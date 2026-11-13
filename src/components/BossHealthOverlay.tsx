@@ -5,15 +5,21 @@ import { ForgedIronFrame } from './ForgedIronFrame';
 
 interface BossHealthOverlayProps {
   boss: BossInfo | null;
+  playerLevel?: number;
 }
 
-export const BossHealthOverlay: React.FC<BossHealthOverlayProps> = ({ boss }) => {
+export const BossHealthOverlay: React.FC<BossHealthOverlayProps> = ({
+  boss,
+  playerLevel = 1,
+}) => {
   if (!boss || !boss.active) return null;
 
   const safeMaxHp = Math.max(1, boss.maxHp);
   const clampedHp = Math.max(0, Math.min(safeMaxHp, Math.round(boss.currentHp)));
   const hpPercent = (clampedHp / safeMaxHp) * 100;
   const isDangerLow = hpPercent > 0 && hpPercent < 25;
+  const recLevel = boss.recommendedLevel ?? 60;
+  const isUnderLeveled = playerLevel < recLevel;
 
   return (
     <div
@@ -58,10 +64,18 @@ export const BossHealthOverlay: React.FC<BossHealthOverlayProps> = ({ boss }) =>
               <span className="font-display text-xs sm:text-sm font-bold tracking-wider text-[#e5303a] truncate">
                 {boss.name}
               </span>
-              {isDangerLow && (
+              <span
+                className={`font-mono-numbers text-[10px] font-semibold whitespace-nowrap shrink-0 ${
+                  isUnderLeveled ? 'text-[#e5303a]' : 'text-[#f2a93b]'
+                }`}
+                title={`Recommended Player Level: ${recLevel}`}
+              >
+                Rec. Lv. {recLevel}
+              </span>
+              {(isDangerLow || boss.enraged) && (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#3a0a0e]/90 border border-[#e5303a]/75 text-[9px] font-bold uppercase tracking-widest text-[#ff6b73] shrink-0 boss-danger-pulse">
                   <Flame className="w-2.5 h-2.5 text-[#e5303a]" />
-                  <span>Danger</span>
+                  <span>{isDangerLow ? 'Danger' : 'Enraged'}</span>
                 </span>
               )}
             </div>

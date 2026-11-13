@@ -5,6 +5,7 @@ import {
   Coins,
   Crown,
   Flame,
+  KeyRound,
   ScrollText,
   Skull,
   Sparkles,
@@ -126,7 +127,7 @@ export const MissionCompleteToast: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Reward Coin Banner Badge */}
+            {/* Right: Reward Coin & Seal Banner Badge */}
             <div className="shrink-0 flex flex-col items-end justify-center px-2.5 py-1.5 rounded-[8px] bg-[#121417]/90 border border-[#f2a93b]/55">
               <div className="flex items-center gap-1">
                 <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
@@ -134,9 +135,12 @@ export const MissionCompleteToast: React.FC = () => {
                   +{activeMission.rewardCoins}
                 </span>
               </div>
-              <span className="text-[9px] uppercase tracking-wider text-[#9c8e72]">
-                Reward
-              </span>
+              <div className="flex items-center gap-1 mt-0.5">
+                <KeyRound className="w-3 h-3 text-[#c084fc]" />
+                <span className="font-mono-numbers text-[10px] font-bold text-[#d8b4fe]">
+                  +{activeMission.rewardSeals || 1} Seal
+                </span>
+              </div>
             </div>
           </div>
 

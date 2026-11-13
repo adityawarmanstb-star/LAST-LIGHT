@@ -5,6 +5,7 @@ import {
   Coins,
   Crown,
   Flame,
+  KeyRound,
   ScrollText,
   Skull,
   Sparkles,
@@ -12,6 +13,13 @@ import {
 } from 'lucide-react';
 import { dailyMissions, getTimeUntilReset } from '../game/dailyMissions';
 import { getSavedCoins, subscribeCoins } from '../game/metaProgression';
+import {
+  MAX_RELIC_SLOTS,
+  getMaxRelicSlots,
+  getNextRelicSlotUnlockInfo,
+  getRelicSeals,
+  subscribeRelics,
+} from '../game/relics';
 import { soundManager } from '../game/audio';
 import { DailyMission, DailyMissionsState } from '../game/types';
 import { haptics } from '../mobile/haptics';
@@ -19,6 +27,7 @@ import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 
 interface DailyMissionsModalProps {
   onClose: () => void;
+  onOpenRelicShop?: () => void;
 }
 
 function formatMissionProgress(mission: DailyMission): string {
@@ -32,14 +41,23 @@ function formatMissionProgress(mission: DailyMission): string {
   return `${mission.progress} / ${mission.target}`;
 }
 
-export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({ onClose }) => {
+export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
+  onClose,
+  onOpenRelicShop,
+}) => {
   const [state, setState] = useState<DailyMissionsState>(() => dailyMissions.getState());
   const [coins, setCoins] = useState<number>(() => getSavedCoins());
+  const [relicSeals, setRelicSeals] = useState<number>(() => getRelicSeals());
+  const [maxRelicSlots, setMaxRelicSlots] = useState<number>(() => getMaxRelicSlots());
   const [resetIn, setResetIn] = useState(() => getTimeUntilReset());
 
   useEffect(() => {
     const unsubMissions = dailyMissions.subscribe((next) => setState(next));
     const unsubCoins = subscribeCoins((nextCoins) => setCoins(nextCoins));
+    const unsubRelics = subscribeRelics(({ relicSeals: nextSeals, maxRelicSlots: nextSlots }) => {
+      setRelicSeals(nextSeals);
+      setMaxRelicSlots(nextSlots);
+    });
     const timer = window.setInterval(() => {
       setState(dailyMissions.ensureToday());
       setResetIn(getTimeUntilReset());
@@ -48,33 +66,41 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({ onClose 
     return () => {
       unsubMissions();
       unsubCoins();
+      unsubRelics();
       window.clearInterval(timer);
     };
   }, []);
 
-  const unclaimedTotal = state.missions
-    .filter((m) => m.completed && !m.claimed)
-    .reduce((sum, m) => sum + m.rewardCoins, 0);
+  const unclaimedMissions = state.missions.filter((m) => m.completed && !m.claimed);
+  const unclaimedTotal = unclaimedMissions.reduce((sum, m) => sum + m.rewardCoins, 0);
+  const unclaimedSeals = unclaimedMissions.reduce(
+    (sum, m) => sum + Math.max(1, m.rewardSeals || 1),
+    0
+  );
 
   const completedCount = state.missions.filter((m) => m.completed).length;
+  const nextSlotInfo = getNextRelicSlotUnlockInfo(maxRelicSlots);
+  const canUnlockSlotNow = Boolean(nextSlotInfo && relicSeals >= nextSlotInfo.costSeals);
 
   const handleClaim = (missionId: string) => {
     const res = dailyMissions.claimMission(missionId);
-    if (res.claimedCoins > 0) {
+    if (res.claimedCoins > 0 || res.claimedSeals > 0) {
       soundManager.playCoinCollect();
       haptics.tap('heavy');
       setState(res.state);
       setCoins(res.newCoins);
+      setRelicSeals(res.newSeals);
     }
   };
 
   const handleClaimAll = () => {
     const res = dailyMissions.claimAllMissions();
-    if (res.claimedCoins > 0) {
+    if (res.claimedCoins > 0 || res.claimedSeals > 0) {
       soundManager.playCoinCollect();
       haptics.tap('heavy');
       setState(res.state);
       setCoins(res.newCoins);
+      setRelicSeals(res.newSeals);
     }
   };
 
@@ -132,8 +158,19 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({ onClose 
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8c9a8] px-2">
+          <div className="flex items-center gap-3 shrink-0">
+            <div
+              className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8b4fe] px-1.5"
+              title="Relic Seals (used in Sanctuary Forge to unlock extra Relic Slots)"
+            >
+              <KeyRound className="w-4 h-4 text-[#c084fc]" />
+              <span>{relicSeals}</span>
+            </div>
+
+            <div
+              className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8c9a8] px-1.5"
+              title="Soul Coins"
+            >
               <Coins className="w-4 h-4 text-[#f2a93b]" />
               <span>{coins}</span>
             </div>
@@ -148,6 +185,69 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({ onClose 
               <X className="w-4 h-4 text-[#d8c9a8]" />
             </IronButton>
           </div>
+        </div>
+
+        {/* Relic Slot Progress Banner */}
+        <div className="px-5 sm:px-6 py-3 border-b border-[#3a3f47]/65 bg-[#101318] flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="flex items-center gap-1.5 font-display font-bold tracking-wider uppercase text-[#d8b4fe]">
+                <KeyRound className="w-3.5 h-3.5 text-[#c084fc]" />
+                <span>
+                  {nextSlotInfo
+                    ? `Relic Slot ${nextSlotInfo.nextSlotNumber} Progress`
+                    : `All ${MAX_RELIC_SLOTS} Relic Slots Unlocked`}
+                </span>
+              </span>
+              {nextSlotInfo ? (
+                <span className="font-mono-numbers text-[11px] font-semibold text-[#d8c9a8]">
+                  {Math.min(relicSeals, nextSlotInfo.costSeals)} / {nextSlotInfo.costSeals} Seals
+                </span>
+              ) : (
+                <span className="font-mono-numbers text-[11px] font-semibold text-[#f2a93b]">
+                  {relicSeals} Seals Held
+                </span>
+              )}
+            </div>
+            {nextSlotInfo ? (
+              <div
+                className="w-full h-1.5 rounded-full overflow-hidden"
+                style={{ background: '#0b0c0e', border: '1px solid #3a3f47' }}
+              >
+                <div
+                  className="h-full rounded-full transition-all duration-200"
+                  style={{
+                    width: `${Math.min(100, (relicSeals / nextSlotInfo.costSeals) * 100)}%`,
+                    background: canUnlockSlotNow
+                      ? 'linear-gradient(90deg, #9333ea 0%, #5de4ff 100%)'
+                      : 'linear-gradient(90deg, #6b21a8 0%, #c084fc 100%)',
+                  }}
+                />
+              </div>
+            ) : (
+              <p className="text-[11px] text-[#9c8e72]">
+                Maximum Relic loadout unlocked in Sanctuary Forge.
+              </p>
+            )}
+          </div>
+
+          {onOpenRelicShop && (
+            <button
+              type="button"
+              onClick={() => {
+                soundManager.playUiClick();
+                haptics.tap('light');
+                onOpenRelicShop();
+              }}
+              className={`min-h-[40px] px-3 rounded-[8px] border text-xs font-display font-bold tracking-wider uppercase transition-colors cursor-pointer shrink-0 ${
+                canUnlockSlotNow
+                  ? 'bg-[#1a1324] border-[#c084fc] text-[#e8dcc2] hover:border-[#5de4ff]'
+                  : 'bg-[#15181d] border-[#3a3f47] text-[#9c8e72] hover:text-[#d8c9a8]'
+              }`}
+            >
+              {canUnlockSlotNow ? 'Unlock Slot' : 'Relic Forge'}
+            </button>
+          )}
         </div>
 
         {/* 3 Daily Mission Cards */}
@@ -194,6 +294,10 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({ onClose 
                       </h3>
                       <span className="inline-flex items-center gap-1 text-xs font-mono-numbers font-semibold text-[#f2a93b]">
                         <Coins className="w-3 h-3" />+{mission.rewardCoins}
+                      </span>
+                      <span className="text-[#6b3a2a] text-xs" aria-hidden="true">·</span>
+                      <span className="inline-flex items-center gap-1 text-xs font-mono-numbers font-semibold text-[#d8b4fe]">
+                        <KeyRound className="w-3 h-3 text-[#c084fc]" />+{mission.rewardSeals || 1} Seal
                       </span>
                     </div>
 
@@ -258,10 +362,10 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({ onClose 
 
         {/* Footer */}
         <div className="p-4 sm:px-6 border-t border-[#3a3f47]/80 bg-[#0d0e11]/70 flex items-center justify-between gap-4">
-          <span className="text-xs text-[#9c8e72]">
+          <span className="text-xs text-[#9c8e72] font-mono-numbers">
             {unclaimedTotal > 0
-              ? `${unclaimedTotal} Soul Coins ready to claim`
-              : 'Complete challenges during runs'}
+              ? `${unclaimedTotal} Coins · ${unclaimedSeals} ${unclaimedSeals === 1 ? 'Seal' : 'Seals'} ready to claim`
+              : 'Each mission awards Soul Coins & 1 Relic Seal'}
           </span>
 
           {unclaimedTotal > 0 ? (
@@ -273,7 +377,9 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({ onClose 
               className="min-h-[56px] px-6 text-sm font-semibold"
             >
               <Coins className="w-4 h-4 text-[#f2a93b]" />
-              <span>Claim All (+{unclaimedTotal})</span>
+              <span>
+                Claim All (+{unclaimedTotal} · +{unclaimedSeals} {unclaimedSeals === 1 ? 'Seal' : 'Seals'})
+              </span>
             </IronButton>
           ) : (
             <IronButton

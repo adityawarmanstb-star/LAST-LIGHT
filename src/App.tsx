@@ -7,23 +7,29 @@ import React, { useState, useEffect, useRef } from 'react';
 import { TitleScreen } from './components/TitleScreen';
 import { HUD } from './components/HUD';
 import { LevelUpModal } from './components/LevelUpModal';
-import { CampShopModal } from './components/CampShopModal';
+import { CampShopModal, CampShopTab } from './components/CampShopModal';
 import { DailyMissionsModal } from './components/DailyMissionsModal';
 import { GameOverModal } from './components/GameOverModal';
 import { SettingsModal } from './components/SettingsModal';
 import { HowToPlayModal } from './components/HowToPlayModal';
+import { BestiaryModal } from './components/BestiaryModal';
+import { AchievementsModal } from './components/AchievementsModal';
 import { MissionCompleteToast } from './components/MissionCompleteToast';
+import { AchievementToast } from './components/AchievementToast';
 import { ForgedIronFrame, IronButton } from './components/ForgedIronFrame';
 import { gameManager } from './game/GameManager';
 import { createPhaserGame } from './game/phaserConfig';
 import { soundManager } from './game/audio';
 import { saveDataStore } from './game/saveData';
+import { getActiveRelicSynergies } from './game/relics';
 import {
   ActiveDynamicChallenge,
   BossInfo,
   DebugStats,
   DynamicChallengeOffer,
   EventWarningInfo,
+  RelicId,
+  RelicSetId,
   RunStats,
   UpgradeOption,
   WeaponState,
@@ -36,7 +42,10 @@ import { haptics } from './mobile/haptics';
 export default function App() {
   const [gameState, setGameState] = useState<'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('TITLE');
   const [showShop, setShowShop] = useState(false);
+  const [shopInitialTab, setShopInitialTab] = useState<CampShopTab>('upgrades');
   const [showMissions, setShowMissions] = useState(false);
+  const [showBestiary, setShowBestiary] = useState(false);
+  const [showAchievements, setShowAchievements] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState<boolean>(
     () => !saveDataStore.read().hasSeenHowToPlay
@@ -67,7 +76,13 @@ export default function App() {
   const [lightShardRemainingSec, setLightShardRemainingSec] = useState<number>(0);
   const [redShardRemainingSec, setRedShardRemainingSec] = useState<number>(0);
   const [darknessFallsRemainingSec, setDarknessFallsRemainingSec] = useState<number>(0);
+  const [bloodFogRemainingSec, setBloodFogRemainingSec] = useState<number>(0);
   const [activeChallenge, setActiveChallenge] = useState<ActiveDynamicChallenge | null>(null);
+  const [dashCharges, setDashCharges] = useState<number>(1);
+  const [maxDashCharges, setMaxDashCharges] = useState<number>(1);
+  const [dashCooldownProgress, setDashCooldownProgress] = useState<number>(1);
+  const [equippedRelicIds, setEquippedRelicIds] = useState<RelicId[]>([]);
+  const [activeRelicSynergies, setActiveRelicSynergies] = useState<RelicSetId[]>([]);
   const [debugStats, setDebugStats] = useState<DebugStats>({
     fps: 60,
     enemyCount: 0,
@@ -92,6 +107,10 @@ export default function App() {
   showShopRef.current = showShop;
   const showMissionsRef = useRef(showMissions);
   showMissionsRef.current = showMissions;
+  const showBestiaryRef = useRef(showBestiary);
+  showBestiaryRef.current = showBestiary;
+  const showAchievementsRef = useRef(showAchievements);
+  showAchievementsRef.current = showAchievements;
   const showSettingsRef = useRef(showSettings);
   showSettingsRef.current = showSettings;
   const showHowToPlayRef = useRef(showHowToPlay);
@@ -114,7 +133,13 @@ export default function App() {
       setLightShardRemainingSec(data.lightShardRemainingSec ?? 0);
       setRedShardRemainingSec(data.redShardRemainingSec ?? 0);
       setDarknessFallsRemainingSec(data.darknessFallsRemainingSec ?? 0);
+      setBloodFogRemainingSec(data.bloodFogRemainingSec ?? 0);
       setActiveChallenge(data.activeChallenge ?? null);
+      setDashCharges(data.dashCharges ?? 1);
+      setMaxDashCharges(data.maxDashCharges ?? 1);
+      setDashCooldownProgress(data.dashCooldownProgress ?? 1);
+      setEquippedRelicIds(data.equippedRelicIds ?? []);
+      setActiveRelicSynergies(data.activeRelicSynergies ?? []);
       setDebugStats(data.debug);
     });
 
@@ -267,6 +292,14 @@ export default function App() {
           setShowMissions(false);
           return true;
         }
+        if (showBestiaryRef.current) {
+          setShowBestiary(false);
+          return true;
+        }
+        if (showAchievementsRef.current) {
+          setShowAchievements(false);
+          return true;
+        }
         if (showShopRef.current) {
           setShowShop(false);
           return true;
@@ -309,7 +342,14 @@ export default function App() {
     setLightShardRemainingSec(0);
     setRedShardRemainingSec(0);
     setDarknessFallsRemainingSec(0);
+    setBloodFogRemainingSec(0);
     setActiveChallenge(null);
+    setDashCharges(1);
+    setMaxDashCharges(1);
+    setDashCooldownProgress(1);
+    const savedRelicIds = saveDataStore.read().equippedRelicIds;
+    setEquippedRelicIds(savedRelicIds);
+    setActiveRelicSynergies(getActiveRelicSynergies(savedRelicIds).map((s) => s.id));
 
     // Unlock audio on user gesture & play gameplay track
     soundManager.onUserGesture();
@@ -436,10 +476,22 @@ export default function App() {
       {gameState === 'TITLE' && (
         <TitleScreen
           isMuted={isMuted}
-          isModalOpen={showShop || showSettings || showMissions || showHowToPlay}
+          isModalOpen={
+            showShop ||
+            showSettings ||
+            showMissions ||
+            showBestiary ||
+            showAchievements ||
+            showHowToPlay
+          }
           onStartGame={handleStartGame}
-          onOpenShop={() => setShowShop(true)}
+          onOpenShop={(tab = 'upgrades') => {
+            setShopInitialTab(tab);
+            setShowShop(true);
+          }}
           onOpenMissions={() => setShowMissions(true)}
+          onOpenBestiary={() => setShowBestiary(true)}
+          onOpenAchievements={() => setShowAchievements(true)}
           onToggleMute={handleToggleMute}
           onOpenSettings={() => setShowSettings(true)}
         />
@@ -463,7 +515,13 @@ export default function App() {
           lightShardRemainingSec={lightShardRemainingSec}
           redShardRemainingSec={redShardRemainingSec}
           darknessFallsRemainingSec={darknessFallsRemainingSec}
+          bloodFogRemainingSec={bloodFogRemainingSec}
           activeChallenge={activeChallenge}
+          dashCharges={dashCharges}
+          maxDashCharges={maxDashCharges}
+          dashCooldownProgress={dashCooldownProgress}
+          equippedRelicIds={equippedRelicIds}
+          activeRelicSynergies={activeRelicSynergies}
           debugStats={debugStats}
           eventWarning={eventWarning}
           isMuted={isMuted}
@@ -472,6 +530,11 @@ export default function App() {
           onOpenSettings={handleOpenSettings}
           onTogglePause={handleTogglePause}
           onSpawnBossNow={handleSpawnBossNow}
+          onTriggerDash={() => {
+            if (gameManager.activeScene) {
+              (gameManager.activeScene as MainScene).triggerDash();
+            }
+          }}
         />
       )}
 
@@ -583,23 +646,47 @@ export default function App() {
           stats={runSummary}
           isModalOpen={showShop || showMissions}
           onRestart={handleStartGame}
-          onOpenShop={() => setShowShop(true)}
+          onOpenShop={(tab = 'upgrades') => {
+            setShopInitialTab(tab);
+            setShowShop(true);
+          }}
           onOpenMissions={() => setShowMissions(true)}
         />
       )}
 
       {/* Modal: Daily Missions */}
       {showMissions && (
-        <DailyMissionsModal onClose={() => setShowMissions(false)} />
+        <DailyMissionsModal
+          onClose={() => setShowMissions(false)}
+          onOpenRelicShop={() => {
+            setShowMissions(false);
+            setShopInitialTab('relics');
+            setShowShop(true);
+          }}
+        />
       )}
 
-      {/* Modal: Permanent Camp Upgrades Forge */}
+      {/* Modal: Bestiary */}
+      {showBestiary && (
+        <BestiaryModal onClose={() => setShowBestiary(false)} />
+      )}
+
+      {/* Modal: Achievements */}
+      {showAchievements && (
+        <AchievementsModal onClose={() => setShowAchievements(false)} />
+      )}
+
+      {/* Modal: Permanent Camp Upgrades & Relics Forge */}
       {showShop && (
-        <CampShopModal onClose={() => setShowShop(false)} />
+        <CampShopModal
+          initialTab={shopInitialTab}
+          onClose={() => setShowShop(false)}
+        />
       )}
 
-      {/* Global Non-Blocking Daily Mission Complete Toast */}
+      {/* Global Non-Blocking Daily Mission & Achievement Toasts */}
       <MissionCompleteToast />
+      <AchievementToast />
     </main>
   );
 }

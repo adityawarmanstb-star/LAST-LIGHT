@@ -4,6 +4,8 @@ import {
   DebugStats,
   DynamicChallengeOffer,
   EventWarningInfo,
+  RelicId,
+  RelicSetId,
   RunStats,
   UpgradeOption,
   WeaponState,
@@ -27,8 +29,27 @@ export interface HudStatsPayload {
   lightShardRemainingSec?: number;
   redShardRemainingSec?: number;
   darknessFallsRemainingSec?: number;
+  bloodFogRemainingSec?: number;
   activeChallenge?: ActiveDynamicChallenge | null;
+  dashCharges?: number;
+  maxDashCharges?: number;
+  dashCooldownProgress?: number;
+  equippedRelicIds?: RelicId[];
+  activeRelicSynergies?: RelicSetId[];
   debug: DebugStats;
+}
+
+export interface CritImpactPayload {
+  damage: number;
+  x: number;
+  y: number;
+  isEliteOrBoss: boolean;
+  shakeDurationMs: number;
+  shakeIntensity: number;
+  hitstopMs: number;
+  flashColorHex: string;
+  flashTintNumber: number;
+  seq: number;
 }
 
 type StatsCallback = (data: HudStatsPayload) => void;
@@ -43,6 +64,7 @@ type PauseToggleCallback = () => void;
 type PauseStateCallback = (isPaused: boolean) => void;
 type BrightnessCallback = (brightness: number) => void;
 type QualityCallback = (tier: QualityTier) => void;
+type CritImpactCallback = (impact: CritImpactPayload) => void;
 
 class GameManager {
   private statsListeners: StatsCallback[] = [];
@@ -54,6 +76,9 @@ class GameManager {
   private pauseStateListeners: PauseStateCallback[] = [];
   private brightnessListeners: BrightnessCallback[] = [];
   private qualityListeners: QualityCallback[] = [];
+  private critImpactListeners: CritImpactCallback[] = [];
+  private lastCritImpactMs: number = 0;
+  private critImpactSeq: number = 0;
 
   public activeScene: Phaser.Scene | null = null;
   public activeUiScene: Phaser.Scene | null = null;
@@ -179,6 +204,47 @@ class GameManager {
 
   public emitPauseState(isPaused: boolean) {
     this.pauseStateListeners.forEach((l) => l(isPaused));
+  }
+
+  public onCritImpact(cb: CritImpactCallback) {
+    this.critImpactListeners.push(cb);
+    return () => {
+      this.critImpactListeners = this.critImpactListeners.filter((l) => l !== cb);
+    };
+  }
+
+  public emitCritImpact(input: {
+    damage: number;
+    x: number;
+    y: number;
+    isEliteOrBoss?: boolean;
+  }): boolean {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    const isEliteOrBoss = Boolean(input.isEliteOrBoss);
+    const minCooldownMs = isEliteOrBoss ? 65 : 110;
+    if (now - this.lastCritImpactMs < minCooldownMs) {
+      return false;
+    }
+
+    this.lastCritImpactMs = now;
+    this.critImpactSeq += 1;
+
+    const isHeavyCrit = isEliteOrBoss || input.damage >= 65;
+    const payload: CritImpactPayload = {
+      damage: input.damage,
+      x: input.x,
+      y: input.y,
+      isEliteOrBoss,
+      shakeDurationMs: isHeavyCrit ? 145 : 95,
+      shakeIntensity: isHeavyCrit ? 0.0068 : 0.0038,
+      hitstopMs: isHeavyCrit ? 46 : 30,
+      flashColorHex: isHeavyCrit ? '#ff4d5a' : '#f2a93b',
+      flashTintNumber: isHeavyCrit ? 0xff4d5a : 0xf2a93b,
+      seq: this.critImpactSeq,
+    };
+
+    this.critImpactListeners.forEach((l) => l(payload));
+    return true;
   }
 
   public setJoystick(x: number, y: number) {

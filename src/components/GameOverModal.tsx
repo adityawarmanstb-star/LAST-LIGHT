@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { RotateCcw, Coins, Skull, Clock, ShoppingBag, ScrollText } from 'lucide-react';
+import { RotateCcw, Coins, Skull, Clock, ShoppingBag, ScrollText, Gem } from 'lucide-react';
 import { dailyMissions } from '../game/dailyMissions';
 import { RunStats } from '../game/types';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
@@ -8,7 +8,7 @@ interface GameOverModalProps {
   stats: RunStats;
   isModalOpen?: boolean;
   onRestart: () => void;
-  onOpenShop: () => void;
+  onOpenShop: (initialTab?: 'upgrades' | 'relics') => void;
   onOpenMissions: () => void;
 }
 
@@ -174,17 +174,17 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             <span>One more run</span>
           </IronButton>
 
-          <div className="grid grid-cols-2 gap-3 w-full">
+          <div className="grid grid-cols-3 gap-2.5 w-full">
             <IronButton
               seed="gameover-missions-btn"
               dripCount={2}
               onClick={onOpenMissions}
-              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+              className="w-full min-h-[56px] px-2.5 text-xs sm:text-sm font-semibold"
             >
-              <ScrollText className="w-4 h-4 text-[#f2a93b]" />
+              <ScrollText className="w-4 h-4 text-[#f2a93b] shrink-0" />
               <span>Missions</span>
               {unclaimedMissions > 0 && (
-                <span className="ml-0.5 min-w-[20px] h-5 px-1.5 rounded-full bg-[#b3121a] border border-[#f2a93b] text-[11px] font-mono-numbers font-bold text-[#f2a93b] inline-flex items-center justify-center shadow-[0_0_8px_rgba(242,169,59,0.55)]">
+                <span className="ml-0.5 min-w-[18px] h-4.5 px-1 rounded-full bg-[#b3121a] border border-[#f2a93b] text-[10px] font-mono-numbers font-bold text-[#f2a93b] inline-flex items-center justify-center shadow-[0_0_8px_rgba(242,169,59,0.55)]">
                   {unclaimedMissions}
                 </span>
               )}
@@ -193,11 +193,21 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             <IronButton
               seed="gameover-shop-btn"
               dripCount={2}
-              onClick={onOpenShop}
-              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+              onClick={() => onOpenShop('upgrades')}
+              className="w-full min-h-[56px] px-2.5 text-xs sm:text-sm font-semibold"
             >
-              <ShoppingBag className="w-4 h-4 text-[#f2a93b]" />
+              <ShoppingBag className="w-4 h-4 text-[#f2a93b] shrink-0" />
               <span>Shop</span>
+            </IronButton>
+
+            <IronButton
+              seed="gameover-relics-btn"
+              dripCount={2}
+              onClick={() => onOpenShop('relics')}
+              className="w-full min-h-[56px] px-2.5 text-xs sm:text-sm font-semibold"
+            >
+              <Gem className="w-4 h-4 text-[#5de4ff] shrink-0" />
+              <span>Relics</span>
             </IronButton>
           </div>
         </div>

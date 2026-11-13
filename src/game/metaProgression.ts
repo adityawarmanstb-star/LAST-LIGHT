@@ -1,5 +1,14 @@
-import { MetaUpgrade, PlayerStats } from './types';
+import { MetaUpgrade, PlayerStats, RelicId, RelicSetId } from './types';
 import { saveDataStore } from './saveData';
+
+const RELIC_SET_BY_ID: Record<RelicId, RelicSetId> = {
+  lodestone_heart: 'tempest',
+  twin_zephyr: 'tempest',
+  blood_chalice: 'shadow',
+  executioner_seal: 'shadow',
+  sunforged_lens: 'fire',
+  iron_spurs: 'fire',
+};
 
 export const INITIAL_UPGRADES: MetaUpgrade[] = [
   {
@@ -145,6 +154,7 @@ export function purchaseUpgrade(upgradeId: string): { success: boolean; newCoins
 }
 
 export function calculateBasePlayerStats(): PlayerStats {
+  const saved = saveDataStore.read();
   const upgrades = getSavedUpgrades();
   const rankMap = new Map<string, number>();
   upgrades.forEach((u) => rankMap.set(u.id, u.currentRank));
@@ -157,13 +167,76 @@ export function calculateBasePlayerStats(): PlayerStats {
   const greedRank = rankMap.get('greed') || 0;
   const reviveRank = rankMap.get('revive') || 0;
 
-  const baseHp = 100 * (1 + vitRank * 0.15);
-  const moveSpeed = 160 * (1 + swiftRank * 0.06);
-  const damageMultiplier = 1 + mightRank * 0.1;
-  const cooldownMultiplier = Math.max(0.4, 1 - cdRank * 0.06);
-  const magnetRadius = 90 * (1 + magnetRank * 0.25);
+  let baseHp = 100 * (1 + vitRank * 0.15);
+  let moveSpeed = 160 * (1 + swiftRank * 0.06);
+  let damageMultiplier = 1 + mightRank * 0.1;
+  let cooldownMultiplier = Math.max(0.4, 1 - cdRank * 0.06);
+  let magnetRadius = 90 * (1 + magnetRank * 0.25);
   const coinMultiplier = 1 + greedRank * 0.2;
+  let critChance = 0.05;
+  let critMultiplier = 1.5;
+  let projectilePierce = 1;
   const hasRevive = reviveRank > 0;
+  let dashCharges = 1;
+  let dashCooldownMs = 3000;
+  let lightRadiusMultiplier = 1;
+  let eliteKillHeal = 0;
+
+  const equippedRelicIds = [...saved.equippedRelicIds];
+  const setCounts: Partial<Record<RelicSetId, number>> = {};
+
+  for (const relicId of equippedRelicIds) {
+    const setId = RELIC_SET_BY_ID[relicId];
+    if (setId) {
+      setCounts[setId] = (setCounts[setId] ?? 0) + 1;
+    }
+
+    switch (relicId) {
+      case 'lodestone_heart':
+        magnetRadius *= 1.85;
+        break;
+      case 'twin_zephyr':
+        dashCharges = Math.max(dashCharges, 2);
+        dashCooldownMs = Math.min(dashCooldownMs, 2600);
+        break;
+      case 'blood_chalice':
+        baseHp *= 1.2;
+        eliteKillHeal += 15;
+        break;
+      case 'sunforged_lens':
+        lightRadiusMultiplier += 0.25;
+        critChance += 0.12;
+        break;
+      case 'iron_spurs':
+        moveSpeed *= 1.15;
+        cooldownMultiplier = Math.max(0.35, cooldownMultiplier - 0.12);
+        break;
+      case 'executioner_seal':
+        damageMultiplier += 0.25;
+        projectilePierce += 1;
+        baseHp = Math.max(40, baseHp * 0.9);
+        break;
+      default:
+        break;
+    }
+  }
+
+  const activeRelicSynergies: RelicSetId[] = [];
+  if ((setCounts.fire ?? 0) >= 2) {
+    activeRelicSynergies.push('fire');
+    damageMultiplier += 0.15;
+    lightRadiusMultiplier += 0.15;
+  }
+  if ((setCounts.shadow ?? 0) >= 2) {
+    activeRelicSynergies.push('shadow');
+    critMultiplier += 0.35;
+    critChance += 0.08;
+  }
+  if ((setCounts.tempest ?? 0) >= 2) {
+    activeRelicSynergies.push('tempest');
+    dashCooldownMs = Math.round(dashCooldownMs * 0.85);
+    moveSpeed *= 1.1;
+  }
 
   return {
     maxHp: Math.round(baseHp),
@@ -171,12 +244,18 @@ export function calculateBasePlayerStats(): PlayerStats {
     moveSpeed: Math.round(moveSpeed),
     damageMultiplier,
     cooldownMultiplier,
-    magnetRadius,
+    magnetRadius: Math.round(magnetRadius),
     coinMultiplier,
-    critChance: 0.05,
-    critMultiplier: 1.5,
-    projectilePierce: 1,
+    critChance,
+    critMultiplier,
+    projectilePierce,
     hasRevive,
     usedRevive: false,
+    dashCharges,
+    dashCooldownMs,
+    lightRadiusMultiplier,
+    eliteKillHeal,
+    equippedRelicIds,
+    activeRelicSynergies,
   };
 }

@@ -1,16 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, Skull, Heart, AlertTriangle } from 'lucide-react';
+import { Coins, Skull, Heart, AlertTriangle, Wind, Gem } from 'lucide-react';
 import {
   ActiveDynamicChallenge,
   BossInfo,
   DebugStats,
   EventWarningInfo,
+  RelicDefinition,
+  RelicId,
+  RelicSetId,
   WeaponState,
 } from '../game/types';
+import { RELIC_SETS, getRelicById } from '../game/relics';
 import { VirtualJoystick } from './VirtualJoystick';
 import { ForgedIronFrame } from './ForgedIronFrame';
 import { BloodHpBar } from './BloodHpBar';
+import { BloodSplatterHit, BloodSplatterOverlay } from './BloodSplatterOverlay';
 import { BossHealthOverlay } from './BossHealthOverlay';
+import { CritImpactPayload, gameManager } from '../game/GameManager';
 import { haptics } from '../mobile/haptics';
 
 interface HUDProps {
@@ -29,7 +35,13 @@ interface HUDProps {
   lightShardRemainingSec?: number;
   redShardRemainingSec?: number;
   darknessFallsRemainingSec?: number;
+  bloodFogRemainingSec?: number;
   activeChallenge?: ActiveDynamicChallenge | null;
+  dashCharges?: number;
+  maxDashCharges?: number;
+  dashCooldownProgress?: number;
+  equippedRelicIds?: RelicId[];
+  activeRelicSynergies?: RelicSetId[];
   debugStats: DebugStats;
   eventWarning: EventWarningInfo | null;
   isMuted: boolean;
@@ -38,6 +50,7 @@ interface HUDProps {
   onOpenSettings: () => void;
   onTogglePause: () => void;
   onSpawnBossNow: () => void;
+  onTriggerDash: () => void;
 }
 
 export const HUD: React.FC<HUDProps> = ({
@@ -56,17 +69,30 @@ export const HUD: React.FC<HUDProps> = ({
   lightShardRemainingSec = 0,
   redShardRemainingSec = 0,
   darknessFallsRemainingSec = 0,
+  bloodFogRemainingSec = 0,
   activeChallenge = null,
+  dashCharges = 1,
+  maxDashCharges = 1,
+  dashCooldownProgress = 1,
+  equippedRelicIds = [],
+  activeRelicSynergies = [],
   debugStats,
   eventWarning,
   onSpawnBossNow,
+  onTriggerDash,
 }) => {
   const [showDebug, setShowDebug] = useState(false);
   const debugTapTimestampsRef = useRef<number[]>([]);
   const prevCoinsRef = useRef<number>(coins);
   const prevLevelRef = useRef<number>(level);
+  const prevHpRef = useRef<number>(hp);
+  const splatterSeqRef = useRef<number>(0);
+  const splatterTimerRef = useRef<number | null>(null);
+  const critFlashTimerRef = useRef<number | null>(null);
   const [coinPopSeq, setCoinPopSeq] = useState<number>(0);
   const [levelPopSeq, setLevelPopSeq] = useState<number>(0);
+  const [splatterHit, setSplatterHit] = useState<BloodSplatterHit | null>(null);
+  const [critFlash, setCritFlash] = useState<CritImpactPayload | null>(null);
 
   useEffect(() => {
     if (coins > prevCoinsRef.current) {
@@ -81,6 +107,50 @@ export const HUD: React.FC<HUDProps> = ({
     }
     prevLevelRef.current = level;
   }, [level]);
+
+  useEffect(() => {
+    const prevHp = prevHpRef.current;
+    if (hp < prevHp - 0.01) {
+      const dmgFraction = (prevHp - hp) / Math.max(1, maxHp);
+      const intensity = Math.max(0.4, Math.min(1, dmgFraction / 0.35));
+      splatterSeqRef.current += 1;
+      setSplatterHit({ seq: splatterSeqRef.current, intensity });
+
+      if (splatterTimerRef.current !== null) {
+        window.clearTimeout(splatterTimerRef.current);
+      }
+      splatterTimerRef.current = window.setTimeout(() => {
+        splatterTimerRef.current = null;
+        setSplatterHit(null);
+      }, 620);
+    }
+    prevHpRef.current = hp;
+  }, [hp, maxHp]);
+
+  useEffect(() => {
+    const unsubCrit = gameManager.onCritImpact((impact) => {
+      setCritFlash(impact);
+      if (critFlashTimerRef.current !== null) {
+        window.clearTimeout(critFlashTimerRef.current);
+      }
+      critFlashTimerRef.current = window.setTimeout(() => {
+        critFlashTimerRef.current = null;
+        setCritFlash(null);
+      }, 210);
+    });
+
+    return () => {
+      unsubCrit();
+      if (splatterTimerRef.current !== null) {
+        window.clearTimeout(splatterTimerRef.current);
+        splatterTimerRef.current = null;
+      }
+      if (critFlashTimerRef.current !== null) {
+        window.clearTimeout(critFlashTimerRef.current);
+        critFlashTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const handleDebugHotspotTap = () => {
     const now = Date.now();
@@ -108,6 +178,12 @@ export const HUD: React.FC<HUDProps> = ({
   const bossTimeStr = `${bossMins}:${String(bossSecs).padStart(2, '0')}`;
 
   const unlockedWeapons = weapons.filter((w) => w.unlocked);
+  const equippedRelics = equippedRelicIds
+    .map((id) => getRelicById(id))
+    .filter((relic): relic is RelicDefinition => relic !== null);
+  const activeSynergyMetas = activeRelicSynergies
+    .map((id) => RELIC_SETS[id])
+    .filter((meta): meta is NonNullable<typeof meta> => Boolean(meta));
 
   return (
     <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between overflow-hidden">
@@ -121,6 +197,48 @@ export const HUD: React.FC<HUDProps> = ({
         aria-label="Toggle debug overlay"
         className="fixed top-0 left-0 w-16 h-16 z-40 pointer-events-auto bg-transparent opacity-0 cursor-default"
       />
+
+      {/* Visceral screen-edge blood splatter flash when taking damage */}
+      <BloodSplatterOverlay hit={splatterHit} />
+
+      {/* Critical hit color-flashing hit-stop screen pulse */}
+      {critFlash && (
+        <div
+          key={`crit-flash-${critFlash.seq}`}
+          aria-hidden="true"
+          className="fixed inset-0 z-25 pointer-events-none crit-color-flash"
+          style={{
+            background: `radial-gradient(ellipse at center, transparent 52%, ${critFlash.flashColorHex}2e 85%, ${critFlash.flashColorHex}55 100%)`,
+            boxShadow: `inset 0 0 ${critFlash.isEliteOrBoss ? 110 : 75}px ${critFlash.flashColorHex}66`,
+          }}
+        />
+      )}
+
+      {/* Screen-wide Horde Frenzy Blood Fog atmosphere (30s event) */}
+      {bloodFogRemainingSec > 0 && (
+        <div aria-hidden="true" className="fixed inset-0 z-10 pointer-events-none overflow-hidden">
+          <div
+            className="absolute -inset-12 blood-fog-drift-a"
+            style={{
+              background:
+                'radial-gradient(circle at 22% 28%, rgba(179, 18, 26, 0.28) 0%, transparent 48%), radial-gradient(circle at 78% 72%, rgba(229, 48, 58, 0.24) 0%, transparent 50%), radial-gradient(ellipse at center, transparent 42%, rgba(92, 8, 14, 0.52) 84%, rgba(179, 18, 26, 0.7) 100%)',
+            }}
+          />
+          <div
+            className="absolute -inset-16 blood-fog-drift-b"
+            style={{
+              background:
+                'radial-gradient(circle at 74% 24%, rgba(179, 18, 26, 0.24) 0%, transparent 46%), radial-gradient(circle at 26% 76%, rgba(145, 12, 20, 0.3) 0%, transparent 52%)',
+            }}
+          />
+          <div
+            className="absolute inset-0"
+            style={{
+              boxShadow: 'inset 0 0 110px rgba(179, 18, 26, 0.58)',
+            }}
+          />
+        </div>
+      )}
 
       {/* Low HP pulsing blood-red screen edge vignette */}
       {isLowHp && (
@@ -209,7 +327,8 @@ export const HUD: React.FC<HUDProps> = ({
             isUnderPressure ||
             lightShardRemainingSec > 0 ||
             redShardRemainingSec > 0 ||
-            darknessFallsRemainingSec > 0) && (
+            darknessFallsRemainingSec > 0 ||
+            bloodFogRemainingSec > 0) && (
             <div className="flex flex-wrap items-center gap-2 text-[11px] max-w-[260px]">
               {combo > 1 && (
                 <ForgedIronFrame
@@ -279,6 +398,24 @@ export const HUD: React.FC<HUDProps> = ({
                   </span>
                   <span className="font-mono-numbers font-bold text-[#e5303a]">
                     {darknessFallsRemainingSec}s
+                  </span>
+                </ForgedIronFrame>
+              )}
+              {bloodFogRemainingSec > 0 && (
+                <ForgedIronFrame
+                  seed="hud-blood-fog-badge"
+                  dripCount={3}
+                  maxDripLength={12}
+                  borderColor="#e5303a"
+                  glowColor="#e5303a"
+                  glowStrength={10}
+                  contentClassName="px-2.5 py-1 flex items-center gap-1.5 text-[#f7e7e2]"
+                >
+                  <span className="font-semibold tracking-wide text-[10px] uppercase text-[#ff7077]">
+                    Blood Fog · <span className="text-[#f2a93b]">+35% SPD · +65% Horde</span>
+                  </span>
+                  <span className="font-mono-numbers font-bold text-[#e5303a]">
+                    {bloodFogRemainingSec}s
                   </span>
                 </ForgedIronFrame>
               )}
@@ -402,12 +539,14 @@ export const HUD: React.FC<HUDProps> = ({
                 <span className="font-mono-numbers font-medium text-[#e5303a]">
                   {bossTimeStr}
                 </span>
+                <span className="text-[#6b3a2a] mx-1" aria-hidden="true">·</span>
+                <span className="font-mono-numbers text-[#f2a93b]">Rec. Lv. 60</span>
               </span>
               <button
                 onPointerDown={() => haptics.tap('light')}
                 onClick={onSpawnBossNow}
                 className="min-h-[56px] px-2.5 -my-4 inline-flex items-center text-[11px] text-[#d8c9a8] hover:text-[#e5303a] transition-colors cursor-pointer underline underline-offset-2"
-                title="Summon Boss now"
+                title="Summon Boss now (Recommended Level 60)"
               >
                 Summon
               </button>
@@ -467,18 +606,105 @@ export const HUD: React.FC<HUDProps> = ({
       )}
 
       {/* Persistent Boss Health Overlay (fixed top-center when boss is active) */}
-      <BossHealthOverlay boss={boss} />
+      <BossHealthOverlay boss={boss} playerLevel={level} />
 
-      {/* Bottom Area: Quiet unboxed weapon levels on bottom-right (keeps bottom-left clear for joystick) */}
+      {/* Bottom Area: Dash charge control + quiet unboxed weapon levels on bottom-right (keeps bottom-left clear for joystick) */}
       <div
-        className="w-full flex items-end justify-end"
+        className="w-full flex flex-col items-end gap-2.5"
         style={{
           paddingBottom: 'max(14px, env(safe-area-inset-bottom))',
           paddingRight: 'max(16px, env(safe-area-inset-right))',
           paddingLeft: 'max(16px, env(safe-area-inset-left))',
         }}
       >
+        <button
+          type="button"
+          onPointerDown={() => {
+            if (dashCharges > 0) {
+              haptics.tap('light');
+              onTriggerDash();
+            }
+          }}
+          disabled={dashCharges <= 0}
+          aria-label="Dash (Space or Shift)"
+          className={`pointer-events-auto min-h-[56px] min-w-[106px] px-3.5 py-2 rounded-[10px] border flex items-center justify-between gap-2.5 transition-all cursor-pointer active:scale-95 ${
+            dashCharges > 0
+              ? 'bg-[#151a20]/90 border-[#5de4ff]/70 text-[#e8dcc2] shadow-[0_0_14px_rgba(93,228,255,0.22)] hover:border-[#5de4ff]'
+              : 'bg-[#121417]/80 border-[#3a3f47] text-[#7c7361] cursor-not-allowed'
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            <Wind
+              className={`w-4 h-4 ${dashCharges > 0 ? 'text-[#5de4ff]' : 'text-[#5a606b]'}`}
+            />
+            <div className="flex flex-col items-start leading-tight">
+              <span className="font-display text-[11px] font-bold tracking-wider uppercase">
+                Dash
+              </span>
+              <span className="text-[9px] text-[#9c8e72] font-mono-numbers">Space</span>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-1">
+              {Array.from({ length: maxDashCharges }).map((_, idx) => {
+                const ready = idx < dashCharges;
+                return (
+                  <span
+                    key={idx}
+                    className={`w-2.5 h-2.5 rounded-full border transition-all ${
+                      ready
+                        ? 'bg-[#5de4ff] border-[#b8f5ff] shadow-[0_0_6px_rgba(93,228,255,0.85)]'
+                        : 'bg-[#1c2026] border-[#3a3f47]'
+                    }`}
+                  />
+                );
+              })}
+            </div>
+            {dashCharges < maxDashCharges && (
+              <div className="w-8 h-1 rounded-full bg-[#1f2329] overflow-hidden">
+                <div
+                  className="h-full bg-[#5de4ff]/80 transition-all duration-75"
+                  style={{ width: `${Math.round(dashCooldownProgress * 100)}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </button>
+
         <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px] text-[#9c8e72]">
+          {activeSynergyMetas.map((synergyMeta, idx) => (
+            <React.Fragment key={synergyMeta.id}>
+              {idx > 0 && (
+                <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
+              )}
+              <span
+                className="flex items-center gap-1 font-semibold"
+                style={{ color: synergyMeta.accentColor }}
+                title={synergyMeta.bonusSummary}
+              >
+                <span>★ {synergyMeta.synergyTitle}</span>
+              </span>
+            </React.Fragment>
+          ))}
+          {activeSynergyMetas.length > 0 &&
+            (equippedRelics.length > 0 || unlockedWeapons.length > 0) && (
+              <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
+            )}
+          {equippedRelics.map((relic, idx) => (
+            <React.Fragment key={relic.id}>
+              {idx > 0 && (
+                <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
+              )}
+              <span className="flex items-center gap-1 text-[#d8c9a8]">
+                <Gem className="w-3 h-3" style={{ color: relic.accentColor }} />
+                <span className="font-medium">{relic.name}</span>
+              </span>
+            </React.Fragment>
+          ))}
+          {equippedRelics.length > 0 && unlockedWeapons.length > 0 && (
+            <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
+          )}
           {unlockedWeapons.map((w, idx) => (
             <React.Fragment key={w.id}>
               {idx > 0 && (

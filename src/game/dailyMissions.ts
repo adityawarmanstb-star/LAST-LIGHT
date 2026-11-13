@@ -1,4 +1,5 @@
 import { addCoins, getSavedCoins } from './metaProgression';
+import { addRelicSeals, getRelicSeals } from './relics';
 import { saveDataStore } from './saveData';
 import {
   DailyMission,
@@ -240,6 +241,7 @@ function generateMissionsForDate(dateKey: string): DailyMission[] {
       target: pick.target,
       progress: 0,
       rewardCoins: pick.rewardCoins,
+      rewardSeals: 1,
       completed: false,
       claimed: false,
       icon: pick.icon,
@@ -279,6 +281,7 @@ class DailyMissionsManager {
         missions: saved.missions.map((m) => ({
           ...m,
           progress: Math.min(m.target, Math.max(0, Number(m.progress) || 0)),
+          rewardSeals: Math.max(1, Number(m.rewardSeals) || 1),
           completed: Boolean(m.completed || m.progress >= m.target),
           claimed: Boolean(m.claimed),
         })),
@@ -327,6 +330,13 @@ class DailyMissionsManager {
     return this.state.missions
       .filter((m) => m.completed && !m.claimed)
       .reduce((sum, m) => sum + m.rewardCoins, 0);
+  }
+
+  public getUnclaimedSealTotal(): number {
+    this.ensureToday();
+    return this.state.missions
+      .filter((m) => m.completed && !m.claimed)
+      .reduce((sum, m) => sum + Math.max(1, m.rewardSeals || 1), 0);
   }
 
   public getCompletedCount(): number {
@@ -444,7 +454,9 @@ class DailyMissionsManager {
 
   public claimMission(missionId: string): {
     claimedCoins: number;
+    claimedSeals: number;
     newCoins: number;
+    newSeals: number;
     state: DailyMissionsState;
   } {
     this.ensureToday();
@@ -452,53 +464,68 @@ class DailyMissionsManager {
     if (!target || !target.completed || target.claimed) {
       return {
         claimedCoins: 0,
+        claimedSeals: 0,
         newCoins: getSavedCoins(),
+        newSeals: getRelicSeals(),
         state: cloneState(this.state),
       };
     }
 
     target.claimed = true;
+    const rewardSeals = Math.max(1, target.rewardSeals || 1);
     const newCoins = addCoins(target.rewardCoins);
+    const newSeals = addRelicSeals(rewardSeals);
     this.saveToStorage(this.state);
     this.notifySubscribers();
 
     return {
       claimedCoins: target.rewardCoins,
+      claimedSeals: rewardSeals,
       newCoins,
+      newSeals,
       state: cloneState(this.state),
     };
   }
 
   public claimAllMissions(): {
     claimedCoins: number;
+    claimedSeals: number;
     newCoins: number;
+    newSeals: number;
     state: DailyMissionsState;
   } {
     this.ensureToday();
-    let total = 0;
+    let totalCoins = 0;
+    let totalSeals = 0;
 
     for (const mission of this.state.missions) {
       if (mission.completed && !mission.claimed) {
         mission.claimed = true;
-        total += mission.rewardCoins;
+        totalCoins += mission.rewardCoins;
+        totalSeals += Math.max(1, mission.rewardSeals || 1);
       }
     }
 
-    if (total <= 0) {
+    if (totalCoins <= 0 && totalSeals <= 0) {
       return {
         claimedCoins: 0,
+        claimedSeals: 0,
         newCoins: getSavedCoins(),
+        newSeals: getRelicSeals(),
         state: cloneState(this.state),
       };
     }
 
-    const newCoins = addCoins(total);
+    const newCoins = totalCoins > 0 ? addCoins(totalCoins) : getSavedCoins();
+    const newSeals = totalSeals > 0 ? addRelicSeals(totalSeals) : getRelicSeals();
     this.saveToStorage(this.state);
     this.notifySubscribers();
 
     return {
-      claimedCoins: total,
+      claimedCoins: totalCoins,
+      claimedSeals: totalSeals,
       newCoins,
+      newSeals,
       state: cloneState(this.state),
     };
   }

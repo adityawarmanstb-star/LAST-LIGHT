@@ -26,6 +26,7 @@ export class DarknessScene extends Phaser.Scene {
   private currentStandBonus: number = 1.2;
   private currentLowHpScale: number = 1.0;
   private currentExternalRadiusMult: number = 1.0;
+  private bloodFogBlend: number = 0;
   private effectTimeMs: number = 0;
 
   // Level-up expanding reveal pulse
@@ -263,13 +264,57 @@ export class DarknessScene extends Phaser.Scene {
       const w = this.scale.width;
       const h = this.scale.height;
 
-      // 1. Update slow-drifting procedural fog layers (freeze drift while paused)
-      if (!snap.isGamePaused && this.fogLayer1 && this.fogLayer2) {
-        const dtSec = delta / 1000;
-        this.fogLayer1.tilePositionX += LIGHT.fog.speed1X * dtSec;
-        this.fogLayer1.tilePositionY += LIGHT.fog.speed1Y * dtSec;
-        this.fogLayer2.tilePositionX += LIGHT.fog.speed2X * dtSec;
-        this.fogLayer2.tilePositionY += LIGHT.fog.speed2Y * dtSec;
+      // 1. Update procedural fog layers (smoothly shift into dense crimson Blood Fog during Horde Frenzy)
+      if (!snap.isGamePaused) {
+        const targetBloodFog = snap.isBloodFogActive ? 1 : 0;
+        this.bloodFogBlend = Phaser.Math.Linear(
+          this.bloodFogBlend,
+          targetBloodFog,
+          Math.min(1, delta / 550)
+        );
+      }
+
+      if (this.fogLayer1 && this.fogLayer2) {
+        if (!snap.isGamePaused) {
+          const dtSec = delta / 1000;
+          const speedBoost = 1 + this.bloodFogBlend * 1.45;
+          this.fogLayer1.tilePositionX += LIGHT.fog.speed1X * speedBoost * dtSec;
+          this.fogLayer1.tilePositionY += LIGHT.fog.speed1Y * speedBoost * dtSec;
+          this.fogLayer2.tilePositionX += LIGHT.fog.speed2X * speedBoost * dtSec;
+          this.fogLayer2.tilePositionY += LIGHT.fog.speed2Y * speedBoost * dtSec;
+        }
+
+        if (this.bloodFogBlend > 0.01) {
+          const baseC1 = Phaser.Display.Color.IntegerToColor(LIGHT.fog.tint1);
+          const bloodC1 = Phaser.Display.Color.IntegerToColor(0xc81622);
+          const mix1 = Phaser.Display.Color.Interpolate.ColorWithColor(
+            baseC1,
+            bloodC1,
+            100,
+            Math.round(this.bloodFogBlend * 100)
+          );
+          const baseC2 = Phaser.Display.Color.IntegerToColor(LIGHT.fog.tint2);
+          const bloodC2 = Phaser.Display.Color.IntegerToColor(0xe5303a);
+          const mix2 = Phaser.Display.Color.Interpolate.ColorWithColor(
+            baseC2,
+            bloodC2,
+            100,
+            Math.round(this.bloodFogBlend * 100)
+          );
+          this.fogLayer1.setTint(Phaser.Display.Color.GetColor(mix1.r, mix1.g, mix1.b));
+          this.fogLayer2.setTint(Phaser.Display.Color.GetColor(mix2.r, mix2.g, mix2.b));
+          this.fogLayer1.setAlpha(
+            Phaser.Math.Linear(LIGHT.fog.layer1Alpha, 0.22, this.bloodFogBlend)
+          );
+          this.fogLayer2.setAlpha(
+            Phaser.Math.Linear(LIGHT.fog.layer2Alpha, 0.16, this.bloodFogBlend)
+          );
+        } else {
+          this.fogLayer1.setTint(LIGHT.fog.tint1);
+          this.fogLayer2.setTint(LIGHT.fog.tint2);
+          this.fogLayer1.setAlpha(LIGHT.fog.layer1Alpha);
+          this.fogLayer2.setAlpha(LIGHT.fog.layer2Alpha);
+        }
       }
 
       // 2. Player light radius: standing still (+20% over 0.3s), low HP (<30% -> 70% faster flicker)
@@ -363,6 +408,23 @@ export class DarknessScene extends Phaser.Scene {
         this.bossGlowSprite.setVisible(true);
       } else {
         this.bossGlowSprite.setVisible(false);
+      }
+
+      // Priority 3.25: Active Elite variants radiate an unmistakable aura through darkness
+      if (snap.enemiesGroup && lightCount < LIGHT.maxLightSources) {
+        const enemies = snap.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+        let eliteLightsAdded = 0;
+        for (let i = 0; i < enemies.length && lightCount < LIGHT.maxLightSources && eliteLightsAdded < 3; i++) {
+          const enemy = enemies[i];
+          if (!enemy.active) continue;
+          const edata = enemy.getData('data') as { isElite?: boolean } | undefined;
+          if (!edata?.isElite) continue;
+          const sx = enemy.x - scrollX;
+          const sy = enemy.y - scrollY;
+          if (sx < -100 || sx > w + 100 || sy < -100 || sy > h + 100) continue;
+          pushLight(enemy.x, enemy.y, 85, 0.85);
+          eliteLightsAdded++;
+        }
       }
 
       // Priority 3.5: All active Enemy Projectiles (50px radius) so they always stay visible in the dark
@@ -459,7 +521,19 @@ export class DarknessScene extends Phaser.Scene {
 
     if (this.darkRT && this.darkRT.scene && this.textures.exists('light_radial_soft')) {
       this.darkRT.clear();
-      this.darkRT.fill(LIGHT.darkColor, darkAlpha);
+      let fillColor: number = LIGHT.darkColor;
+      if (this.bloodFogBlend > 0.01) {
+        const baseDark = Phaser.Display.Color.IntegerToColor(LIGHT.darkColor);
+        const bloodDark = Phaser.Display.Color.IntegerToColor(0x280409);
+        const mixedDark = Phaser.Display.Color.Interpolate.ColorWithColor(
+          baseDark,
+          bloodDark,
+          100,
+          Math.round(this.bloodFogBlend * 100)
+        );
+        fillColor = Phaser.Display.Color.GetColor(mixedDark.r, mixedDark.g, mixedDark.b);
+      }
+      this.darkRT.fill(fillColor, darkAlpha);
 
       const rtScale = this.currentRtScale;
       const rtW = this.darkRT.width;

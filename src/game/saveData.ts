@@ -1,4 +1,19 @@
-import { DailyMissionsState, DailyStreakState } from './types';
+import {
+  AchievementsProgressState,
+  BestiaryKillsMap,
+  DailyMissionsState,
+  DailyStreakState,
+  RelicId,
+} from './types';
+
+const VALID_RELIC_IDS: RelicId[] = [
+  'lodestone_heart',
+  'twin_zephyr',
+  'blood_chalice',
+  'sunforged_lens',
+  'iron_spurs',
+  'executioner_seal',
+];
 
 export const SAVE_STORAGE_KEY = 'last_light_save_v1';
 export const CURRENT_SAVE_VERSION = 1;
@@ -20,6 +35,12 @@ export interface SaveDataV1 {
   dailyMissions: DailyMissionsState | null;
   dailyStreak: DailyStreakState | null;
   hasSeenHowToPlay: boolean;
+  bestiaryKills: BestiaryKillsMap;
+  unlockedRelics: RelicId[];
+  equippedRelicIds: RelicId[];
+  relicSeals: number;
+  maxRelicSlots: number;
+  achievements: AchievementsProgressState;
 }
 
 const DEFAULT_SETTINGS: SaveSettingsData = {
@@ -40,6 +61,30 @@ function createDefaultSaveData(): SaveDataV1 {
     dailyMissions: null,
     dailyStreak: null,
     hasSeenHowToPlay: false,
+    bestiaryKills: {
+      wisp: 0,
+      imp: 0,
+      spitter: 0,
+      brute: 0,
+      boss: 0,
+    },
+    unlockedRelics: [],
+    equippedRelicIds: [],
+    relicSeals: 0,
+    maxRelicSlots: 2,
+    achievements: {
+      stats: {
+        totalKills: 0,
+        longestRunSec: 0,
+        bossesDefeated: 0,
+        elitesSlain: 0,
+        highestLevel: 1,
+        totalCoinsEarned: 0,
+        runsCompleted: 0,
+      },
+      unlockedIds: [],
+      claimedIds: [],
+    },
   };
 }
 
@@ -105,6 +150,7 @@ function sanitizeDailyMissions(raw: unknown): DailyMissionsState | null {
         target,
         progress,
         rewardCoins: safeNonNegativeInt(m.rewardCoins, 25),
+        rewardSeals: safeNonNegativeInt(m.rewardSeals, 1) || 1,
         completed,
         claimed: Boolean(m.claimed) && completed,
       };
@@ -131,6 +177,129 @@ function sanitizeDailyStreak(raw: unknown): DailyStreakState | null {
   };
 }
 
+function sanitizeBestiaryKills(raw: unknown): BestiaryKillsMap {
+  const defaults: BestiaryKillsMap = {
+    wisp: 0,
+    imp: 0,
+    spitter: 0,
+    brute: 0,
+    boss: 0,
+  };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return defaults;
+  const obj = raw as Record<string, unknown>;
+  return {
+    wisp: safeNonNegativeInt(obj.wisp, 0),
+    imp: safeNonNegativeInt(obj.imp, 0),
+    spitter: safeNonNegativeInt(obj.spitter, 0),
+    brute: safeNonNegativeInt(obj.brute, 0),
+    boss: safeNonNegativeInt(obj.boss, 0),
+  };
+}
+
+function sanitizeStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (typeof item === 'string' && item.length > 0) {
+      seen.add(item);
+    }
+  }
+  return Array.from(seen);
+}
+
+function sanitizeAchievements(
+  raw: unknown,
+  bestiaryKills: BestiaryKillsMap
+): AchievementsProgressState {
+  const bestiaryTotal =
+    bestiaryKills.wisp +
+    bestiaryKills.imp +
+    bestiaryKills.spitter +
+    bestiaryKills.brute +
+    bestiaryKills.boss;
+
+  const defaults: AchievementsProgressState = {
+    stats: {
+      totalKills: bestiaryTotal,
+      longestRunSec: 0,
+      bossesDefeated: bestiaryKills.boss,
+      elitesSlain: 0,
+      highestLevel: 1,
+      totalCoinsEarned: 0,
+      runsCompleted: 0,
+    },
+    unlockedIds: [],
+    claimedIds: [],
+  };
+
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return defaults;
+  }
+
+  const obj = raw as Record<string, unknown>;
+  const rawStats =
+    obj.stats && typeof obj.stats === 'object' && !Array.isArray(obj.stats)
+      ? (obj.stats as Record<string, unknown>)
+      : {};
+
+  const unlockedIds = sanitizeStringArray(obj.unlockedIds);
+  const unlockedSet = new Set(unlockedIds);
+  const claimedIds = sanitizeStringArray(obj.claimedIds).filter((id) => unlockedSet.has(id));
+
+  return {
+    stats: {
+      totalKills: Math.max(bestiaryTotal, safeNonNegativeInt(rawStats.totalKills, 0)),
+      longestRunSec: safeNonNegativeInt(rawStats.longestRunSec, 0),
+      bossesDefeated: Math.max(
+        bestiaryKills.boss,
+        safeNonNegativeInt(rawStats.bossesDefeated, 0)
+      ),
+      elitesSlain: safeNonNegativeInt(rawStats.elitesSlain, 0),
+      highestLevel: Math.max(1, safeNonNegativeInt(rawStats.highestLevel, 1)),
+      totalCoinsEarned: safeNonNegativeInt(rawStats.totalCoinsEarned, 0),
+      runsCompleted: safeNonNegativeInt(rawStats.runsCompleted, 0),
+    },
+    unlockedIds,
+    claimedIds,
+  };
+}
+
+function sanitizeUnlockedRelics(raw: unknown): RelicId[] {
+  if (!Array.isArray(raw)) return [];
+  const validSet = new Set<string>(VALID_RELIC_IDS);
+  const seen = new Set<RelicId>();
+  for (const item of raw) {
+    if (typeof item === 'string' && validSet.has(item)) {
+      seen.add(item as RelicId);
+    }
+  }
+  return Array.from(seen);
+}
+
+function sanitizeEquippedRelics(
+  rawList: unknown,
+  legacySingle: unknown,
+  unlocked: RelicId[],
+  maxSlots: number
+): RelicId[] {
+  const result: RelicId[] = [];
+  if (Array.isArray(rawList)) {
+    for (const item of rawList) {
+      if (
+        typeof item === 'string' &&
+        unlocked.includes(item as RelicId) &&
+        !result.includes(item as RelicId)
+      ) {
+        result.push(item as RelicId);
+        if (result.length >= maxSlots) break;
+      }
+    }
+  } else if (typeof legacySingle === 'string' && unlocked.includes(legacySingle as RelicId)) {
+    result.push(legacySingle as RelicId);
+  }
+  return result;
+}
+
 function sanitizeSaveData(raw: unknown): SaveDataV1 {
   const defaults = createDefaultSaveData();
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -142,6 +311,18 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
     obj.settings && typeof obj.settings === 'object' && !Array.isArray(obj.settings)
       ? (obj.settings as Record<string, unknown>)
       : {};
+
+  const unlockedRelics = sanitizeUnlockedRelics(obj.unlockedRelics);
+  const maxRelicSlots = Math.max(2, Math.min(4, safeNonNegativeInt(obj.maxRelicSlots, defaults.maxRelicSlots)));
+  const relicSeals = safeNonNegativeInt(obj.relicSeals, defaults.relicSeals);
+  const equippedRelicIds = sanitizeEquippedRelics(
+    obj.equippedRelicIds,
+    obj.equippedRelicId,
+    unlockedRelics,
+    maxRelicSlots
+  );
+
+  const bestiaryKills = sanitizeBestiaryKills(obj.bestiaryKills);
 
   return {
     version: CURRENT_SAVE_VERSION,
@@ -158,6 +339,12 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
     dailyMissions: sanitizeDailyMissions(obj.dailyMissions),
     dailyStreak: sanitizeDailyStreak(obj.dailyStreak),
     hasSeenHowToPlay: safeBoolean(obj.hasSeenHowToPlay, defaults.hasSeenHowToPlay),
+    bestiaryKills,
+    unlockedRelics,
+    equippedRelicIds,
+    relicSeals,
+    maxRelicSlots,
+    achievements: sanitizeAchievements(obj.achievements, bestiaryKills),
   };
 }
 
@@ -278,6 +465,16 @@ class SaveDataStore {
         : null,
       dailyStreak: this.cache.dailyStreak ? { ...this.cache.dailyStreak } : null,
       hasSeenHowToPlay: this.cache.hasSeenHowToPlay,
+      bestiaryKills: { ...this.cache.bestiaryKills },
+      unlockedRelics: [...this.cache.unlockedRelics],
+      equippedRelicIds: [...this.cache.equippedRelicIds],
+      relicSeals: this.cache.relicSeals,
+      maxRelicSlots: this.cache.maxRelicSlots,
+      achievements: {
+        stats: { ...this.cache.achievements.stats },
+        unlockedIds: [...this.cache.achievements.unlockedIds],
+        claimedIds: [...this.cache.achievements.claimedIds],
+      },
     };
   }
 

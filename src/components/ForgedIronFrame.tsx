@@ -456,6 +456,9 @@ interface IronButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> 
   variant?: 'default' | 'blood';
   radius?: number;
   dripCount?: number;
+  borderColor?: string;
+  glowColor?: string;
+  glowStrength?: number;
 }
 
 export const IronButton: React.FC<IronButtonProps> = ({
@@ -463,6 +466,9 @@ export const IronButton: React.FC<IronButtonProps> = ({
   variant = 'default',
   radius = 10,
   dripCount = 2,
+  borderColor,
+  glowColor,
+  glowStrength,
   className = '',
   children,
   disabled,
@@ -479,18 +485,20 @@ export const IronButton: React.FC<IronButtonProps> = ({
   const activeBorder =
     disabled
       ? '#2b2e35'
-      : pressed
-        ? BLOOD_IRON_COLORS.bloodGlow
-        : hovered || variant === 'blood'
-          ? BLOOD_IRON_COLORS.freshBlood
-          : BLOOD_IRON_COLORS.steel;
+      : borderColor ??
+        (pressed
+          ? BLOOD_IRON_COLORS.bloodGlow
+          : hovered || variant === 'blood'
+            ? BLOOD_IRON_COLORS.freshBlood
+            : BLOOD_IRON_COLORS.steel);
 
   const activeGlow =
     disabled
       ? undefined
-      : pressed || hovered || variant === 'blood'
-        ? BLOOD_IRON_COLORS.bloodGlow
-        : undefined;
+      : glowColor ??
+        (pressed || hovered || variant === 'blood'
+          ? BLOOD_IRON_COLORS.bloodGlow
+          : undefined);
 
   return (
     <button
@@ -536,7 +544,7 @@ export const IronButton: React.FC<IronButtonProps> = ({
         pressed={pressed && !disabled}
         borderColor={activeBorder}
         glowColor={activeGlow}
-        glowStrength={variant === 'blood' && !disabled ? 8 : 0}
+        glowStrength={glowStrength ?? (variant === 'blood' && !disabled ? 8 : 0)}
         className="w-full h-full"
         contentClassName="w-full h-full flex items-center justify-center gap-2 text-[#d8c9a8]"
       >

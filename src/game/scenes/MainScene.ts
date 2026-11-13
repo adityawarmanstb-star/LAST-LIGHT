@@ -3,6 +3,8 @@ import { soundManager } from '../audio';
 import { gameManager } from '../GameManager';
 import { calculateBasePlayerStats, saveCoins, getSavedCoins } from '../metaProgression';
 import { dailyMissions } from '../dailyMissions';
+import { achievements } from '../achievements';
+import { bestiary } from '../bestiary';
 import { haptics } from '../../mobile/haptics';
 import { CameraController } from '../CameraController';
 import { AtmosphereOverlay } from '../AtmosphereOverlay';
@@ -46,7 +48,11 @@ export const BALANCE = {
   },
   xp: {
     firstLevelXp: 8,                // ~8 kills for first level-up
-    xpGrowthMultiplier: 1.15,       // +15% more XP needed each level
+    xpGrowthMultiplier: 1.03,       // Steady +3% scaling within each 5-level bracket
+    xpFlatIncrement: 2,             // +2 XP base step within each 5-level bracket
+    milestoneInterval: 5,           // Every 5 levels triggers a hardcore XP wall
+    milestoneMultiplier: 1.45,      // +45% XP requirement spike at each 5-level gap
+    milestoneFlatPerTier: 16,       // +16 * tier flat XP surge at each 5-level gap (16, 32, 48...)
   },
   levelUp: {
     cardCount: 3,
@@ -114,6 +120,52 @@ export const SPAWN_TIMELINE = {
 // =========================================================================
 export const STAND_STILL_DELAY_MS = 80;
 export const ORBIT_BLADES_NEED_STANDING = true;
+export const BOSS_RECOMMENDED_LEVEL = 60;
+
+// =========================================================================
+// HORDE FRENZY & BLOOD FOG EVENT CONSTANTS
+// =========================================================================
+export const HORDE_FRENZY = {
+  durationMs: 30000,               // Blood Fog lasts 30 seconds
+  cooldownMs: 35000,               // 35s cooldown after Blood Fog ends
+  killSurgeWindowMs: 12000,        // Rolling 12s window for rapid kill surge detection
+  killSurgeThreshold: 22,          // 22 kills inside 12s triggers Horde Frenzy
+  killMilestoneStep: 100,          // Also triggers every 100 total kills if off cooldown
+  enemySpeedMultiplier: 1.35,      // +35% enemy movement speed during Blood Fog
+  spawnDensityMultiplier: 1.65,    // +65% target on-screen enemy density
+  maxActiveEnemiesOverride: 160,   // Raised enemy cap during Blood Fog
+  spawnIntervalScale: 0.52,        // Nearly 2x faster spawn cadence during Blood Fog
+} as const;
+
+// =========================================================================
+// OCCASIONAL ELITE ENEMY VARIANTS (Stats, Aura Colors & Bonus XP)
+// =========================================================================
+export const ELITE_VARIANTS = {
+  minRunTimeSec: 25,               // Earliest time roaming Elites can appear
+  baseSpawnChance: 0.055,          // 5.5% initial chance per wave spawn after 25s
+  chancePerMinute: 0.015,          // +1.5% chance per minute survived
+  maxSpawnChance: 0.14,            // Capped at 14%
+  spawnCooldownMs: 12000,          // Minimum 12s gap between roaming Elite spawns
+  maxActiveElites: 3,              // Maximum concurrent roaming Elites
+  hpMultiplier: 3.8,               // +280% higher HP for Elite variants
+  speedMultiplier: 1.22,           // +22% faster movement speed
+  damageMultiplier: 1.35,          // +35% attack damage
+  scaleMultiplier: 1.32,           // Larger silhouette
+  xpMultiplier: 4,                 // 4x base enemy XP (min 10)
+  bonusXpOrbs: 2,                  // Extra bonus XP orbs scattered on defeat
+  chestDropChance: 0.35,           // 35% chance for roaming Elite to drop an Upgrade Chest
+} as const;
+
+const ELITE_AURA_STYLE: Record<
+  'wisp' | 'imp' | 'spitter' | 'brute' | 'boss',
+  { outerColor: number; innerColor: number; spriteTint: number }
+> = {
+  wisp: { outerColor: 0x5de4ff, innerColor: 0xc44cff, spriteTint: 0xbbeeff },
+  imp: { outerColor: 0xe5303a, innerColor: 0xff6b73, spriteTint: 0xff9a9e },
+  spitter: { outerColor: 0x90df63, innerColor: 0xd9ff7a, spriteTint: 0xc9ffad },
+  brute: { outerColor: 0xf2a93b, innerColor: 0xff4d54, spriteTint: 0xffcca3 },
+  boss: { outerColor: 0xf2a93b, innerColor: 0xe5303a, spriteTint: 0xffffff },
+};
 
 // =========================================================================
 // LIMITED-VISION DARKNESS & LIGHTING CONSTANTS
@@ -510,8 +562,17 @@ export class MainScene extends Phaser.Scene {
     S: Phaser.Input.Keyboard.Key;
     D: Phaser.Input.Keyboard.Key;
     SPACE: Phaser.Input.Keyboard.Key;
+    SHIFT: Phaser.Input.Keyboard.Key;
     ESC: Phaser.Input.Keyboard.Key;
   };
+
+  // Dash Mechanic (Supports Single Default Dash or Twin-Wind Feather Double Dash)
+  private dashChargesRemaining: number = 1;
+  private dashRechargeTimerMs: number = 0;
+  private dashActiveTimerMs: number = 0;
+  private dashDirX: number = 1;
+  private dashDirY: number = 0;
+  private dashTrailAccumMs: number = 0;
 
   // Graphics overlays for telegraphs & elite auras
   private telegraphGraphics!: Phaser.GameObjects.Graphics;
@@ -545,6 +606,14 @@ export class MainScene extends Phaser.Scene {
   private lightShardTimerMs: number = 0;
   private darknessFallsTimerMs: number = 0;
 
+  // Horde Frenzy / Blood Fog State
+  private bloodFogTimerMs: number = 0;
+  private bloodFogCooldownMs: number = 0;
+  private bloodFogBannerTimerMs: number = 0;
+  private recentKillTimesMs: number[] = [];
+  private nextFrenzyKillMilestone: number = HORDE_FRENZY.killMilestoneStep;
+  private lastEliteVariantSpawnMs: number = 0;
+
   // Red Shard & Dynamic Challenges State
   private redShardsPickedCount: number = 0;
   private redShardTimerMs: number = 0;
@@ -559,6 +628,8 @@ export class MainScene extends Phaser.Scene {
   // State flags
   private isGamePaused: boolean = false;
   private hitstopTimer: number = 0;
+  private isHitstopPausedPhysics: boolean = false;
+  private unsubCritImpact: (() => void) | null = null;
   private levelUpPulseSeq: number = 0;
   private lastMissionSecondRecorded: number = 0;
   private lowFpsDurationMs: number = 0;
@@ -573,6 +644,10 @@ export class MainScene extends Phaser.Scene {
   init() {
     this.isDead = false;
     this.isGamePaused = false;
+    this.hitstopTimer = 0;
+    this.isHitstopPausedPhysics = false;
+    this.unsubCritImpact?.();
+    this.unsubCritImpact = null;
     this.isInvulnerable = false;
     this.invulnTimerMs = 0;
     this.isMoving = false;
@@ -616,6 +691,12 @@ export class MainScene extends Phaser.Scene {
     this.hasNightEyes = false;
     this.lightShardTimerMs = 0;
     this.darknessFallsTimerMs = 0;
+    this.bloodFogTimerMs = 0;
+    this.bloodFogCooldownMs = 0;
+    this.bloodFogBannerTimerMs = 0;
+    this.recentKillTimesMs = [];
+    this.nextFrenzyKillMilestone = HORDE_FRENZY.killMilestoneStep;
+    this.lastEliteVariantSpawnMs = 0;
     this.redShardsPickedCount = 0;
     this.redShardTimerMs = 0;
     this.isRedShardBuffActive = false;
@@ -749,6 +830,9 @@ export class MainScene extends Phaser.Scene {
     const vitalityScale = this.playerStats.maxHp / 100;
     this.playerStats.maxHp = Math.round(BALANCE.player.startingHp * vitalityScale);
     this.playerStats.currentHp = this.playerStats.maxHp;
+    this.dashChargesRemaining = this.playerStats.dashCharges;
+    this.dashRechargeTimerMs = 0;
+    this.dashActiveTimerMs = 0;
 
     // 5. Initialize Weapons
     this.initWeapons();
@@ -850,11 +934,11 @@ export class MainScene extends Phaser.Scene {
       repeat: 0,
     });
 
-    // fx_blade_spin_sheet: 256x256, 16 frames, 20 fps, loop, orbiting blade weapon (full 360 rotation baked in sheet)
+    // fx_blade_spin_sheet: 256x256, 16 frames, 60 fps, loop, orbiting blade weapon (full 360 rotation baked in sheet)
     this.anims.create({
       key: 'fx_blade_spin_anim',
       frames: this.anims.generateFrameNumbers('fx_blade_spin_sheet', { start: 0, end: 15 }),
-      frameRate: 20,
+      frameRate: 60,
       repeat: -1,
     });
 
@@ -1044,6 +1128,7 @@ export class MainScene extends Phaser.Scene {
         S: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.S),
         D: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.D),
         SPACE: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE),
+        SHIFT: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SHIFT),
         ESC: this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ESC),
       };
     }
@@ -1092,9 +1177,43 @@ export class MainScene extends Phaser.Scene {
     this.scene.bringToTop('DarknessScene');
     this.scene.bringToTop('UIScene');
 
+    // Subscribe to GameManager critical hit impact bus (screen-shake + hitstop + color shockwave)
+    this.unsubCritImpact?.();
+    this.unsubCritImpact = gameManager.onCritImpact((impact) => {
+      if (this.isDead || this.isGamePaused || !this.scene?.isActive()) return;
+
+      this.cameraController.triggerShake(
+        impact.shakeDurationMs,
+        impact.shakeIntensity,
+        impact.isEliteOrBoss
+      );
+
+      this.hitstopTimer = Math.max(this.hitstopTimer, impact.hitstopMs);
+      if (!this.isHitstopPausedPhysics) {
+        this.isHitstopPausedPhysics = true;
+        this.physics.pause();
+      }
+
+      this.spawnParticleBurst(
+        impact.x,
+        impact.y,
+        impact.isEliteOrBoss ? 14 : 9,
+        'fx_ring',
+        110,
+        280,
+        0.14,
+        0.28,
+        impact.flashTintNumber
+      );
+    });
+
     // Clean up activeScene reference and atmosphere graphics on shutdown/restart
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.unsubCritImpact?.();
+      this.unsubCritImpact = null;
+      this.isHitstopPausedPhysics = false;
       dailyMissions.flush();
+      achievements.flush();
       this.atmosphereOverlay?.destroy();
       this.atmosphereOverlay = null;
       if (gameManager.activeScene === this) {
@@ -1692,10 +1811,18 @@ export class MainScene extends Phaser.Scene {
     // Clamp delta time to avoid frame skips
     const delta = Math.min(rawDelta, 50);
 
-    // Hitstop handling
+    // Hitstop handling (freezes physics & AI briefly while keeping camera shake active)
     if (this.hitstopTimer > 0) {
-      this.hitstopTimer -= delta;
+      this.hitstopTimer = Math.max(0, this.hitstopTimer - delta);
+      this.cameraController.update(delta, this.player.x, this.player.y, this.activeBoss);
+      if (this.hitstopTimer <= 0 && this.isHitstopPausedPhysics) {
+        this.isHitstopPausedPhysics = false;
+        this.physics.resume();
+      }
       return;
+    } else if (this.isHitstopPausedPhysics) {
+      this.isHitstopPausedPhysics = false;
+      this.physics.resume();
     }
 
     this.runTime += delta / 1000;
@@ -1703,6 +1830,7 @@ export class MainScene extends Phaser.Scene {
     if (wholeSec > this.lastMissionSecondRecorded) {
       this.lastMissionSecondRecorded = wholeSec;
       dailyMissions.recordMax('survive_seconds', wholeSec);
+      achievements.recordMax('longestRunSec', wholeSec);
     }
 
     if (BALANCE.player.hpRegenPerSec > 0 && this.playerStats.currentHp < this.playerStats.maxHp) {
@@ -1721,6 +1849,28 @@ export class MainScene extends Phaser.Scene {
         if (this.player.active) {
           this.player.clearTint();
           this.player.setAlpha(1);
+        }
+      }
+    }
+
+    // Dash input & charge recharge
+    if (
+      this.wasdKeys &&
+      (Phaser.Input.Keyboard.JustDown(this.wasdKeys.SPACE) ||
+        Phaser.Input.Keyboard.JustDown(this.wasdKeys.SHIFT))
+    ) {
+      this.triggerDash();
+    }
+    if (this.dashChargesRemaining < this.playerStats.dashCharges) {
+      this.dashRechargeTimerMs += delta;
+      if (this.dashRechargeTimerMs >= this.playerStats.dashCooldownMs) {
+        this.dashRechargeTimerMs -= this.playerStats.dashCooldownMs;
+        this.dashChargesRemaining = Math.min(
+          this.playerStats.dashCharges,
+          this.dashChargesRemaining + 1
+        );
+        if (this.dashChargesRemaining >= this.playerStats.dashCharges) {
+          this.dashRechargeTimerMs = 0;
         }
       }
     }
@@ -1747,6 +1897,25 @@ export class MainScene extends Phaser.Scene {
     }
     if (this.darknessFallsTimerMs > 0) {
       this.darknessFallsTimerMs = Math.max(0, this.darknessFallsTimerMs - delta);
+    }
+
+    // Horde Frenzy Blood Fog 30s active duration, banner auto-dismiss, and cooldown
+    if (this.bloodFogTimerMs > 0) {
+      this.bloodFogTimerMs = Math.max(0, this.bloodFogTimerMs - delta);
+      if (this.bloodFogTimerMs <= 0) {
+        this.bloodFogCooldownMs = HORDE_FRENZY.cooldownMs;
+        this.recentKillTimesMs = [];
+        this.showFloatingCallout(this.player.x, this.player.y - 48, 'BLOOD FOG CLEARS', '#d8c9a8');
+      }
+    } else if (this.bloodFogCooldownMs > 0) {
+      this.bloodFogCooldownMs = Math.max(0, this.bloodFogCooldownMs - delta);
+    }
+
+    if (this.bloodFogBannerTimerMs > 0) {
+      this.bloodFogBannerTimerMs = Math.max(0, this.bloodFogBannerTimerMs - delta);
+      if (this.bloodFogBannerTimerMs <= 0 && !this.pendingEvent) {
+        gameManager.emitEventWarning(null);
+      }
     }
 
     // Red Shard temporary damage surge timer
@@ -1888,7 +2057,93 @@ export class MainScene extends Phaser.Scene {
     this.stanceRing.fillEllipse(0, 0, 78, 30);
   }
 
+  public triggerDash() {
+    if (this.isDead || this.isGamePaused) return;
+    if (this.dashChargesRemaining <= 0 || this.dashActiveTimerMs > 0) return;
+
+    let dx = 0;
+    let dy = 0;
+    if (this.cursors && this.wasdKeys) {
+      if (this.cursors.left?.isDown || this.wasdKeys.A.isDown) dx -= 1;
+      if (this.cursors.right?.isDown || this.wasdKeys.D.isDown) dx += 1;
+      if (this.cursors.up?.isDown || this.wasdKeys.W.isDown) dy -= 1;
+      if (this.cursors.down?.isDown || this.wasdKeys.S.isDown) dy += 1;
+    }
+    if (gameManager.joystickVector.x !== 0 || gameManager.joystickVector.y !== 0) {
+      dx += gameManager.joystickVector.x;
+      dy += gameManager.joystickVector.y;
+    }
+
+    const len = Math.hypot(dx, dy);
+    if (len > 0.05) {
+      this.dashDirX = dx / len;
+      this.dashDirY = dy / len;
+    } else {
+      this.dashDirX = this.player?.flipX ? -1 : 1;
+      this.dashDirY = 0;
+    }
+
+    this.dashChargesRemaining = Math.max(0, this.dashChargesRemaining - 1);
+    this.dashActiveTimerMs = 175;
+    this.dashTrailAccumMs = 0;
+    this.isInvulnerable = true;
+    this.invulnTimerMs = Math.max(this.invulnTimerMs, 210);
+    this.standStillTimerMs = 0;
+    this.isStandingReady = false;
+    this.isAttacking = false;
+    this.muzzleFiredThisAttack = false;
+
+    this.player.setTint(0x5de4ff);
+    const ringFx = this.getPooledEffect();
+    if (ringFx) {
+      ringFx.inUse = true;
+      ringFx.spawnTime = this.time.now;
+      ringFx.sprite.setPosition(this.player.x, this.player.y);
+      ringFx.sprite.setOrigin(0.5, 0.5);
+      ringFx.sprite.setRotation(0);
+      ringFx.sprite.setScale(0.75);
+      ringFx.sprite.setBlendMode(Phaser.BlendModes.ADD);
+      ringFx.sprite.setDepth(26);
+      ringFx.sprite.setTint(0x5de4ff);
+      ringFx.sprite.setActive(true);
+      ringFx.sprite.setVisible(true);
+      ringFx.sprite.play('fx_ring_anim');
+      ringFx.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+        this.releasePooledEffect(ringFx);
+      });
+    }
+    this.spawnParticleBurst(this.player.x, this.player.y, 12, 'fx_spark', 90, 220, 0.2, 0.45, 0x5de4ff);
+    soundManager.playBladeSlash();
+    haptics.tap('medium');
+    this.emitStatsUpdate();
+  }
+
   private updatePlayerMovement(delta: number) {
+    if (this.dashActiveTimerMs > 0) {
+      this.dashActiveTimerMs = Math.max(0, this.dashActiveTimerMs - delta);
+      const dashSpeed = 580;
+      const vx = this.dashDirX * dashSpeed;
+      const vy = this.dashDirY * dashSpeed;
+      this.player.setVelocity(vx, vy);
+      if (this.dashDirX < -0.1) {
+        this.player.setFlipX(true);
+      } else if (this.dashDirX > 0.1) {
+        this.player.setFlipX(false);
+      }
+
+      this.dashTrailAccumMs += delta;
+      if (this.dashTrailAccumMs >= 32) {
+        this.dashTrailAccumMs = 0;
+        this.spawnParticleBurst(this.player.x, this.player.y + 8, 3, 'fx_spark', 20, 70, 0.12, 0.25, 0x5de4ff);
+      }
+
+      if (this.stanceRing) {
+        this.stanceRing.setPosition(this.player.x, this.player.y + 36);
+        this.stanceRing.setAlpha(0.16);
+      }
+      return;
+    }
+
     let vx = 0;
     let vy = 0;
 
@@ -2235,9 +2490,10 @@ export class MainScene extends Phaser.Scene {
       const by = this.player.y + Math.sin(angle) * radius;
 
       const blade = this.orbitingBlades[i];
-      // Orbit the sprite's POSITION around the player; do not rotate the sprite in code
+      // Orbit the sprite's POSITION around the player; keep sprite's baked spin animation fast & sharp
       blade.setPosition(bx, by);
       blade.setAlpha(canDealDamage ? 1.0 : 0.28);
+      blade.anims.timeScale = canDealDamage ? 1.25 : 0.85;
 
       if (!canDealDamage) continue;
 
@@ -2484,6 +2740,8 @@ export class MainScene extends Phaser.Scene {
   private updateEnemies(time: number, delta: number) {
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     const pressureSpeedFactor = this.isUnderPressure ? 1 + SPAWN_TIMELINE.pressure.enemySpeedBonus : 1;
+    const bloodFogSpeedFactor = this.bloodFogTimerMs > 0 ? HORDE_FRENZY.enemySpeedMultiplier : 1;
+    const globalEnemySpeedFactor = pressureSpeedFactor * bloodFogSpeedFactor;
 
     if (this.eliteAuraGraphics) {
       this.eliteAuraGraphics.clear();
@@ -2495,13 +2753,30 @@ export class MainScene extends Phaser.Scene {
       const edata = enemy.getData('data') as EnemyData;
       if (!edata) continue;
 
-      // Elite pulsing red glow aura
+      // Elite distinct multi-layered pulsing aura & orbiting sigil nodes
       if (edata.isElite && this.eliteAuraGraphics) {
+        const auraStyle = ELITE_AURA_STYLE[edata.type] ?? ELITE_AURA_STYLE.brute;
         const auraPulse = 0.65 + 0.35 * Math.sin(time * 0.008);
-        this.eliteAuraGraphics.fillStyle(0xe5484d, 0.16 * auraPulse);
-        this.eliteAuraGraphics.fillCircle(enemy.x, enemy.y, 52 * enemy.scaleX);
-        this.eliteAuraGraphics.lineStyle(3, 0xff4d54, 0.55 * auraPulse);
-        this.eliteAuraGraphics.strokeCircle(enemy.x, enemy.y, 58 * enemy.scaleX);
+        const auraRadius = 54 * enemy.scaleX;
+
+        this.eliteAuraGraphics.fillStyle(auraStyle.outerColor, 0.16 * auraPulse);
+        this.eliteAuraGraphics.fillCircle(enemy.x, enemy.y, auraRadius);
+        this.eliteAuraGraphics.lineStyle(2.5, auraStyle.outerColor, 0.7 * auraPulse);
+        this.eliteAuraGraphics.strokeCircle(enemy.x, enemy.y, auraRadius + 5);
+        this.eliteAuraGraphics.lineStyle(1.5, auraStyle.innerColor, 0.6 * auraPulse);
+        this.eliteAuraGraphics.strokeCircle(enemy.x, enemy.y, auraRadius * 0.72);
+
+        const spin = time * 0.0032;
+        const orbitR = auraRadius + 8;
+        this.eliteAuraGraphics.fillStyle(auraStyle.innerColor, 0.9 * auraPulse);
+        for (let n = 0; n < 4; n++) {
+          const na = spin + (n * Math.PI) / 2;
+          this.eliteAuraGraphics.fillCircle(
+            enemy.x + Math.cos(na) * orbitR,
+            enemy.y + Math.sin(na) * orbitR,
+            3.2
+          );
+        }
       }
 
       // Handle knockback decay
@@ -2514,13 +2789,13 @@ export class MainScene extends Phaser.Scene {
 
       const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
       const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
-      const effectiveSpeed = edata.speed * pressureSpeedFactor;
+      const effectiveSpeed = edata.speed * globalEnemySpeedFactor;
 
       // Stampede linear charge override
       if (edata.chargeTimerMs && edata.chargeTimerMs > 0) {
         edata.chargeTimerMs -= delta;
-        const cvx = (edata.chargeVx ?? Math.cos(angle) * effectiveSpeed) * pressureSpeedFactor;
-        const cvy = (edata.chargeVy ?? Math.sin(angle) * effectiveSpeed) * pressureSpeedFactor;
+        const cvx = (edata.chargeVx ?? Math.cos(angle) * effectiveSpeed) * globalEnemySpeedFactor;
+        const cvy = (edata.chargeVy ?? Math.sin(angle) * effectiveSpeed) * globalEnemySpeedFactor;
         enemy.setVelocity(cvx, cvy);
         enemy.setFlipX(cvx < 0);
         if (edata.type === 'imp' && (!enemy.anims.isPlaying || enemy.anims.currentAnim?.key !== 'imp_run')) {
@@ -2605,9 +2880,32 @@ export class MainScene extends Phaser.Scene {
         }
 
         case 'boss': {
+          const bossTier = (enemy.getData('bossTier') as number) || 1;
+          const hpRatio = edata.hp / Math.max(1, edata.maxHp);
+          const isEnraged = hpRatio <= 0.5;
+          const isCritical = hpRatio <= 0.25;
+
+          if (isEnraged && !enemy.getData('enraged')) {
+            enemy.setData('enraged', true);
+            enemy.setTint(0xff7a7a);
+            soundManager.playBossWarning();
+            this.cameraController.shakeFromBossProximity(
+              enemy.x,
+              enemy.y,
+              this.player.x,
+              this.player.y,
+              0.018,
+              550,
+              950
+            );
+            this.showFloatingCallout(enemy.x, enemy.y - 90, 'THE TITAN ENRAGES!', '#e5303a');
+          }
+
+          const phaseSpeedBoost = isCritical ? 1.42 : isEnraged ? 1.24 : 1.0;
           const isAttacking = (enemy.getData('isAttacking') as boolean) || false;
           if (!isAttacking) {
-            enemy.setVelocity(Math.cos(angle) * effectiveSpeed, Math.sin(angle) * effectiveSpeed);
+            const bossMoveSpeed = effectiveSpeed * phaseSpeedBoost;
+            enemy.setVelocity(Math.cos(angle) * bossMoveSpeed, Math.sin(angle) * bossMoveSpeed);
             if (!enemy.anims.isPlaying || enemy.anims.currentAnim?.key !== 'boss_idle') {
               enemy.play('boss_idle', true);
             }
@@ -2615,8 +2913,9 @@ export class MainScene extends Phaser.Scene {
             enemy.setVelocity(0, 0);
           }
 
-          // Periodic boss ground slam with >=0.5s red ground circle telegraph
-          if (!isAttacking && time - edata.lastAttack > 3600) {
+          // Faster periodic boss ground slam with larger 295px radius & >=0.5s red ground telegraph
+          const slamCooldown = isCritical ? 1650 : isEnraged ? 1950 : 2600;
+          if (!isAttacking && time - edata.lastAttack > slamCooldown) {
             edata.lastAttack = time;
             enemy.setData('isAttacking', true);
             enemy.setData('attackShockwaveDone', false);
@@ -2629,29 +2928,33 @@ export class MainScene extends Phaser.Scene {
               y: enemy.y,
               angle: 0,
               length: 0,
-              radius: 260,
-              durationMs: Math.max(550, SPAWN_TIMELINE.pressure.telegraphDurationMs),
+              radius: 295,
+              durationMs: Math.max(580, SPAWN_TIMELINE.pressure.telegraphDurationMs),
               damage: 0,
               speed: 0,
               tint: 0xe5484d,
             });
-          } else if (!isAttacking && dist < 560) {
-            // Boss ranged void volley with 0.5s line telegraphs
+          } else if (!isAttacking && dist < 640) {
+            // Escalating Void Volley: 5-way normally, 7-way critical burst below 25% HP
+            const volleyCooldown = isCritical ? 1250 : isEnraged ? 1450 : 1950;
             const lastVolley = (enemy.getData('lastBossVolley') as number) || 0;
-            if (time - lastVolley > 2500) {
+            if (time - lastVolley > volleyCooldown) {
               enemy.setData('lastBossVolley', time);
-              const offsets = [-0.26, 0, 0.26];
+              const offsets = isCritical
+                ? [-0.66, -0.44, -0.22, 0, 0.22, 0.44, 0.66]
+                : [-0.44, -0.22, 0, 0.22, 0.44];
+              const orbSpeed = isCritical ? 380 : isEnraged ? 355 : 335;
               for (const offset of offsets) {
                 this.queueTelegraph({
                   kind: 'line',
                   x: enemy.x,
                   y: enemy.y,
                   angle: angle + offset,
-                  length: 560,
+                  length: 620,
                   radius: 0,
                   durationMs: SPAWN_TIMELINE.pressure.telegraphDurationMs,
-                  damage: Math.round(edata.damage * 0.65),
-                  speed: 280,
+                  damage: Math.round(edata.damage * (isEnraged ? 0.78 : 0.7)),
+                  speed: orbSpeed,
                   tint: 0xe5484d,
                   sourceEnemy: enemy,
                 });
@@ -2659,13 +2962,41 @@ export class MainScene extends Phaser.Scene {
             }
           }
 
+          // Periodic Void Minion Summons so kiting remains dangerous
+          const summonCooldown = isEnraged ? 6500 : 9000;
+          const lastSummon = (enemy.getData('lastBossSummon') as number) || 0;
+          if (
+            time - lastSummon > summonCooldown &&
+            this.enemiesGroup.countActive(true) < SPAWN_TIMELINE.maxActiveEnemies
+          ) {
+            enemy.setData('lastBossSummon', time);
+            const { hpMult, speedMult, dmgMult } = this.getTimelineScaling();
+            const minionCount = isEnraged ? 5 : 4;
+            for (let s = 0; s < minionCount; s++) {
+              const sAngle = angle + (s * Math.PI * 2) / minionCount;
+              const sx = enemy.x + Math.cos(sAngle) * 110;
+              const sy = enemy.y + Math.sin(sAngle) * 110;
+              const minionType = s % 3 === 0 ? 'spitter' : 'imp';
+              this.spawnEnemyAt(
+                sx,
+                sy,
+                minionType,
+                hpMult * 1.45,
+                dmgMult * 1.2,
+                speedMult * 1.15
+              );
+            }
+            this.spawnParticleBurst(enemy.x, enemy.y, 18, 'fx_ring', 90, 220, 0.2, 0.4, 0xe5303a);
+          }
+
           // Emit boss update to UI
-          const bossTier = (enemy.getData('bossTier') as number) || 1;
           gameManager.emitBossUpdate({
             name: bossTier > 1 ? `The Void Titan Tier ${bossTier}` : 'The Void Titan',
             currentHp: Math.max(0, Math.round(edata.hp)),
             maxHp: edata.maxHp,
             active: true,
+            recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 15,
+            enraged: isEnraged,
           });
           break;
         }
@@ -3025,7 +3356,7 @@ export class MainScene extends Phaser.Scene {
       this.scheduleTimelineEvent(
         'boss_1',
         'THE VOID TITAN',
-        'Apex dreadnought awakens at the 5-minute mark',
+        `Apex dreadnought awakens · Rec. Lv. ${BOSS_RECOMMENDED_LEVEL}`,
         () => {
           this.spawnBoss(1);
         }
@@ -3089,7 +3420,7 @@ export class MainScene extends Phaser.Scene {
         this.scheduleTimelineEvent(
           `recurring_${cycleIdx}`,
           `VOID TITAN TIER ${tier}`,
-          'A stronger Void Titan rises from the abyss',
+          `Abyssal juggernaut rises · Rec. Lv. ${BOSS_RECOMMENDED_LEVEL + (tier - 1) * 15}`,
           () => {
             this.spawnBoss(tier);
           }
@@ -3101,10 +3432,21 @@ export class MainScene extends Phaser.Scene {
   private handleEnemySpawning(time: number) {
     this.handleTimelineEvents();
 
-    const activeCount = this.enemiesGroup.countActive(true);
-    if (activeCount >= SPAWN_TIMELINE.maxActiveEnemies) return;
+    const isBloodFog = this.bloodFogTimerMs > 0;
+    const effectiveMaxActive = isBloodFog
+      ? HORDE_FRENZY.maxActiveEnemiesOverride
+      : SPAWN_TIMELINE.maxActiveEnemies;
 
-    const targetOnScreen = this.getTargetOnScreenCount(this.runTime);
+    const activeCount = this.enemiesGroup.countActive(true);
+    if (activeCount >= effectiveMaxActive) return;
+
+    const baseTarget = this.getTargetOnScreenCount(this.runTime);
+    const targetOnScreen = isBloodFog
+      ? Math.min(
+          effectiveMaxActive,
+          Math.max(28, Math.round(baseTarget * HORDE_FRENZY.spawnDensityMultiplier))
+        )
+      : baseTarget;
     const deficit = targetOnScreen - activeCount;
 
     if (time >= this.nextSpawnTime) {
@@ -3112,14 +3454,29 @@ export class MainScene extends Phaser.Scene {
       const { hpMult, speedMult, dmgMult } = this.getTimelineScaling();
 
       // Dynamic interval keeps crowd pacing tightly aligned to targetOnScreen
-      const interval = deficit > 6 ? Math.min(diff.spawnIntervalMs, 380) : diff.spawnIntervalMs;
+      let interval = deficit > 6 ? Math.min(diff.spawnIntervalMs, 380) : diff.spawnIntervalMs;
+      if (isBloodFog) {
+        interval = Math.max(180, Math.round(interval * HORDE_FRENZY.spawnIntervalScale));
+      }
       this.nextSpawnTime = time + interval;
 
       if (deficit <= 0) return;
 
+      const desiredBatch = isBloodFog
+        ? deficit > 10
+          ? 5
+          : deficit > 4
+            ? 3
+            : 2
+        : deficit > 12
+          ? 4
+          : deficit > 5
+            ? 2
+            : 1;
+
       const batchSize = Math.min(
-        SPAWN_TIMELINE.maxActiveEnemies - activeCount,
-        deficit > 12 ? 4 : deficit > 5 ? 2 : 1,
+        effectiveMaxActive - activeCount,
+        desiredBatch,
         Math.max(1, deficit)
       );
 
@@ -3130,19 +3487,71 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  private countActiveElites(): number {
+    if (!this.enemiesGroup) return 0;
+    const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+    let count = 0;
+    for (const enemy of enemies) {
+      if (!enemy.active) continue;
+      const edata = enemy.getData('data') as EnemyData | undefined;
+      if (edata?.isElite) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  private shouldSpawnEliteVariant(): boolean {
+    if (this.runTime < ELITE_VARIANTS.minRunTimeSec) return false;
+    if (this.time.now - this.lastEliteVariantSpawnMs < ELITE_VARIANTS.spawnCooldownMs) {
+      return false;
+    }
+    if (this.countActiveElites() >= ELITE_VARIANTS.maxActiveElites) {
+      return false;
+    }
+    const chance = Math.min(
+      ELITE_VARIANTS.maxSpawnChance,
+      ELITE_VARIANTS.baseSpawnChance + (this.runTime / 60) * ELITE_VARIANTS.chancePerMinute
+    );
+    return Math.random() < chance;
+  }
+
   private spawnRandomEnemy(
     type: 'wisp' | 'imp' | 'spitter' | 'brute',
     hpMultiplier: number = 1,
     dmgMultiplier: number = 1,
     speedMultiplier: number = 1
   ) {
-    if (this.enemiesGroup.countActive(true) >= SPAWN_TIMELINE.maxActiveEnemies) return;
+    const cap =
+      this.bloodFogTimerMs > 0
+        ? HORDE_FRENZY.maxActiveEnemiesOverride
+        : SPAWN_TIMELINE.maxActiveEnemies;
+    if (this.enemiesGroup.countActive(true) >= cap) return;
 
     // Spawn off-screen around player
     const angle = Math.random() * Math.PI * 2;
     const distance = Phaser.Math.Between(520, 680);
     const x = this.player.x + Math.cos(angle) * distance;
     const y = this.player.y + Math.sin(angle) * distance;
+
+    if (this.shouldSpawnEliteVariant()) {
+      this.lastEliteVariantSpawnMs = this.time.now;
+      this.spawnEnemyAt(
+        x,
+        y,
+        type,
+        hpMultiplier * ELITE_VARIANTS.hpMultiplier,
+        dmgMultiplier * ELITE_VARIANTS.damageMultiplier,
+        speedMultiplier * ELITE_VARIANTS.speedMultiplier,
+        {
+          isElite: true,
+          coinDrops: 2,
+          dropsChest: Math.random() < ELITE_VARIANTS.chestDropChance,
+          scaleMultiplierOverride: ELITE_VARIANTS.scaleMultiplier,
+        }
+      );
+      return;
+    }
 
     this.spawnEnemyAt(x, y, type, hpMultiplier, dmgMultiplier, speedMultiplier);
   }
@@ -3161,6 +3570,7 @@ export class MainScene extends Phaser.Scene {
       chargeVx?: number;
       chargeVy?: number;
       chargeTimerMs?: number;
+      scaleMultiplierOverride?: number;
     }
   ) {
     let texture = 'enemy_wisp';
@@ -3201,7 +3611,8 @@ export class MainScene extends Phaser.Scene {
     }
 
     if (options?.isElite) {
-      scale *= SPAWN_TIMELINE.events.firstElite.scaleMultiplier;
+      scale *=
+        options.scaleMultiplierOverride ?? SPAWN_TIMELINE.events.firstElite.scaleMultiplier;
     }
 
     const hp = Math.max(1, Math.round(baseHp * hpMultiplier));
@@ -3211,6 +3622,9 @@ export class MainScene extends Phaser.Scene {
     const enemy = this.enemiesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
     enemy.setDepth(options?.isElite ? 20 : 18);
     enemy.setScale(scale);
+    if (options?.isElite) {
+      enemy.setTint((ELITE_AURA_STYLE[type] ?? ELITE_AURA_STYLE.brute).spriteTint);
+    }
 
     // Hitbox smaller than sprite
     const enemyBody = enemy.body as Phaser.Physics.Arcade.Body;
@@ -3231,6 +3645,9 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    const baseGemValue = type === 'brute' ? 5 : type === 'spitter' ? 3 : 1;
+    const eliteGemValue = Math.max(10, baseGemValue * ELITE_VARIANTS.xpMultiplier);
+
     const edata: EnemyData = {
       type,
       hp,
@@ -3238,7 +3655,7 @@ export class MainScene extends Phaser.Scene {
       speed,
       damage,
       scoreValue: options?.isElite ? 160 : type === 'brute' ? 40 : type === 'spitter' ? 25 : 10,
-      gemValue: options?.isElite ? 10 : type === 'brute' ? 5 : type === 'spitter' ? 3 : 1,
+      gemValue: options?.isElite ? eliteGemValue : baseGemValue,
       lastAttack: 0,
       knockbackX: 0,
       knockbackY: 0,
@@ -3329,34 +3746,38 @@ export class MainScene extends Phaser.Scene {
     }
 
     const { hpMult, speedMult } = this.getTimelineScaling();
-    const bossHp = Math.round(6500 * hpMult * Math.pow(1.65, tier - 1));
-    const bossDmg = Math.round(35 * (1 + (tier - 1) * 0.3));
+    // Raid-scale Boss HP & damage calibrated for Recommended Level 60 builds
+    const bossHp = Math.round(120000 * hpMult * Math.pow(1.85, tier - 1));
+    const bossDmg = Math.round(48 * (1 + (tier - 1) * 0.35));
+    const recommendedLevel = BOSS_RECOMMENDED_LEVEL + (tier - 1) * 15;
 
     const edata: EnemyData = {
       type: 'boss',
       hp: bossHp,
       maxHp: bossHp,
-      speed: Math.round(78 * speedMult),
+      speed: Math.round(105 * speedMult),
       damage: bossDmg,
-      scoreValue: 500 * tier,
-      gemValue: 30,
+      scoreValue: 1500 * tier,
+      gemValue: 45,
       lastAttack: this.time.now,
       knockbackX: 0,
       knockbackY: 0,
       dropsChest: true,
-      coinDrops: 12,
+      coinDrops: 30 * tier,
     };
     boss.setData('data', edata);
     boss.setData('bossTier', tier);
     boss.setData('isAttacking', false);
     boss.setData('attackShockwaveDone', false);
+    boss.setData('enraged', false);
+    boss.setData('lastBossSummon', this.time.now);
     this.activeBoss = boss;
 
     // Start with boss_idle and randomize start frame
     boss.play('boss_idle');
     boss.anims.setProgress(Math.random());
 
-    // On boss_attack frame index 10: deal area damage, add camera shake 0.01, spawn fx_ring shockwave
+    // On boss_attack frame index 10: deal area damage, add camera shake, spawn fx_ring shockwave
     boss.on(
       Phaser.Animations.Events.ANIMATION_UPDATE,
       (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
@@ -3389,6 +3810,8 @@ export class MainScene extends Phaser.Scene {
       currentHp: bossHp,
       maxHp: bossHp,
       active: true,
+      recommendedLevel,
+      enraged: false,
     });
   }
 
@@ -3397,8 +3820,8 @@ export class MainScene extends Phaser.Scene {
     if (!boss.active) return;
     const edata = boss.getData('data') as EnemyData | undefined;
 
-    // fx_slam_sheet: 448x252, 14 frames, 14 fps, scaled to damage radius; area damage on frame 8
-    this.spawnBossGroundSlam(boss.x, boss.y, 260, edata?.damage ?? 35);
+    // fx_slam_sheet: 448x252, 14 frames, 14 fps, scaled to 295px damage radius; area damage on frame 8
+    this.spawnBossGroundSlam(boss.x, boss.y, 295, edata?.damage ?? 48);
 
     // Keep fx_ring shockwave as static fallback with ADD blend mode
     const ring = this.add
@@ -3472,14 +3895,34 @@ export class MainScene extends Phaser.Scene {
     }
 
     // Apply knockback
-    const resist = edata.type === 'boss' ? 0.05 : edata.type === 'brute' || edata.isElite ? 0.25 : 1;
+    const resist = edata.type === 'boss' ? 0.01 : edata.type === 'brute' || edata.isElite ? 0.25 : 1;
     edata.knockbackX += knockbackX * resist;
     edata.knockbackY += knockbackY * resist;
 
-    // White flash on hit
-    enemy.setTint(0xffffff);
-    this.time.delayedCall(70, () => {
-      if (enemy.active) enemy.clearTint();
+    // Color-flash on hit (golden/crimson burst for critical hits, crisp white flash otherwise)
+    const isHeavyEnemy = Boolean(edata.isElite || edata.type === 'boss');
+    if (isCrit) {
+      enemy.setTint(isHeavyEnemy ? 0xff4d5a : 0xf2a93b);
+      gameManager.emitCritImpact({
+        damage,
+        x: enemy.x,
+        y: enemy.y,
+        isEliteOrBoss: isHeavyEnemy,
+      });
+    } else {
+      enemy.setTint(0xffffff);
+    }
+
+    this.time.delayedCall(isCrit ? 95 : 70, () => {
+      if (enemy.active) {
+        if (enemy.getData('enraged')) {
+          enemy.setTint(0xff7a7a);
+        } else if (edata.isElite) {
+          enemy.setTint((ELITE_AURA_STYLE[edata.type] ?? ELITE_AURA_STYLE.brute).spriteTint);
+        } else {
+          enemy.clearTint();
+        }
+      }
     });
 
     // Spawn floating damage text
@@ -3493,12 +3936,30 @@ export class MainScene extends Phaser.Scene {
 
   private killEnemy(enemy: Phaser.Physics.Arcade.Sprite, edata: EnemyData) {
     this.enemiesKilled++;
+    bestiary.recordKill(edata.type);
     dailyMissions.recordIncrement('kill_enemies', 1);
+    achievements.recordIncrement('totalKills', 1);
     if (edata.isElite) {
       dailyMissions.recordIncrement('kill_elites', 1);
+      achievements.recordIncrement('elitesSlain', 1);
     }
     if (edata.type === 'boss') {
       dailyMissions.recordIncrement('kill_bosses', 1);
+      achievements.recordIncrement('bossesDefeated', 1);
+    }
+
+    // Horde Frenzy detection: rapid kill surge OR high cumulative kill milestone
+    this.checkHordeFrenzyTrigger();
+    if (this.playerStats.eliteKillHeal > 0 && (edata.isElite || edata.type === 'boss')) {
+      const prevHp = this.playerStats.currentHp;
+      this.playerStats.currentHp = Math.min(
+        this.playerStats.maxHp,
+        this.playerStats.currentHp + this.playerStats.eliteKillHeal
+      );
+      const healed = Math.round(this.playerStats.currentHp - prevHp);
+      if (healed > 0) {
+        this.showFloatingCallout(this.player.x, this.player.y - 36, `+${healed} HP`, '#6ee7b7');
+      }
     }
     soundManager.playEnemyDeath();
 
@@ -3520,11 +3981,25 @@ export class MainScene extends Phaser.Scene {
     // Death particle burst
     this.spawnParticleBurst(enemy.x, enemy.y, 10, 'fx_spark', 100, 240, 0.2, 0.4);
 
-    // Drop XP Gem (+50% during Darkness Falls event)
+    // Drop XP Gem (+50% during Darkness Falls event; Elites scatter extra bonus XP orbs)
     const xpMult =
       this.darknessFallsTimerMs > 0 ? 1 + LIGHT.progression.darknessFalls.xpDropBonus : 1;
     const gemXp = Math.max(1, Math.round(edata.gemValue * xpMult));
     this.spawnPickup(enemy.x, enemy.y, 'gem', gemXp);
+    if (edata.isElite) {
+      const bonusOrbXp = Math.max(3, Math.round(gemXp * 0.45));
+      for (let i = 0; i < ELITE_VARIANTS.bonusXpOrbs; i++) {
+        const angle = (i * Math.PI * 2) / ELITE_VARIANTS.bonusXpOrbs + Math.random() * 0.6;
+        this.spawnPickup(
+          enemy.x + Math.cos(angle) * 24,
+          enemy.y + Math.sin(angle) * 24,
+          'gem',
+          bonusOrbXp
+        );
+      }
+      const totalEliteXp = gemXp + bonusOrbXp * ELITE_VARIANTS.bonusXpOrbs;
+      this.showFloatingCallout(enemy.x, enemy.y - 34, `ELITE +${totalEliteXp} XP`, '#f2a93b');
+    }
 
     // Soul Coins (guaranteed for Elites/Brutes/Bosses or chance roll)
     const coinRoll = Math.random();
@@ -3590,6 +4065,50 @@ export class MainScene extends Phaser.Scene {
     }
 
     enemy.destroy();
+  }
+
+  private checkHordeFrenzyTrigger(): void {
+    const nowRunMs = this.runTime * 1000;
+    const windowStart = nowRunMs - HORDE_FRENZY.killSurgeWindowMs;
+    this.recentKillTimesMs.push(nowRunMs);
+    while (this.recentKillTimesMs.length > 0 && this.recentKillTimesMs[0] < windowStart) {
+      this.recentKillTimesMs.shift();
+    }
+
+    if (this.bloodFogTimerMs > 0 || this.bloodFogCooldownMs > 0) {
+      return;
+    }
+
+    const hitSurge = this.recentKillTimesMs.length >= HORDE_FRENZY.killSurgeThreshold;
+    const hitMilestone = this.enemiesKilled >= this.nextFrenzyKillMilestone;
+    if (!hitSurge && !hitMilestone) {
+      return;
+    }
+
+    this.bloodFogTimerMs = HORDE_FRENZY.durationMs;
+    this.recentKillTimesMs = [];
+    this.nextFrenzyKillMilestone =
+      Math.floor(this.enemiesKilled / HORDE_FRENZY.killMilestoneStep) *
+        HORDE_FRENZY.killMilestoneStep +
+      HORDE_FRENZY.killMilestoneStep;
+
+    this.screenEdgeFlashAlpha = 0.95;
+    soundManager.playBossWarning();
+    this.cameraController.triggerShake(260, 0.008);
+    this.showFloatingCallout(
+      this.player.x,
+      this.player.y - 54,
+      'HORDE FRENZY: BLOOD FOG!',
+      '#ff4d5a'
+    );
+
+    if (!this.pendingEvent) {
+      gameManager.emitEventWarning({
+        title: 'HORDE FRENZY · BLOOD FOG',
+        subtitle: 'Blood mist rises for 30s — +35% Enemy Speed & +65% Horde Density',
+      });
+      this.bloodFogBannerTimerMs = 2800;
+    }
   }
 
   // -------------------------------------------------------------
@@ -3686,6 +4205,7 @@ export class MainScene extends Phaser.Scene {
       soundManager.playCoinCollect();
       this.coinsEarned += value;
       dailyMissions.recordIncrement('collect_coins', value);
+      achievements.recordIncrement('totalCoinsEarned', value);
       this.spawnParticleBurst(pickup.x, pickup.y, 5, 'fx_spark', 60, 140, 0.15, 0.28, 0xffd700);
       if (this.activeChallenge?.status === 'active' && this.activeChallenge.id === 'no_coin_greed') {
         this.failDynamicChallenge('Collected a Soul Coin');
@@ -3730,14 +4250,56 @@ export class MainScene extends Phaser.Scene {
   // -------------------------------------------------------------
   // XP & Level Up System
   // -------------------------------------------------------------
+  private computeNextLevelXp(
+    newLevel: number,
+    prevRequiredXp: number
+  ): { nextXp: number; isMilestoneGap: boolean } {
+    const isMilestoneGap =
+      newLevel > 0 && newLevel % BALANCE.xp.milestoneInterval === 0;
+
+    if (isMilestoneGap) {
+      const tier = Math.floor(newLevel / BALANCE.xp.milestoneInterval);
+      const milestoneXp =
+        Math.round(prevRequiredXp * BALANCE.xp.milestoneMultiplier) +
+        BALANCE.xp.milestoneFlatPerTier * tier;
+      return {
+        nextXp: Math.max(prevRequiredXp + BALANCE.xp.milestoneFlatPerTier, milestoneXp),
+        isMilestoneGap: true,
+      };
+    }
+
+    const scaledNext =
+      Math.round(prevRequiredXp * BALANCE.xp.xpGrowthMultiplier) +
+      BALANCE.xp.xpFlatIncrement;
+    return {
+      nextXp: Math.max(prevRequiredXp + BALANCE.xp.xpFlatIncrement, scaledNext),
+      isMilestoneGap: false,
+    };
+  }
+
   private addXp(amount: number) {
     this.currentXp += Math.max(1, Math.round(amount * (1 + this.xpMultiplierBonus)));
     if (this.currentXp >= this.nextLevelXp) {
       this.currentXp -= this.nextLevelXp;
       this.playerLevel++;
       dailyMissions.recordMax('reach_level', this.playerLevel);
-      // +15% more XP needed each level
-      this.nextLevelXp = Math.round(this.nextLevelXp * BALANCE.xp.xpGrowthMultiplier);
+      achievements.recordMax('highestLevel', this.playerLevel);
+
+      const { nextXp, isMilestoneGap } = this.computeNextLevelXp(
+        this.playerLevel,
+        this.nextLevelXp
+      );
+      this.nextLevelXp = nextXp;
+
+      if (isMilestoneGap) {
+        this.showFloatingCallout(
+          this.player.x,
+          this.player.y - 66,
+          `LV.${this.playerLevel} · HARDCORE XP SURGE!`,
+          '#f2a93b'
+        );
+      }
+
       this.triggerLevelUp();
     }
   }
@@ -3981,6 +4543,7 @@ export class MainScene extends Phaser.Scene {
 
     this.coinsEarned += challenge.rewardCoins;
     dailyMissions.recordIncrement('collect_coins', challenge.rewardCoins);
+    achievements.recordIncrement('totalCoinsEarned', challenge.rewardCoins);
 
     switch (challenge.id) {
       case 'no_red_shards':
@@ -4124,10 +4687,13 @@ export class MainScene extends Phaser.Scene {
 
     soundManager.playGameOverStinger();
 
-    // Bank earned coins & flush Daily Missions on run completion
+    // Bank earned coins & flush Daily Missions + Bestiary on run completion
     saveCoins(getSavedCoins() + this.coinsEarned);
     dailyMissions.recordIncrement('play_runs', 1);
+    achievements.recordIncrement('runsCompleted', 1);
     dailyMissions.flush();
+    achievements.flush();
+    bestiary.flush();
 
     this.tweens.add({
       targets: this.player,
@@ -4312,6 +4878,11 @@ export class MainScene extends Phaser.Scene {
     const playerDps = Math.round(recentDamageSum / (windowMs / 1000));
     const currentMinute = Math.floor(this.runTime / 60);
 
+    const dashCooldownProgress =
+      this.dashChargesRemaining < this.playerStats.dashCharges && this.playerStats.dashCooldownMs > 0
+        ? Math.min(1, this.dashRechargeTimerMs / this.playerStats.dashCooldownMs)
+        : 1;
+
     gameManager.emitStats({
       hp: this.playerStats.currentHp,
       maxHp: this.playerStats.maxHp,
@@ -4330,7 +4901,14 @@ export class MainScene extends Phaser.Scene {
         this.redShardTimerMs > 0 ? Math.ceil(this.redShardTimerMs / 1000) : 0,
       darknessFallsRemainingSec:
         this.darknessFallsTimerMs > 0 ? Math.ceil(this.darknessFallsTimerMs / 1000) : 0,
+      bloodFogRemainingSec:
+        this.bloodFogTimerMs > 0 ? Math.ceil(this.bloodFogTimerMs / 1000) : 0,
       activeChallenge: this.activeChallenge ? { ...this.activeChallenge } : null,
+      dashCharges: this.dashChargesRemaining,
+      maxDashCharges: this.playerStats.dashCharges,
+      dashCooldownProgress,
+      equippedRelicIds: this.playerStats.equippedRelicIds,
+      activeRelicSynergies: this.playerStats.activeRelicSynergies,
       debug: {
         fps,
         enemyCount,
@@ -4348,13 +4926,18 @@ export class MainScene extends Phaser.Scene {
       this.lightShardTimerMs > 0 ? 1 + LIGHT.progression.lightShard.radiusBonus : 1;
     const darknessFallsMult =
       this.darknessFallsTimerMs > 0 ? 1 - LIGHT.progression.darknessFalls.radiusPenalty : 1;
-    return lanternMult * shardMult * darknessFallsMult;
+    const relicMult = this.playerStats?.lightRadiusMultiplier ?? 1;
+    return lanternMult * shardMult * darknessFallsMult * relicMult;
   }
 
   // Comprehensive pause / resume (physics, timers, tweens, animations, darkness, audio)
   public pauseGame() {
     this.isGamePaused = true;
+    this.hitstopTimer = 0;
+    this.isHitstopPausedPhysics = false;
     dailyMissions.flush();
+    achievements.flush();
+    bestiary.flush();
     this.physics.pause();
     this.time.paused = true;
     this.tweens.pauseAll();
@@ -4398,6 +4981,7 @@ export class MainScene extends Phaser.Scene {
       lightRadiusMultiplier: this.getLightRadiusMultiplier(),
       hasNightEyes: this.hasNightEyes,
       isDarknessFallsActive: this.darknessFallsTimerMs > 0,
+      isBloodFogActive: this.bloodFogTimerMs > 0,
       isGamePaused: this.isGamePaused,
       isDead: this.isDead,
     };
