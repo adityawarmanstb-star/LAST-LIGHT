@@ -107,6 +107,12 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             {stats.victory
               ? 'You vanquished the Void Titan and reclaimed the dark.'
               : `Reached Lv. ${stats.levelReached} before the shadows closed in.`}
+            {(stats.challengesCompleted ?? 0) > 0 && (
+              <span className="block mt-1 text-[#f2a93b] font-semibold">
+                {stats.challengesCompleted} Dynamic{' '}
+                {stats.challengesCompleted === 1 ? 'Pact' : 'Pacts'} Cleared
+              </span>
+            )}
           </p>
         </div>
 

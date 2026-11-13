@@ -1,7 +1,20 @@
-import React, { useEffect, useState } from 'react';
-import { Play, ShoppingBag, Volume2, VolumeX, Coins, Settings, ScrollText } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  Play,
+  ShoppingBag,
+  Volume2,
+  VolumeX,
+  Coins,
+  Settings,
+  ScrollText,
+  Flame,
+} from 'lucide-react';
 import { getSavedCoins, subscribeCoins } from '../game/metaProgression';
 import { dailyMissions } from '../game/dailyMissions';
+import { dailyStreak } from '../game/dailyStreak';
+import { soundManager } from '../game/audio';
+import { DailyStreakState } from '../game/types';
+import { haptics } from '../mobile/haptics';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 
 interface TitleScreenProps {
@@ -55,15 +68,61 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   const [unclaimedMissions, setUnclaimedMissions] = useState<number>(() =>
     dailyMissions.getUnclaimedCount()
   );
+  const [streak, setStreak] = useState<DailyStreakState>(() => dailyStreak.getState());
+  const [streakBonusToast, setStreakBonusToast] = useState<{
+    streak: number;
+    coins: number;
+    streakContinued: boolean;
+  } | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     const unsubCoins = subscribeCoins(setBankCoins);
     const unsubMissions = dailyMissions.subscribe(() => {
       setUnclaimedMissions(dailyMissions.getUnclaimedCount());
     });
+
+    const claimDailyLogin = () => {
+      const result = dailyStreak.checkAndClaimDailyLogin();
+      setStreak(result.state);
+      setBankCoins(getSavedCoins());
+
+      if (result.awardedToday && result.rewardCoins > 0) {
+        setStreakBonusToast({
+          streak: result.state.currentStreak,
+          coins: result.rewardCoins,
+          streakContinued: result.streakContinued,
+        });
+        haptics.tap('medium');
+        soundManager.playCoinCollect();
+
+        if (toastTimerRef.current !== null) {
+          window.clearTimeout(toastTimerRef.current);
+        }
+        toastTimerRef.current = window.setTimeout(() => {
+          toastTimerRef.current = null;
+          setStreakBonusToast(null);
+        }, 4500);
+      }
+    };
+
+    claimDailyLogin();
+
+    const handleVisibility = () => {
+      if (!document.hidden) {
+        claimDailyLogin();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       unsubCoins();
       unsubMissions();
+      document.removeEventListener('visibilitychange', handleVisibility);
+      if (toastTimerRef.current !== null) {
+        window.clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = null;
+      }
     };
   }, []);
 
@@ -78,6 +137,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onStartGame, isModalOpen]);
+
+  const nextDayReward = dailyStreak.getNextDayReward(streak.currentStreak);
 
   return (
     <div
@@ -110,26 +171,57 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         ))}
       </div>
 
-      {/* Top Bar: Bank Coins & 56px Iron Mute Button */}
-      <div className="relative z-10 w-full max-w-5xl flex items-center justify-between pt-1 px-1">
-        <ForgedIronFrame
-          seed="title-coins-panel"
-          dripCount={2}
-          maxDripLength={12}
-          contentClassName="px-4 py-2.5 flex items-center gap-2.5 min-h-[56px]"
-        >
-          <Coins className="w-4 h-4 text-[#f2a93b]" />
-          <span className="text-xs text-[#9c8e72] font-medium">Soul Coins</span>
-          <span className="font-mono-numbers font-semibold text-[#d8c9a8] text-sm">
-            {bankCoins}
-          </span>
-        </ForgedIronFrame>
+      {/* Top Bar: Bank Coins, Daily Streak & 56px Iron Mute Button */}
+      <div className="relative z-10 w-full max-w-5xl flex items-center justify-between gap-2 pt-1 px-1">
+        <div className="flex items-center gap-2 min-w-0">
+          <ForgedIronFrame
+            seed="title-coins-panel"
+            dripCount={2}
+            maxDripLength={12}
+            contentClassName="px-3 sm:px-4 py-2.5 flex items-center gap-2 sm:gap-2.5 min-h-[56px]"
+          >
+            <Coins className="w-4 h-4 text-[#f2a93b] shrink-0" />
+            <span className="text-[11px] sm:text-xs text-[#9c8e72] font-medium whitespace-nowrap">
+              <span className="hidden sm:inline">Soul </span>Coins
+            </span>
+            <span className="font-mono-numbers font-semibold text-[#d8c9a8] text-sm">
+              {bankCoins}
+            </span>
+          </ForgedIronFrame>
+
+          <ForgedIronFrame
+            seed="title-streak-panel"
+            dripCount={2}
+            maxDripLength={12}
+            borderColor={streak.currentStreak > 1 ? '#f2a93b' : undefined}
+            contentClassName="px-3 sm:px-4 py-2.5 flex items-center gap-2 min-h-[56px]"
+          >
+            <Flame
+              className="w-4 h-4 text-[#e5303a] shrink-0"
+              aria-hidden="true"
+            />
+            <div
+              className="flex items-center gap-1.5 whitespace-nowrap"
+              title={`Daily Streak: Day ${streak.currentStreak} · Best: ${streak.bestStreak}d · Tomorrow: +${nextDayReward} Coins`}
+            >
+              <span className="text-[11px] sm:text-xs text-[#9c8e72] font-medium hidden sm:inline">
+                Streak
+              </span>
+              <span className="font-mono-numbers font-semibold text-[#f2a93b] text-xs sm:text-sm">
+                Day {Math.max(1, streak.currentStreak)}
+              </span>
+              <span className="hidden md:inline text-[11px] text-[#9c8e72]">
+                · Next +{nextDayReward}
+              </span>
+            </div>
+          </ForgedIronFrame>
+        </div>
 
         <IronButton
           seed="title-mute-btn"
           dripCount={2}
           onClick={onToggleMute}
-          className="w-14 h-14 min-h-[56px] min-w-[56px]"
+          className="w-14 h-14 min-h-[56px] min-w-[56px] shrink-0"
           aria-label={isMuted ? 'Unmute Sound' : 'Mute Sound'}
           title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
         >
@@ -140,6 +232,52 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           )}
         </IronButton>
       </div>
+
+      {/* Daily Login Streak Bonus Banner */}
+      {streakBonusToast && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-sm pointer-events-none"
+          style={{
+            top: 'calc(max(16px, env(safe-area-inset-top)) + 68px)',
+          }}
+        >
+          <div className="mission-banner-enter">
+            <ForgedIronFrame
+              seed={`daily-streak-toast-${streakBonusToast.streak}`}
+              dripCount={3}
+              maxDripLength={12}
+              borderColor="#f2a93b"
+              glowColor="#f2a93b"
+              glowStrength={14}
+              contentClassName="px-4 py-2.5 flex items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-9 h-9 rounded-[8px] bg-[#121417] border border-[#f2a93b]/70 flex items-center justify-center shrink-0">
+                  <Flame className="w-4 h-4 text-[#e5303a]" />
+                </div>
+                <div className="flex flex-col min-w-0 text-left">
+                  <span className="font-display text-xs font-bold tracking-[0.12em] text-[#f2a93b] uppercase">
+                    Day {streakBonusToast.streak} Daily Streak
+                  </span>
+                  <span className="text-[11px] text-[#9c8e72] truncate">
+                    {streakBonusToast.streakContinued
+                      ? 'Consecutive login bonus awarded'
+                      : 'Daily login bonus awarded'}
+                  </span>
+                </div>
+              </div>
+              <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-[7px] bg-[#121417]/90 border border-[#f2a93b]/55">
+                <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
+                <span className="font-mono-numbers text-xs font-bold text-[#f2a93b]">
+                  +{streakBonusToast.coins}
+                </span>
+              </div>
+            </ForgedIronFrame>
+          </div>
+        </div>
+      )}
 
       {/* Main Centerpiece */}
       <div className="relative z-10 flex flex-col items-center max-w-md w-full text-center my-auto px-2">

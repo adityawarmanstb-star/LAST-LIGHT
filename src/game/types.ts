@@ -55,6 +55,34 @@ export interface RunStats {
   levelReached: number;
   damageDealt: number;
   victory: boolean;
+  challengesCompleted?: number;
+}
+
+export type DynamicChallengeId =
+  | 'no_red_shards'
+  | 'no_coin_greed'
+  | 'untouchable'
+  | 'stand_firm'
+  | 'cull_the_horde'
+  | 'light_purist';
+
+export interface DynamicChallengeOffer {
+  id: DynamicChallengeId;
+  title: string;
+  description: string;
+  constraintLabel: string;
+  rewardCoins: number;
+  rewardBuffLabel: string;
+  targetValue: number;
+  timeLimitSec?: number;
+  icon: 'shard' | 'coins' | 'shield' | 'flame' | 'skull' | 'sun';
+}
+
+export interface ActiveDynamicChallenge extends DynamicChallengeOffer {
+  progress: number;
+  elapsedSec: number;
+  status: 'active' | 'completed' | 'failed';
+  statusNote: string;
 }
 
 export interface BossInfo {
@@ -106,3 +134,11 @@ export interface DailyMissionsState {
   dateKey: string;
   missions: DailyMission[];
 }
+
+export interface DailyStreakState {
+  currentStreak: number;
+  bestStreak: number;
+  lastLoginDateKey: string;
+  lastRewardCoins: number;
+}
+

@@ -1,10 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, Skull, Heart, AlertTriangle, ScrollText } from 'lucide-react';
-import { dailyMissions } from '../game/dailyMissions';
-import { BossInfo, DailyMission, DebugStats, EventWarningInfo, WeaponState } from '../game/types';
+import { Coins, Skull, Heart, AlertTriangle } from 'lucide-react';
+import {
+  ActiveDynamicChallenge,
+  BossInfo,
+  DebugStats,
+  EventWarningInfo,
+  WeaponState,
+} from '../game/types';
 import { VirtualJoystick } from './VirtualJoystick';
 import { ForgedIronFrame } from './ForgedIronFrame';
 import { BloodHpBar } from './BloodHpBar';
+import { BossHealthOverlay } from './BossHealthOverlay';
 import { haptics } from '../mobile/haptics';
 
 interface HUDProps {
@@ -21,7 +27,9 @@ interface HUDProps {
   combo: number;
   isUnderPressure: boolean;
   lightShardRemainingSec?: number;
+  redShardRemainingSec?: number;
   darknessFallsRemainingSec?: number;
+  activeChallenge?: ActiveDynamicChallenge | null;
   debugStats: DebugStats;
   eventWarning: EventWarningInfo | null;
   isMuted: boolean;
@@ -46,33 +54,33 @@ export const HUD: React.FC<HUDProps> = ({
   combo,
   isUnderPressure,
   lightShardRemainingSec = 0,
+  redShardRemainingSec = 0,
   darknessFallsRemainingSec = 0,
+  activeChallenge = null,
   debugStats,
   eventWarning,
   onSpawnBossNow,
 }) => {
   const [showDebug, setShowDebug] = useState(false);
-  const [missionToast, setMissionToast] = useState<DailyMission | null>(null);
   const debugTapTimestampsRef = useRef<number[]>([]);
+  const prevCoinsRef = useRef<number>(coins);
+  const prevLevelRef = useRef<number>(level);
+  const [coinPopSeq, setCoinPopSeq] = useState<number>(0);
+  const [levelPopSeq, setLevelPopSeq] = useState<number>(0);
 
   useEffect(() => {
-    let dismissTimer: number | null = null;
-    const unsub = dailyMissions.onMissionCompleted((mission) => {
-      setMissionToast(mission);
-      if (dismissTimer !== null) {
-        window.clearTimeout(dismissTimer);
-      }
-      dismissTimer = window.setTimeout(() => {
-        setMissionToast(null);
-      }, 3200);
-    });
-    return () => {
-      unsub();
-      if (dismissTimer !== null) {
-        window.clearTimeout(dismissTimer);
-      }
-    };
-  }, []);
+    if (coins > prevCoinsRef.current) {
+      setCoinPopSeq((seq) => seq + 1);
+    }
+    prevCoinsRef.current = coins;
+  }, [coins]);
+
+  useEffect(() => {
+    if (level > prevLevelRef.current) {
+      setLevelPopSeq((seq) => seq + 1);
+    }
+    prevLevelRef.current = level;
+  }, [level]);
 
   const handleDebugHotspotTap = () => {
     const now = Date.now();
@@ -183,7 +191,12 @@ export const HUD: React.FC<HUDProps> = ({
                   <span className="text-[#8e8168]"> / {maxHp}</span>
                 </span>
               </div>
-              <span className="font-mono-numbers font-semibold text-[#d8c9a8]">
+              <span
+                key={`hud-lv-${levelPopSeq}`}
+                className={`inline-block font-mono-numbers font-semibold text-[#d8c9a8] ${
+                  levelPopSeq > 0 ? 'hud-level-pop' : ''
+                }`}
+              >
                 Lv. {level}
               </span>
             </div>
@@ -195,6 +208,7 @@ export const HUD: React.FC<HUDProps> = ({
           {(combo > 1 ||
             isUnderPressure ||
             lightShardRemainingSec > 0 ||
+            redShardRemainingSec > 0 ||
             darknessFallsRemainingSec > 0) && (
             <div className="flex flex-wrap items-center gap-2 text-[11px] max-w-[260px]">
               {combo > 1 && (
@@ -238,6 +252,20 @@ export const HUD: React.FC<HUDProps> = ({
                   <span className="font-mono-numbers font-bold">{lightShardRemainingSec}s</span>
                 </ForgedIronFrame>
               )}
+              {redShardRemainingSec > 0 && (
+                <ForgedIronFrame
+                  seed="hud-red-shard-badge"
+                  dripCount={2}
+                  maxDripLength={8}
+                  borderColor="#e5303a"
+                  contentClassName="px-2.5 py-1 flex items-center gap-1.5 text-[#e5303a]"
+                >
+                  <span className="font-semibold tracking-wide text-[10px] uppercase">
+                    Blood +15% DMG
+                  </span>
+                  <span className="font-mono-numbers font-bold">{redShardRemainingSec}s</span>
+                </ForgedIronFrame>
+              )}
               {darknessFallsRemainingSec > 0 && (
                 <ForgedIronFrame
                   seed="hud-darkness-badge"
@@ -255,6 +283,67 @@ export const HUD: React.FC<HUDProps> = ({
                 </ForgedIronFrame>
               )}
             </div>
+          )}
+
+          {/* Active Dynamic Challenge Pact Tracker */}
+          {activeChallenge && (
+            <ForgedIronFrame
+              seed={`hud-challenge-${activeChallenge.id}`}
+              dripCount={2}
+              maxDripLength={10}
+              borderColor={
+                activeChallenge.status === 'completed'
+                  ? '#f2a93b'
+                  : activeChallenge.status === 'failed'
+                    ? '#b3121a'
+                    : '#f2a93b'
+              }
+              glowColor={
+                activeChallenge.status === 'failed' ? '#e5303a' : '#f2a93b'
+              }
+              glowStrength={activeChallenge.status === 'active' ? 5 : 10}
+              className="max-w-[232px]"
+              contentClassName="px-2.5 py-1.5 flex flex-col gap-0.5 text-[11px]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold text-[#d8c9a8] truncate">
+                  {activeChallenge.title}
+                </span>
+                <span
+                  className={`text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                    activeChallenge.status === 'completed'
+                      ? 'text-[#f2a93b]'
+                      : activeChallenge.status === 'failed'
+                        ? 'text-[#e5303a]'
+                        : 'text-[#5de4ff]'
+                  }`}
+                >
+                  {activeChallenge.status === 'completed'
+                    ? 'Cleared'
+                    : activeChallenge.status === 'failed'
+                      ? 'Failed'
+                      : 'Pact'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-[10px] font-mono-numbers">
+                <span
+                  className={
+                    activeChallenge.status === 'failed'
+                      ? 'text-[#e5303a]'
+                      : activeChallenge.status === 'completed'
+                        ? 'text-[#f2a93b]'
+                        : 'text-[#9c8e72]'
+                  }
+                >
+                  {activeChallenge.statusNote}
+                </span>
+                {activeChallenge.status === 'active' && (
+                  <span className="text-[#f2a93b] font-semibold shrink-0">
+                    +{activeChallenge.rewardCoins}c
+                  </span>
+                )}
+              </div>
+            </ForgedIronFrame>
           )}
 
           {/* Hidden Debug Overlay (toggled via 5 taps in top-left corner) */}
@@ -339,7 +428,11 @@ export const HUD: React.FC<HUDProps> = ({
               <span className="font-mono-numbers font-semibold text-[#d8c9a8]">{kills}</span>
             </div>
             <span className="h-3.5 w-px bg-[#3a3f47]" aria-hidden="true" />
-            <div className="flex items-center gap-1.5" title="Coins">
+            <div
+              key={`hud-coin-${coinPopSeq}`}
+              className={`flex items-center gap-1.5 ${coinPopSeq > 0 ? 'hud-coin-pop' : ''}`}
+              title="Coins"
+            >
               <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
               <span className="font-mono-numbers font-semibold text-[#d8c9a8]">{coins}</span>
             </div>
@@ -373,74 +466,8 @@ export const HUD: React.FC<HUDProps> = ({
         </div>
       )}
 
-      {/* Non-blocking Daily Mission Completed Toast */}
-      {missionToast && !eventWarning && (
-        <div className="w-full max-w-sm mx-auto px-4 pointer-events-none">
-          <ForgedIronFrame
-            seed={`mission-toast-${missionToast.id}`}
-            dripCount={2}
-            maxDripLength={10}
-            borderColor="#f2a93b"
-            glowColor="#f2a93b"
-            glowStrength={10}
-            contentClassName="px-4 py-2 flex items-center gap-3 justify-center text-center"
-          >
-            <ScrollText className="w-4 h-4 text-[#f2a93b] shrink-0" />
-            <div className="flex flex-col">
-              <span className="font-display text-xs font-bold tracking-wider text-[#f2a93b]">
-                MISSION COMPLETE
-              </span>
-              <span className="text-[11px] text-[#d8c9a8]">
-                {missionToast.title} · +{missionToast.rewardCoins} Coins
-              </span>
-            </div>
-          </ForgedIronFrame>
-        </div>
-      )}
-
-      {/* Boss Health Bar (centered below timer when active) */}
-      {boss && (
-        <div className="w-full max-w-lg mx-auto px-4 -mt-4">
-          <ForgedIronFrame
-            seed={`boss-bar-${boss.name}`}
-            dripCount={4}
-            maxDripLength={18}
-            borderColor="#b3121a"
-            glowColor="#e5303a"
-            glowStrength={8}
-            contentClassName="p-3.5"
-          >
-            <div className="flex items-center justify-between text-xs mb-2">
-              <span className="font-display font-bold tracking-wider text-[#e5303a]">
-                {boss.name}
-              </span>
-              <span className="font-mono-numbers text-xs text-[#d8c9a8]">
-                {boss.currentHp} / {boss.maxHp}
-              </span>
-            </div>
-            <div
-              className="w-full h-3 rounded-full overflow-hidden"
-              style={{
-                background: 'linear-gradient(180deg, #0b0c0e 0%, #14161a 100%)',
-                borderTop: '1.5px solid #4a515e',
-                borderBottom: '1.5px solid #07080a',
-                borderLeft: '1.5px solid #3a3f47',
-                borderRight: '1.5px solid #090a0c',
-              }}
-            >
-              <div
-                className="h-full rounded-full transition-all duration-150 ease-out"
-                style={{
-                  width: `${Math.max(0, Math.min(100, (boss.currentHp / Math.max(1, boss.maxHp)) * 100))}%`,
-                  background:
-                    'linear-gradient(180deg, #e5303a 0%, #b3121a 55%, #3a0a0e 100%)',
-                  boxShadow: '0 0 12px rgba(229, 48, 58, 0.6)',
-                }}
-              />
-            </div>
-          </ForgedIronFrame>
-        </div>
-      )}
+      {/* Persistent Boss Health Overlay (fixed top-center when boss is active) */}
+      <BossHealthOverlay boss={boss} />
 
       {/* Bottom Area: Quiet unboxed weapon levels on bottom-right (keeps bottom-left clear for joystick) */}
       <div

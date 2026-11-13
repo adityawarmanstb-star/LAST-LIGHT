@@ -1,5 +1,16 @@
 import React from 'react';
-import { Volume2, VolumeX, X, Sparkles, Music, Zap, Sliders, Sun, Smartphone } from 'lucide-react';
+import {
+  Volume2,
+  VolumeX,
+  X,
+  Sparkles,
+  Music,
+  Zap,
+  Sliders,
+  Sun,
+  Smartphone,
+  BookOpen,
+} from 'lucide-react';
 import { soundManager } from '../game/audio';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 
@@ -18,6 +29,7 @@ interface SettingsModalProps {
   onBrightnessChange: (val: number) => void;
   onToggleMute: () => void;
   onToggleHaptics: () => void;
+  onOpenHowToPlay: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -35,6 +47,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onBrightnessChange,
   onToggleMute,
   onToggleHaptics,
+  onOpenHowToPlay,
 }) => {
   if (!isOpen) return null;
 
@@ -65,8 +78,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         seed="settings-modal-panel"
         dripCount={3}
         maxDripLength={20}
-        className="w-full max-w-md"
-        contentClassName="relative p-6 sm:p-7"
+        className="w-full max-w-md max-h-[90vh] flex flex-col"
+        contentClassName="relative p-6 sm:p-7 overflow-y-auto"
       >
         {/* Close Button (56px touch target) */}
         <IronButton
@@ -306,6 +319,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <span>Gem</span>
               </IronButton>
             </div>
+          </div>
+
+          {/* How to Play Guide Row */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <BookOpen className="w-4 h-4 text-[#5de4ff]" />
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-[#d8c9a8]">How to Play</span>
+                <span className="text-[11px] text-[#8e8168]">Controls &amp; auto-fire guide</span>
+              </div>
+            </div>
+
+            <IronButton
+              seed="settings-how-to-play-btn"
+              dripCount={0}
+              onClick={() => {
+                soundManager.playUiClick();
+                onOpenHowToPlay();
+              }}
+              className="min-h-[56px] px-4 text-xs font-semibold whitespace-nowrap shrink-0"
+            >
+              <span>View Guide</span>
+            </IronButton>
           </div>
         </div>
 

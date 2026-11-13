@@ -4,7 +4,22 @@ import { gameManager } from '../GameManager';
 import { calculateBasePlayerStats, saveCoins, getSavedCoins } from '../metaProgression';
 import { dailyMissions } from '../dailyMissions';
 import { haptics } from '../../mobile/haptics';
-import { BossInfo, PlayerStats, RunStats, UpgradeOption, WeaponState } from '../types';
+import { CameraController } from '../CameraController';
+import { AtmosphereOverlay } from '../AtmosphereOverlay';
+import {
+  ActiveDynamicChallenge,
+  BossInfo,
+  DynamicChallengeOffer,
+  PlayerStats,
+  RunStats,
+  UpgradeOption,
+  WeaponState,
+} from '../types';
+import {
+  createActiveDynamicChallenge,
+  formatChallengeProgressText,
+  pickDynamicChallengeOffer,
+} from '../dynamicChallenges';
 import { getAvailableUpgrades } from '../upgrades';
 
 // =========================================================================
@@ -340,7 +355,15 @@ function pickEnemyTypeFromWeights(weights: MinuteDifficultyConfig['enemyWeights'
 
 interface FloatingText {
   text: Phaser.GameObjects.Text;
+  inUse: boolean;
+  spawnTime: number;
   life: number;
+  maxLife: number;
+  vx: number;
+  vy: number;
+  gravity: number;
+  baseScale: number;
+  popScale: number;
 }
 
 interface Particle {
@@ -455,8 +478,14 @@ export class MainScene extends Phaser.Scene {
   private projectilesGroup!: Phaser.Physics.Arcade.Group;
   private pickupsGroup!: Phaser.Physics.Arcade.Group;
 
+  // Camera & Atmosphere controllers
+  private cameraController!: CameraController;
+  private atmosphereOverlay: AtmosphereOverlay | null = null;
+
   // Floating text pool
   private floatingTexts: FloatingText[] = [];
+  private readonly MAX_FLOATING_TEXTS = 64;
+  private readonly LOW_QUALITY_MAX_FLOATING_TEXTS = 36;
 
   // Run Stats
   private runTime: number = 0;
@@ -515,6 +544,17 @@ export class MainScene extends Phaser.Scene {
   private hasNightEyes: boolean = false;
   private lightShardTimerMs: number = 0;
   private darknessFallsTimerMs: number = 0;
+
+  // Red Shard & Dynamic Challenges State
+  private redShardsPickedCount: number = 0;
+  private redShardTimerMs: number = 0;
+  private isRedShardBuffActive: boolean = false;
+  private xpMultiplierBonus: number = 0;
+  private pendingOfferedChallenge: DynamicChallengeOffer | null = null;
+  private activeChallenge: ActiveDynamicChallenge | null = null;
+  private challengeBannerTimerMs: number = 0;
+  private completedChallengeIds: Set<string> = new Set();
+  private challengesCompletedCount: number = 0;
 
   // State flags
   private isGamePaused: boolean = false;
@@ -576,8 +616,19 @@ export class MainScene extends Phaser.Scene {
     this.hasNightEyes = false;
     this.lightShardTimerMs = 0;
     this.darknessFallsTimerMs = 0;
+    this.redShardsPickedCount = 0;
+    this.redShardTimerMs = 0;
+    this.isRedShardBuffActive = false;
+    this.xpMultiplierBonus = 0;
+    this.pendingOfferedChallenge = null;
+    this.activeChallenge = null;
+    this.challengeBannerTimerMs = 0;
+    this.completedChallengeIds = new Set();
+    this.challengesCompletedCount = 0;
     this.enemyProjectilePool = [];
     this.enemyTrailPool = [];
+    this.floatingTexts = [];
+    this.atmosphereOverlay = null;
     this.lastMissionSecondRecorded = 0;
     this.lowFpsDurationMs = 0;
     gameManager.setQualityTier('high');
@@ -689,8 +740,9 @@ export class MainScene extends Phaser.Scene {
     this.projectilesGroup = this.physics.add.group();
     this.pickupsGroup = this.physics.add.group();
 
-    // 3. Object Pool: 200 Particles (Cap at 200, ADD blend mode)
+    // 3. Object Pools: 200 Particles (ADD blend mode) & Floating Combat Text
     this.initParticlePool();
+    this.initFloatingTextPool();
 
     // 4. Initialize Player Stats from Meta Progression & BALANCE starting HP
     this.playerStats = calculateBasePlayerStats();
@@ -874,6 +926,35 @@ export class MainScene extends Phaser.Scene {
       g.destroy();
     }
 
+    // Procedural crimson Red Shard texture (heals + temporary damage surge)
+    if (!this.textures.exists('pickup_red_shard')) {
+      const g = this.make.graphics({ x: 0, y: 0 });
+      g.fillStyle(0xe5303a, 0.25);
+      g.fillCircle(20, 20, 19);
+      g.fillStyle(0xb3121a, 0.35);
+      g.fillCircle(20, 20, 12);
+      g.fillStyle(0xe5303a, 1);
+      g.beginPath();
+      g.moveTo(20, 4);
+      g.lineTo(31, 20);
+      g.lineTo(20, 36);
+      g.lineTo(9, 20);
+      g.closePath();
+      g.fillPath();
+      g.fillStyle(0xffb4b8, 0.95);
+      g.beginPath();
+      g.moveTo(20, 9);
+      g.lineTo(26, 20);
+      g.lineTo(20, 31);
+      g.lineTo(14, 20);
+      g.closePath();
+      g.fillPath();
+      g.lineStyle(1.5, 0xffd2d5, 0.9);
+      g.strokePath();
+      g.generateTexture('pickup_red_shard', 40, 40);
+      g.destroy();
+    }
+
     // Ground telegraph & elite red glow aura layers
     this.telegraphGraphics = this.add.graphics().setDepth(16);
     this.telegraphGraphics.disableInteractive();
@@ -901,8 +982,9 @@ export class MainScene extends Phaser.Scene {
     this.stanceRing.setPosition(this.player.x, this.player.y + 36);
     this.stanceRing.setAlpha(this.stanceRingAlpha);
 
-    // Camera follow player smoothly
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    // Camera controller with smooth player follow & damage/boss-proximity shake
+    this.cameraController = new CameraController(this.cameras.main);
+    this.cameraController.followTarget(this.player, true, 0.1, 0.1);
 
     // Trigger muzzle effect and camera shake on attack frame 2
     this.player.on(
@@ -935,9 +1017,10 @@ export class MainScene extends Phaser.Scene {
       }
     });
 
-    // 7. Light Vignette / Lantern Glow Layer (non-interactive to never block inputs)
+    // 7. Light Vignette / Lantern Glow Layer & Dynamic Weather/Time-of-Day Atmosphere Overlay
     this.lightVignette = this.add.graphics().setDepth(15).setScrollFactor(0);
     this.lightVignette.disableInteractive();
+    this.atmosphereOverlay = new AtmosphereOverlay(this);
 
     // Lantern glow pulse tween (alpha 0.6 <-> 1.0)
     this.tweens.add({
@@ -1009,9 +1092,11 @@ export class MainScene extends Phaser.Scene {
     this.scene.bringToTop('DarknessScene');
     this.scene.bringToTop('UIScene');
 
-    // Clean up activeScene reference on shutdown/restart
+    // Clean up activeScene reference and atmosphere graphics on shutdown/restart
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       dailyMissions.flush();
+      this.atmosphereOverlay?.destroy();
+      this.atmosphereOverlay = null;
       if (gameManager.activeScene === this) {
         gameManager.activeScene = null;
       }
@@ -1397,7 +1482,15 @@ export class MainScene extends Phaser.Scene {
         // Area damage on frame index 8
         if ((fIdx === 8 || frame.index === 9) && !areaDamageDone) {
           areaDamageDone = true;
-          this.cameras.main.shake(250, 0.01);
+          this.cameraController.shakeFromBossProximity(
+            x,
+            y,
+            this.player.x,
+            this.player.y,
+            0.016,
+            280,
+            750
+          );
           soundManager.playBossSlam();
 
           const dist = Phaser.Math.Distance.Between(x, y, this.player.x, this.player.y);
@@ -1553,7 +1646,7 @@ export class MainScene extends Phaser.Scene {
     this.muzzleFiredThisAttack = true;
 
     // Small camera shake on attack frame 2
-    this.cameras.main.shake(90, 0.003);
+    this.cameraController.triggerShake(90, 0.003);
 
     // Muzzle flash particle effect at the lantern / hand position
     const offsetX = this.player.flipX ? -28 : 28;
@@ -1656,6 +1749,49 @@ export class MainScene extends Phaser.Scene {
       this.darknessFallsTimerMs = Math.max(0, this.darknessFallsTimerMs - delta);
     }
 
+    // Red Shard temporary damage surge timer
+    if (this.redShardTimerMs > 0) {
+      this.redShardTimerMs = Math.max(0, this.redShardTimerMs - delta);
+      if (this.redShardTimerMs <= 0 && this.isRedShardBuffActive) {
+        this.isRedShardBuffActive = false;
+        this.playerStats.damageMultiplier = Math.max(0.5, this.playerStats.damageMultiplier - 0.15);
+      }
+    }
+
+    // Dynamic Challenge progression & expiry
+    if (this.activeChallenge) {
+      if (this.activeChallenge.status === 'active') {
+        this.activeChallenge.elapsedSec += delta / 1000;
+        if (
+          this.activeChallenge.id === 'no_coin_greed' ||
+          this.activeChallenge.id === 'untouchable' ||
+          this.activeChallenge.id === 'light_purist'
+        ) {
+          this.activeChallenge.progress = Math.floor(this.activeChallenge.elapsedSec);
+          this.activeChallenge.statusNote = formatChallengeProgressText(this.activeChallenge);
+          if (this.activeChallenge.elapsedSec >= this.activeChallenge.targetValue) {
+            this.completeDynamicChallenge();
+          }
+        } else if (
+          this.activeChallenge.id === 'cull_the_horde' ||
+          this.activeChallenge.id === 'stand_firm'
+        ) {
+          this.activeChallenge.statusNote = formatChallengeProgressText(this.activeChallenge);
+          const limit = this.activeChallenge.timeLimitSec ?? 60;
+          if (this.activeChallenge.elapsedSec >= limit) {
+            this.failDynamicChallenge('Time expired');
+          }
+        } else {
+          this.activeChallenge.statusNote = formatChallengeProgressText(this.activeChallenge);
+        }
+      } else {
+        this.challengeBannerTimerMs -= delta;
+        if (this.challengeBannerTimerMs <= 0) {
+          this.activeChallenge = null;
+        }
+      }
+    }
+
     // Combo decay if player stops killing for 3s
     if (this.comboKills > 0) {
       this.comboTimerMs -= delta;
@@ -1712,13 +1848,24 @@ export class MainScene extends Phaser.Scene {
     // 10. Update Particles
     this.updateParticles(delta);
 
-    // 11. Update Floating Texts
+    // 11. Update Floating Combat Text Pool
     this.updateFloatingTexts(delta);
 
-    // 12. Enemy Spawning & Timeline Events
+    // 12. Update Dynamic Weather & Time-of-Day Overlay
+    this.atmosphereOverlay?.update(
+      delta,
+      this.runTime,
+      Boolean(this.activeBoss && this.activeBoss.active),
+      this.darknessFallsTimerMs > 0
+    );
+
+    // 13. Update Camera Controller (shake decay & boss proximity tremor)
+    this.cameraController.update(delta, this.player.x, this.player.y, this.activeBoss);
+
+    // 13. Enemy Spawning & Timeline Events
     this.handleEnemySpawning(time);
 
-    // 13. Periodic Stats Sync with UI (every ~100ms)
+    // 14. Periodic Stats Sync with UI (every ~100ms)
     if (time - this.lastStatsEmitMs >= 100) {
       this.lastStatsEmitMs = time;
       this.emitStatsUpdate();
@@ -2314,7 +2461,7 @@ export class MainScene extends Phaser.Scene {
           this.damagePlayer(data.damage);
           this.spawnSparkHitEffect(proj.x, proj.y, 0xff44ee, 0.85);
           this.spawnOrbImpactDeathEffect(proj.x, proj.y);
-          this.cameras.main.shake(110, 0.007);
+          this.cameraController.shakeOnDamage(data.damage, this.playerStats.maxHp);
           this.spawnParticleBurst(proj.x, proj.y, 8, 'fx_spark', 60, 150, 0.16, 0.3, 0xff44ee, 300);
           this.releaseEnemyProjectile(proj);
         } else if (
@@ -2516,7 +2663,7 @@ export class MainScene extends Phaser.Scene {
           const bossTier = (enemy.getData('bossTier') as number) || 1;
           gameManager.emitBossUpdate({
             name: bossTier > 1 ? `The Void Titan Tier ${bossTier}` : 'The Void Titan',
-            currentHp: edata.hp,
+            currentHp: Math.max(0, Math.round(edata.hp)),
             maxHp: edata.maxHp,
             active: true,
           });
@@ -3164,11 +3311,12 @@ export class MainScene extends Phaser.Scene {
 
     soundManager.playBossWarning();
     soundManager.playBoss();
-    this.cameras.main.shake(600, 0.015);
 
     const angle = Math.random() * Math.PI * 2;
     const x = this.player.x + Math.cos(angle) * 450;
     const y = this.player.y + Math.sin(angle) * 450;
+
+    this.cameraController.shakeFromBossProximity(x, y, this.player.x, this.player.y, 0.018, 600, 900);
 
     const boss = this.enemiesGroup.create(x, y, 'boss_idle_sheet') as Phaser.Physics.Arcade.Sprite;
     boss.setDepth(24);
@@ -3401,6 +3549,33 @@ export class MainScene extends Phaser.Scene {
       this.spawnPickup(enemy.x - 16, enemy.y - 10, 'light_shard', 1);
     }
 
+    // Red Shards occasionally drop from Brutes, Spitters, and rare Imps (heals + temporary +15% DMG)
+    const redShardChance =
+      edata.type === 'brute' ? 0.2 : edata.type === 'spitter' ? 0.14 : edata.type === 'imp' ? 0.03 : 0;
+    if (redShardChance > 0 && Math.random() < redShardChance) {
+      this.spawnPickup(enemy.x + 12, enemy.y + 12, 'red_shard', 1);
+    }
+
+    // Dynamic Challenge kill / boss completion checks
+    if (this.activeChallenge && this.activeChallenge.status === 'active') {
+      if (this.activeChallenge.id === 'cull_the_horde') {
+        this.activeChallenge.progress++;
+        this.activeChallenge.statusNote = formatChallengeProgressText(this.activeChallenge);
+        if (this.activeChallenge.progress >= this.activeChallenge.targetValue) {
+          this.completeDynamicChallenge();
+        }
+      } else if (this.activeChallenge.id === 'stand_firm' && this.isStandingReady) {
+        this.activeChallenge.progress++;
+        this.activeChallenge.statusNote = formatChallengeProgressText(this.activeChallenge);
+        if (this.activeChallenge.progress >= this.activeChallenge.targetValue) {
+          this.completeDynamicChallenge();
+        }
+      } else if (this.activeChallenge.id === 'no_red_shards' && edata.type === 'boss') {
+        this.activeChallenge.progress = 1;
+        this.completeDynamicChallenge();
+      }
+    }
+
     // Boss defeat clears boss HUD & switches back to intense/gameplay music so survival run continues
     if (edata.type === 'boss') {
       this.activeBoss = null;
@@ -3418,20 +3593,34 @@ export class MainScene extends Phaser.Scene {
   }
 
   // -------------------------------------------------------------
-  // Pickups (XP Gems [12s expiry], Coins, Light Shards & Upgrade Chests)
+  // Pickups (XP Gems [12s expiry], Coins, Light Shards, Red Shards & Upgrade Chests)
   // -------------------------------------------------------------
   private spawnPickup(
     x: number,
     y: number,
-    type: 'gem' | 'coin' | 'chest' | 'light_shard',
+    type: 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard',
     value: number
   ) {
     const texture =
-      type === 'chest' ? 'pickup_chest' : type === 'light_shard' ? 'pickup_light_shard' : type;
+      type === 'chest'
+        ? 'pickup_chest'
+        : type === 'light_shard'
+          ? 'pickup_light_shard'
+          : type === 'red_shard'
+            ? 'pickup_red_shard'
+            : type;
     const pickup = this.pickupsGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
-    pickup.setDepth(type === 'chest' || type === 'light_shard' ? 19 : 17);
+    pickup.setDepth(
+      type === 'chest' || type === 'light_shard' || type === 'red_shard' ? 19 : 17
+    );
     pickup.setScale(
-      type === 'chest' ? 1.0 : type === 'light_shard' ? 0.95 : type === 'coin' ? 0.38 : 0.36
+      type === 'chest'
+        ? 1.0
+        : type === 'light_shard' || type === 'red_shard'
+          ? 0.95
+          : type === 'coin'
+            ? 0.38
+            : 0.36
     );
     pickup.setData('type', type);
     pickup.setData('value', value);
@@ -3455,22 +3644,23 @@ export class MainScene extends Phaser.Scene {
 
     for (const p of pickups) {
       if (!p.active) continue;
-      const type = p.getData('type') as 'gem' | 'coin' | 'chest' | 'light_shard';
+      const type = p.getData('type') as 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard';
 
-      // XP gems expire after 12 seconds (blink in final 3s)
-      if (type === 'gem') {
+      // XP gems expire after 12 seconds (blink in final 3s); Red Shards expire after 16s
+      if (type === 'gem' || type === 'red_shard') {
+        const expireMs = type === 'red_shard' ? 16000 : SPAWN_TIMELINE.pressure.gemExpireMs;
         const life = ((p.getData('life') as number) || 0) + delta;
-        if (life >= SPAWN_TIMELINE.pressure.gemExpireMs) {
+        if (life >= expireMs) {
           p.destroy();
           continue;
         }
         p.setData('life', life);
-        if (life >= SPAWN_TIMELINE.pressure.gemExpireMs - 3000) {
+        if (life >= expireMs - 3000) {
           p.setAlpha(Math.sin(life * 0.025) > 0 ? 0.9 : 0.25);
         }
       }
 
-      if (type !== 'chest') {
+      if (type !== 'chest' && type !== 'red_shard') {
         const dist = Phaser.Math.Distance.Between(p.x, p.y, this.player.x, this.player.y);
         if (dist <= magnetDist) {
           const angle = Phaser.Math.Angle.Between(p.x, p.y, this.player.x, this.player.y);
@@ -3497,6 +3687,9 @@ export class MainScene extends Phaser.Scene {
       this.coinsEarned += value;
       dailyMissions.recordIncrement('collect_coins', value);
       this.spawnParticleBurst(pickup.x, pickup.y, 5, 'fx_spark', 60, 140, 0.15, 0.28, 0xffd700);
+      if (this.activeChallenge?.status === 'active' && this.activeChallenge.id === 'no_coin_greed') {
+        this.failDynamicChallenge('Collected a Soul Coin');
+      }
     } else if (type === 'light_shard') {
       soundManager.playGemCollect();
       soundManager.playLightning();
@@ -3504,6 +3697,24 @@ export class MainScene extends Phaser.Scene {
       this.spawnParticleBurst(pickup.x, pickup.y, 18, 'fx_spark', 90, 240, 0.2, 0.42, 0x5de4ff);
       const bonusPct = Math.round(LIGHT.progression.lightShard.radiusBonus * 100);
       this.showFloatingCallout(this.player.x, this.player.y - 44, `+${bonusPct}% LIGHT!`, '#5de4ff');
+      if (this.activeChallenge?.status === 'active' && this.activeChallenge.id === 'light_purist') {
+        this.failDynamicChallenge('Picked up Light Shard');
+      }
+      this.emitStatsUpdate();
+    } else if (type === 'red_shard') {
+      soundManager.playGemCollect();
+      this.redShardsPickedCount++;
+      this.playerStats.currentHp = Math.min(this.playerStats.maxHp, this.playerStats.currentHp + 18);
+      this.redShardTimerMs = 12000;
+      if (!this.isRedShardBuffActive) {
+        this.isRedShardBuffActive = true;
+        this.playerStats.damageMultiplier += 0.15;
+      }
+      this.spawnParticleBurst(pickup.x, pickup.y, 18, 'fx_spark', 90, 240, 0.2, 0.42, 0xe5303a);
+      this.showFloatingCallout(this.player.x, this.player.y - 44, '+18 HP · +15% DMG', '#e5303a');
+      if (this.activeChallenge?.status === 'active' && this.activeChallenge.id === 'no_red_shards') {
+        this.failDynamicChallenge('Picked up Red Shard');
+      }
       this.emitStatsUpdate();
     } else if (type === 'chest') {
       soundManager.playCoinCollect();
@@ -3520,7 +3731,7 @@ export class MainScene extends Phaser.Scene {
   // XP & Level Up System
   // -------------------------------------------------------------
   private addXp(amount: number) {
-    this.currentXp += amount;
+    this.currentXp += Math.max(1, Math.round(amount * (1 + this.xpMultiplierBonus)));
     if (this.currentXp >= this.nextLevelXp) {
       this.currentXp -= this.nextLevelXp;
       this.playerLevel++;
@@ -3597,11 +3808,23 @@ export class MainScene extends Phaser.Scene {
         hasNightEyes: this.hasNightEyes,
       }
     );
-    gameManager.emitLevelUp(options);
+
+    const challengeOffer =
+      !this.activeChallenge && this.playerLevel >= 2
+        ? pickDynamicChallengeOffer({
+            playerLevel: this.playerLevel,
+            redShardsPicked: this.redShardsPickedCount,
+            bossSpawned: this.bossSpawned,
+            completedIds: this.completedChallengeIds,
+          })
+        : null;
+    this.pendingOfferedChallenge = challengeOffer;
+
+    gameManager.emitLevelUp(options, challengeOffer);
   }
 
   // Called when player selects an upgrade card in React UI
-  public applyUpgrade(option: UpgradeOption) {
+  public applyUpgrade(option: UpgradeOption, acceptChallenge: boolean = false) {
     switch (option.id) {
       case 'multishot':
         this.multishotLevel = Math.min(BALANCE.multishot.maxLevel, this.multishotLevel + 1);
@@ -3731,8 +3954,74 @@ export class MainScene extends Phaser.Scene {
         break;
     }
 
+    if (acceptChallenge && this.pendingOfferedChallenge && !this.activeChallenge) {
+      this.activeChallenge = createActiveDynamicChallenge(this.pendingOfferedChallenge);
+      this.showFloatingCallout(
+        this.player.x,
+        this.player.y - 52,
+        `PACT: ${this.activeChallenge.title.toUpperCase()}`,
+        '#f2a93b'
+      );
+    }
+    this.pendingOfferedChallenge = null;
+
     // Unpause game completely (restoring timers/tweens/anims/DarknessScene if paused during level-up)
     this.resumeGame();
+    this.emitStatsUpdate();
+  }
+
+  private completeDynamicChallenge() {
+    if (!this.activeChallenge || this.activeChallenge.status !== 'active') return;
+    const challenge = this.activeChallenge;
+    challenge.status = 'completed';
+    challenge.statusNote = formatChallengeProgressText(challenge);
+    this.challengeBannerTimerMs = 3400;
+    this.challengesCompletedCount++;
+    this.completedChallengeIds.add(challenge.id);
+
+    this.coinsEarned += challenge.rewardCoins;
+    dailyMissions.recordIncrement('collect_coins', challenge.rewardCoins);
+
+    switch (challenge.id) {
+      case 'no_red_shards':
+        this.playerStats.damageMultiplier += 0.15;
+        break;
+      case 'no_coin_greed':
+        this.xpMultiplierBonus += 0.15;
+        break;
+      case 'untouchable':
+        this.playerStats.moveSpeed = Math.round(this.playerStats.moveSpeed * 1.12);
+        break;
+      case 'stand_firm':
+        this.playerStats.cooldownMultiplier = Math.max(0.35, this.playerStats.cooldownMultiplier - 0.1);
+        break;
+      case 'cull_the_horde':
+        this.playerStats.critChance += 0.1;
+        break;
+      case 'light_purist':
+        this.playerStats.maxHp += 25;
+        this.playerStats.currentHp = Math.min(this.playerStats.maxHp, this.playerStats.currentHp + 25);
+        break;
+    }
+
+    soundManager.playCoinCollect();
+    haptics.onMissionComplete();
+    this.showFloatingCallout(
+      this.player.x,
+      this.player.y - 54,
+      `PACT CLEARED! +${challenge.rewardCoins} COINS`,
+      '#f2a93b'
+    );
+    this.emitStatsUpdate();
+  }
+
+  private failDynamicChallenge(reason: string) {
+    if (!this.activeChallenge || this.activeChallenge.status !== 'active') return;
+    this.activeChallenge.status = 'failed';
+    this.activeChallenge.statusNote = reason;
+    this.challengeBannerTimerMs = 2600;
+    haptics.tap('heavy');
+    this.showFloatingCallout(this.player.x, this.player.y - 52, `PACT FAILED: ${reason}`, '#e5303a');
     this.emitStatsUpdate();
   }
 
@@ -3767,9 +4056,13 @@ export class MainScene extends Phaser.Scene {
     soundManager.playPlayerHurt();
     haptics.onPlayerHit();
 
-    // Hitstop & Camera Shake
+    if (this.activeChallenge?.status === 'active' && this.activeChallenge.id === 'untouchable') {
+      this.failDynamicChallenge('Took damage');
+    }
+
+    // Hitstop & Incoming Damage-Scaled Camera Shake
     this.hitstopTimer = 50;
-    this.cameras.main.shake(180, 0.012);
+    this.cameraController.shakeOnDamage(amount, this.playerStats.maxHp);
 
     // Invulnerability period (0.4s managed cleanly by invulnTimerMs in update)
     this.isInvulnerable = true;
@@ -3851,6 +4144,7 @@ export class MainScene extends Phaser.Scene {
           levelReached: this.playerLevel,
           damageDealt: this.damageDealt,
           victory: false,
+          challengesCompleted: this.challengesCompletedCount,
         };
         gameManager.emitGameOver(stats);
       },
@@ -3876,63 +4170,134 @@ export class MainScene extends Phaser.Scene {
     return nearest;
   }
 
-  private showDamageNumber(x: number, y: number, damage: number, isCrit: boolean) {
-    const text = this.add.text(x, y, `${damage}`, {
-      fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-      fontStyle: isCrit ? '700' : '600',
-      fontSize: isCrit ? '18px' : '14px',
-      color: isCrit ? '#f2a93b' : '#ffffff',
-      stroke: '#0b0d12',
-      strokeThickness: 4,
-    });
-    text.setDepth(30);
-    text.setOrigin(0.5, 0.5);
+  private initFloatingTextPool() {
+    this.floatingTexts = [];
+    for (let i = 0; i < this.MAX_FLOATING_TEXTS; i++) {
+      const text = this.add.text(0, 0, '', {
+        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+        fontStyle: '700',
+        fontSize: '16px',
+        color: '#ffffff',
+        stroke: '#0b0d12',
+        strokeThickness: 4,
+      });
+      text.setOrigin(0.5, 0.5);
+      text.setDepth(30);
+      text.setActive(false);
+      text.setVisible(false);
+      text.disableInteractive();
 
-    this.tweens.add({
-      targets: text,
-      y: y - 28,
-      alpha: 0,
-      duration: 600,
-      ease: 'Cubic.easeOut',
-      onComplete: () => {
-        text.destroy();
-      },
-    });
+      this.floatingTexts.push({
+        text,
+        inUse: false,
+        spawnTime: 0,
+        life: 0,
+        maxLife: 600,
+        vx: 0,
+        vy: 0,
+        gravity: 95,
+        baseScale: 1,
+        popScale: 1.2,
+      });
+    }
+  }
+
+  private acquireFloatingText(): FloatingText | null {
+    if (this.floatingTexts.length === 0) return null;
+
+    const poolCap =
+      gameManager.getQualityTier() === 'low'
+        ? Math.min(this.LOW_QUALITY_MAX_FLOATING_TEXTS, this.floatingTexts.length)
+        : this.floatingTexts.length;
+
+    let oldest = this.floatingTexts[0];
+    for (let i = 0; i < poolCap; i++) {
+      const slot = this.floatingTexts[i];
+      if (!slot.inUse) {
+        return slot;
+      }
+      if (slot.spawnTime < oldest.spawnTime) {
+        oldest = slot;
+      }
+    }
+
+    return oldest;
+  }
+
+  private showDamageNumber(x: number, y: number, damage: number, isCrit: boolean) {
+    const slot = this.acquireFloatingText();
+    if (!slot) return;
+
+    const rounded = Math.max(1, Math.round(damage));
+    slot.inUse = true;
+    slot.spawnTime = this.time.now;
+    slot.life = 0;
+    slot.maxLife = isCrit ? 680 : 560;
+    slot.vx = Phaser.Math.FloatBetween(-26, 26);
+    slot.vy = isCrit ? -96 : -76;
+    slot.gravity = 105;
+    slot.baseScale = isCrit ? 1.18 : 0.88;
+    slot.popScale = isCrit ? 1.52 : 1.1;
+
+    slot.text.setPosition(x + Phaser.Math.FloatBetween(-8, 8), y);
+    slot.text.setText(isCrit ? `${rounded}!` : `${rounded}`);
+    slot.text.setColor(isCrit ? '#f2a93b' : '#ffffff');
+    slot.text.setDepth(isCrit ? 31 : 30);
+    slot.text.setScale(slot.popScale);
+    slot.text.setAlpha(1);
+    slot.text.setActive(true);
+    slot.text.setVisible(true);
   }
 
   private updateFloatingTexts(delta: number) {
-    for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+    const dtSec = delta * 0.001;
+    for (let i = 0; i < this.floatingTexts.length; i++) {
       const item = this.floatingTexts[i];
+      if (!item.inUse) continue;
+
       item.life += delta;
-      if (item.life > 600) {
-        item.text.destroy();
-        this.floatingTexts.splice(i, 1);
+      if (item.life >= item.maxLife) {
+        item.inUse = false;
+        item.text.setActive(false);
+        item.text.setVisible(false);
+        continue;
       }
+
+      item.text.x += item.vx * dtSec;
+      item.text.y += item.vy * dtSec;
+      item.vy += item.gravity * dtSec;
+
+      const popProgress = Math.min(1, item.life / 110);
+      item.text.setScale(Phaser.Math.Linear(item.popScale, item.baseScale, popProgress));
+
+      const lifeProgress = item.life / item.maxLife;
+      const alpha = lifeProgress > 0.62 ? Math.max(0, 1 - (lifeProgress - 0.62) / 0.38) : 1;
+      item.text.setAlpha(alpha);
     }
   }
 
   private showFloatingCallout(x: number, y: number, label: string, color: string = '#5de4ff') {
-    const text = this.add.text(x, y, label, {
-      fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-      fontStyle: '700',
-      fontSize: '13px',
-      color,
-      stroke: '#0b0d12',
-      strokeThickness: 4,
-    });
-    text.setDepth(31);
-    text.setOrigin(0.5, 0.5);
+    const slot = this.acquireFloatingText();
+    if (!slot) return;
 
-    this.tweens.add({
-      targets: text,
-      y: y - 26,
-      alpha: 0,
-      duration: 650,
-      ease: 'Cubic.easeOut',
-      onComplete: () => {
-        text.destroy();
-      },
-    });
+    slot.inUse = true;
+    slot.spawnTime = this.time.now;
+    slot.life = 0;
+    slot.maxLife = 650;
+    slot.vx = 0;
+    slot.vy = -52;
+    slot.gravity = 30;
+    slot.baseScale = 0.85;
+    slot.popScale = 1.02;
+
+    slot.text.setPosition(x, y);
+    slot.text.setText(label);
+    slot.text.setColor(color);
+    slot.text.setDepth(31);
+    slot.text.setScale(slot.popScale);
+    slot.text.setAlpha(1);
+    slot.text.setActive(true);
+    slot.text.setVisible(true);
   }
 
   private emitStatsUpdate() {
@@ -3961,8 +4326,11 @@ export class MainScene extends Phaser.Scene {
       isUnderPressure: this.isUnderPressure,
       lightShardRemainingSec:
         this.lightShardTimerMs > 0 ? Math.ceil(this.lightShardTimerMs / 1000) : 0,
+      redShardRemainingSec:
+        this.redShardTimerMs > 0 ? Math.ceil(this.redShardTimerMs / 1000) : 0,
       darknessFallsRemainingSec:
         this.darknessFallsTimerMs > 0 ? Math.ceil(this.darknessFallsTimerMs / 1000) : 0,
+      activeChallenge: this.activeChallenge ? { ...this.activeChallenge } : null,
       debug: {
         fps,
         enemyCount,

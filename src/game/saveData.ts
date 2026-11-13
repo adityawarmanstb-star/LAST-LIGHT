@@ -1,4 +1,4 @@
-import { DailyMissionsState } from './types';
+import { DailyMissionsState, DailyStreakState } from './types';
 
 export const SAVE_STORAGE_KEY = 'last_light_save_v1';
 export const CURRENT_SAVE_VERSION = 1;
@@ -18,6 +18,8 @@ export interface SaveDataV1 {
   upgrades: Record<string, number>;
   settings: SaveSettingsData;
   dailyMissions: DailyMissionsState | null;
+  dailyStreak: DailyStreakState | null;
+  hasSeenHowToPlay: boolean;
 }
 
 const DEFAULT_SETTINGS: SaveSettingsData = {
@@ -36,6 +38,8 @@ function createDefaultSaveData(): SaveDataV1 {
     upgrades: {},
     settings: { ...DEFAULT_SETTINGS },
     dailyMissions: null,
+    dailyStreak: null,
+    hasSeenHowToPlay: false,
   };
 }
 
@@ -108,6 +112,25 @@ function sanitizeDailyMissions(raw: unknown): DailyMissionsState | null {
   };
 }
 
+function sanitizeDailyStreak(raw: unknown): DailyStreakState | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.lastLoginDateKey !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(obj.lastLoginDateKey)) {
+    return null;
+  }
+
+  const currentStreak = Math.max(1, safeNonNegativeInt(obj.currentStreak, 1));
+  const bestStreak = Math.max(currentStreak, safeNonNegativeInt(obj.bestStreak, currentStreak));
+  const lastRewardCoins = safeNonNegativeInt(obj.lastRewardCoins, 0);
+
+  return {
+    currentStreak,
+    bestStreak,
+    lastLoginDateKey: obj.lastLoginDateKey,
+    lastRewardCoins,
+  };
+}
+
 function sanitizeSaveData(raw: unknown): SaveDataV1 {
   const defaults = createDefaultSaveData();
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
@@ -133,6 +156,8 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
       hapticsEnabled: safeBoolean(rawSettings.hapticsEnabled, defaults.settings.hapticsEnabled),
     },
     dailyMissions: sanitizeDailyMissions(obj.dailyMissions),
+    dailyStreak: sanitizeDailyStreak(obj.dailyStreak),
+    hasSeenHowToPlay: safeBoolean(obj.hasSeenHowToPlay, defaults.hasSeenHowToPlay),
   };
 }
 
@@ -251,6 +276,8 @@ class SaveDataStore {
             missions: this.cache.dailyMissions.missions.map((m) => ({ ...m })),
           }
         : null,
+      dailyStreak: this.cache.dailyStreak ? { ...this.cache.dailyStreak } : null,
+      hasSeenHowToPlay: this.cache.hasSeenHowToPlay,
     };
   }
 

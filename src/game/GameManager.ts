@@ -1,4 +1,13 @@
-import { BossInfo, DebugStats, EventWarningInfo, RunStats, UpgradeOption, WeaponState } from './types';
+import {
+  ActiveDynamicChallenge,
+  BossInfo,
+  DebugStats,
+  DynamicChallengeOffer,
+  EventWarningInfo,
+  RunStats,
+  UpgradeOption,
+  WeaponState,
+} from './types';
 import { saveDataStore } from './saveData';
 
 export type QualityTier = 'high' | 'low';
@@ -16,12 +25,17 @@ export interface HudStatsPayload {
   combo: number;
   isUnderPressure: boolean;
   lightShardRemainingSec?: number;
+  redShardRemainingSec?: number;
   darknessFallsRemainingSec?: number;
+  activeChallenge?: ActiveDynamicChallenge | null;
   debug: DebugStats;
 }
 
 type StatsCallback = (data: HudStatsPayload) => void;
-type LevelUpCallback = (options: UpgradeOption[]) => void;
+type LevelUpCallback = (
+  options: UpgradeOption[],
+  challengeOffer: DynamicChallengeOffer | null
+) => void;
 type GameOverCallback = (stats: RunStats) => void;
 type BossCallback = (boss: BossInfo | null) => void;
 type EventWarningCallback = (warning: EventWarningInfo | null) => void;
@@ -105,8 +119,11 @@ class GameManager {
     };
   }
 
-  public emitLevelUp(options: UpgradeOption[]) {
-    this.levelUpListeners.forEach((l) => l(options));
+  public emitLevelUp(
+    options: UpgradeOption[],
+    challengeOffer: DynamicChallengeOffer | null = null
+  ) {
+    this.levelUpListeners.forEach((l) => l(options, challengeOffer));
   }
 
   public onGameOver(cb: GameOverCallback) {

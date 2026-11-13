@@ -77,6 +77,24 @@ class HapticFeedbackManager {
     });
   }
 
+  /**
+   * Haptic feedback pulse when a daily mission requirement is met.
+   */
+  public onMissionComplete(): void {
+    if (!this.enabled || !Capacitor.isNativePlatform()) {
+      return;
+    }
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this.lastTriggerAtMs < MIN_PULSE_INTERVAL_MS) {
+      return;
+    }
+    this.lastTriggerAtMs = now;
+
+    void Haptics.notification({ type: NotificationType.Success }).catch(() => {
+      void this.triggerNativePulse('heavy');
+    });
+  }
+
   private async triggerNativePulse(style: HapticPulseStyle): Promise<void> {
     try {
       if (style === 'selection') {

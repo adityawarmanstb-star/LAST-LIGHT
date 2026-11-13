@@ -11,11 +11,23 @@ import { CampShopModal } from './components/CampShopModal';
 import { DailyMissionsModal } from './components/DailyMissionsModal';
 import { GameOverModal } from './components/GameOverModal';
 import { SettingsModal } from './components/SettingsModal';
+import { HowToPlayModal } from './components/HowToPlayModal';
+import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { ForgedIronFrame, IronButton } from './components/ForgedIronFrame';
 import { gameManager } from './game/GameManager';
 import { createPhaserGame } from './game/phaserConfig';
 import { soundManager } from './game/audio';
-import { BossInfo, DebugStats, EventWarningInfo, RunStats, UpgradeOption, WeaponState } from './game/types';
+import { saveDataStore } from './game/saveData';
+import {
+  ActiveDynamicChallenge,
+  BossInfo,
+  DebugStats,
+  DynamicChallengeOffer,
+  EventWarningInfo,
+  RunStats,
+  UpgradeOption,
+  WeaponState,
+} from './game/types';
 import { Play, RotateCcw, Settings } from 'lucide-react';
 import { MainScene } from './game/scenes/MainScene';
 import { initCapacitorMobile } from './mobile/capacitorBridge';
@@ -26,6 +38,12 @@ export default function App() {
   const [showShop, setShowShop] = useState(false);
   const [showMissions, setShowMissions] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showHowToPlay, setShowHowToPlay] = useState<boolean>(
+    () => !saveDataStore.read().hasSeenHowToPlay
+  );
+  const [isFirstLaunchGuide, setIsFirstLaunchGuide] = useState<boolean>(
+    () => !saveDataStore.read().hasSeenHowToPlay
+  );
   const [isMuted, setIsMuted] = useState<boolean>(soundManager.getMuted());
   const [masterVolume, setMasterVolume] = useState<number>(soundManager.getMasterVolume());
   const [musicVolume, setMusicVolume] = useState<number>(soundManager.getMusicVolume());
@@ -47,7 +65,9 @@ export default function App() {
   const [combo, setCombo] = useState<number>(1);
   const [isUnderPressure, setIsUnderPressure] = useState<boolean>(false);
   const [lightShardRemainingSec, setLightShardRemainingSec] = useState<number>(0);
+  const [redShardRemainingSec, setRedShardRemainingSec] = useState<number>(0);
   const [darknessFallsRemainingSec, setDarknessFallsRemainingSec] = useState<number>(0);
+  const [activeChallenge, setActiveChallenge] = useState<ActiveDynamicChallenge | null>(null);
   const [debugStats, setDebugStats] = useState<DebugStats>({
     fps: 60,
     enemyCount: 0,
@@ -59,6 +79,7 @@ export default function App() {
 
   // Modals
   const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[] | null>(null);
+  const [levelUpChallenge, setLevelUpChallenge] = useState<DynamicChallengeOffer | null>(null);
   const [runSummary, setRunSummary] = useState<RunStats | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -73,6 +94,8 @@ export default function App() {
   showMissionsRef.current = showMissions;
   const showSettingsRef = useRef(showSettings);
   showSettingsRef.current = showSettings;
+  const showHowToPlayRef = useRef(showHowToPlay);
+  showHowToPlayRef.current = showHowToPlay;
 
   // Subscribe to GameManager events once
   useEffect(() => {
@@ -89,12 +112,15 @@ export default function App() {
       setCombo(data.combo);
       setIsUnderPressure(data.isUnderPressure);
       setLightShardRemainingSec(data.lightShardRemainingSec ?? 0);
+      setRedShardRemainingSec(data.redShardRemainingSec ?? 0);
       setDarknessFallsRemainingSec(data.darknessFallsRemainingSec ?? 0);
+      setActiveChallenge(data.activeChallenge ?? null);
       setDebugStats(data.debug);
     });
 
-    const unsubLevelUp = gameManager.onLevelUp((options) => {
+    const unsubLevelUp = gameManager.onLevelUp((options, challengeOffer) => {
       setLevelUpOptions(options);
+      setLevelUpChallenge(challengeOffer);
     });
 
     const unsubGameOver = gameManager.onGameOver((stats) => {
@@ -226,6 +252,13 @@ export default function App() {
   useEffect(() => {
     return initCapacitorMobile({
       onBackButton: () => {
+        if (showHowToPlayRef.current) {
+          saveDataStore.update((draft) => {
+            draft.hasSeenHowToPlay = true;
+          });
+          setShowHowToPlay(false);
+          return true;
+        }
         if (showSettingsRef.current) {
           setShowSettings(false);
           return true;
@@ -267,13 +300,16 @@ export default function App() {
   const handleStartGame = () => {
     setGameState('PLAYING');
     setLevelUpOptions(null);
+    setLevelUpChallenge(null);
     setRunSummary(null);
     setBoss(null);
     setEventWarning(null);
     setCombo(1);
     setIsUnderPressure(false);
     setLightShardRemainingSec(0);
+    setRedShardRemainingSec(0);
     setDarknessFallsRemainingSec(0);
+    setActiveChallenge(null);
 
     // Unlock audio on user gesture & play gameplay track
     soundManager.onUserGesture();
@@ -322,6 +358,19 @@ export default function App() {
     setShowSettings(true);
   };
 
+  const handleCloseHowToPlay = () => {
+    saveDataStore.update((draft) => {
+      draft.hasSeenHowToPlay = true;
+    });
+    setShowHowToPlay(false);
+    setIsFirstLaunchGuide(false);
+  };
+
+  const handleOpenHowToPlayFromSettings = () => {
+    setIsFirstLaunchGuide(false);
+    setShowHowToPlay(true);
+  };
+
   // Toggle pause: handles physics, timers, tweens, anims, DarknessScene, audio without conflicting with level up
   const handleTogglePause = () => {
     soundManager.playUiClick();
@@ -364,10 +413,11 @@ export default function App() {
   };
   handleQuitToTitleRef.current = handleQuitToTitle;
 
-  const handleSelectUpgrade = (option: UpgradeOption) => {
+  const handleSelectUpgrade = (option: UpgradeOption, acceptChallenge: boolean) => {
     setLevelUpOptions(null);
+    setLevelUpChallenge(null);
     if (gameManager.activeScene) {
-      (gameManager.activeScene as MainScene).applyUpgrade(option);
+      (gameManager.activeScene as MainScene).applyUpgrade(option, acceptChallenge);
     }
   };
 
@@ -386,7 +436,7 @@ export default function App() {
       {gameState === 'TITLE' && (
         <TitleScreen
           isMuted={isMuted}
-          isModalOpen={showShop || showSettings || showMissions}
+          isModalOpen={showShop || showSettings || showMissions || showHowToPlay}
           onStartGame={handleStartGame}
           onOpenShop={() => setShowShop(true)}
           onOpenMissions={() => setShowMissions(true)}
@@ -411,7 +461,9 @@ export default function App() {
           combo={combo}
           isUnderPressure={isUnderPressure}
           lightShardRemainingSec={lightShardRemainingSec}
+          redShardRemainingSec={redShardRemainingSec}
           darknessFallsRemainingSec={darknessFallsRemainingSec}
+          activeChallenge={activeChallenge}
           debugStats={debugStats}
           eventWarning={eventWarning}
           isMuted={isMuted}
@@ -506,12 +558,21 @@ export default function App() {
         onBrightnessChange={handleBrightnessChange}
         onToggleMute={handleToggleMute}
         onToggleHaptics={handleToggleHaptics}
+        onOpenHowToPlay={handleOpenHowToPlayFromSettings}
+      />
+
+      {/* Modal: How to Play (First Launch & Settings Guide) */}
+      <HowToPlayModal
+        isOpen={showHowToPlay}
+        isFirstLaunch={isFirstLaunchGuide}
+        onClose={handleCloseHowToPlay}
       />
 
       {/* Modal: Level-Up Card Selection */}
       {levelUpOptions && (
         <LevelUpModal
           options={levelUpOptions}
+          challengeOffer={levelUpChallenge}
           onSelectUpgrade={handleSelectUpgrade}
         />
       )}
@@ -536,6 +597,9 @@ export default function App() {
       {showShop && (
         <CampShopModal onClose={() => setShowShop(false)} />
       )}
+
+      {/* Global Non-Blocking Daily Mission Complete Toast */}
+      <MissionCompleteToast />
     </main>
   );
 }

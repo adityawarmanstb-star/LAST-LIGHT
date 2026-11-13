@@ -427,14 +427,24 @@ export class DarknessScene extends Phaser.Scene {
         const sy = p.y - scrollY;
         if (sx < -60 || sx > w + 60 || sy < -60 || sy > h + 60) continue;
         const pType = p.getData('type');
-        if (pType === 'gem' || pType === 'chest' || pType === 'light_shard') {
+        if (
+          pType === 'gem' ||
+          pType === 'chest' ||
+          pType === 'light_shard' ||
+          pType === 'red_shard'
+        ) {
           const r =
-            pType === 'light_shard'
+            pType === 'light_shard' || pType === 'red_shard'
               ? LIGHT.sources.lightShardRadius
               : pType === 'chest'
                 ? LIGHT.sources.fxRadius
                 : LIGHT.sources.gemRadius;
-          pushLight(p.x, p.y, r, pType === 'light_shard' ? 0.95 : 0.85);
+          pushLight(
+            p.x,
+            p.y,
+            r,
+            pType === 'light_shard' ? 0.95 : pType === 'red_shard' ? 0.9 : 0.85
+          );
         }
       }
     }
