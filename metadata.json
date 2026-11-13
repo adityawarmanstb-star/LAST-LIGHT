@@ -1,0 +1,6 @@
+{
+  "name": "Last Light - 2D Survivor",
+  "description": "Survive the encroaching dark in this high-intensity 2D survivor roguelite with auto-firing arcane weapons, enemy hordes, boss encounters, and permanent upgrades.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

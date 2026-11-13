@@ -1,0 +1,230 @@
+@import "tailwindcss";
+
+:root {
+  --bg-void: #121316;
+  --iron-base: #1a1c20;
+  --steel-edge: #3a3f47;
+  --rust-accent: #6b3a2a;
+  --dried-blood: #3a0a0e;
+  --fresh-blood: #b3121a;
+  --blood-glow: #e5303a;
+  --bone-text: #d8c9a8;
+  --accent-cyan: #5de4ff;
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    touch-action: none;
+    overscroll-behavior: none;
+  }
+
+  body {
+    background-color: var(--bg-void);
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    color: var(--bone-text);
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    overscroll-behavior: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+.font-display {
+  font-family: 'Cinzel', Georgia, 'Times New Roman', serif;
+}
+
+.font-body {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+.font-mono-numbers {
+  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Fallback Blood & Iron forged frame styling */
+.df-panel {
+  background: linear-gradient(180deg, rgba(32, 35, 42, 0.94) 0%, rgba(16, 18, 22, 0.96) 100%);
+  border: 1.5px solid #3a3f47;
+  border-radius: 10px;
+  box-shadow:
+    inset 2px 2px 0 rgba(85, 93, 105, 0.45),
+    inset -2px -2px 0 rgba(7, 8, 10, 0.88),
+    0 20px 46px rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+/* Safe-area padding helper */
+.safe-area-pad {
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: max(16px, env(safe-area-inset-bottom));
+  padding-left: max(16px, env(safe-area-inset-left));
+}
+
+/* Forged-iron range slider styling */
+input[type='range'].df-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  background: linear-gradient(180deg, #0d0f12 0%, #1a1c20 100%);
+  border: 1px solid #3a3f47;
+  border-radius: 999px;
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.85);
+}
+
+input[type='range'].df-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #687180 0%, #2b3038 65%, #121417 100%);
+  border: 2px solid var(--slider-accent, #b3121a);
+  box-shadow: 0 0 10px var(--slider-glow, rgba(229, 48, 58, 0.45));
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 150ms ease;
+}
+
+input[type='range'].df-slider::-webkit-slider-thumb:active {
+  transform: scale(0.92);
+}
+
+/* Staggered card slide-up for Level-Up Modal */
+@keyframes cardSlideUp {
+  0% {
+    opacity: 0;
+    transform: translateY(28px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-card-slide-up {
+  opacity: 0;
+  animation: cardSlideUp 280ms cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Slow liquid blood wave inside HP tube */
+@keyframes bloodLiquidWave {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.blood-wave-svg {
+  animation: bloodLiquidWave 3.6s linear infinite;
+  will-change: transform;
+}
+
+/* Falling blood droplets when taking damage */
+@keyframes bloodDropFall {
+  0% {
+    opacity: 0.98;
+    transform: translate3d(0, 0, 0) scaleY(0.85);
+  }
+  25% {
+    opacity: 1;
+    transform: translate3d(calc(var(--drop-drift, 0px) * 0.35), 7px, 0) scaleY(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--drop-drift, 0px), 28px, 0) scale(0.7, 1.35);
+  }
+}
+
+.blood-drop-fall {
+  animation: bloodDropFall 680ms cubic-bezier(0.32, 0, 0.67, 0.5) forwards;
+  will-change: transform, opacity;
+}
+
+/* Low-HP pulsing blood-red edge vignette */
+@keyframes bloodVignettePulse {
+  0%,
+  100% {
+    opacity: 0.52;
+  }
+  45% {
+    opacity: 0.92;
+  }
+}
+
+.low-hp-vignette {
+  animation: bloodVignettePulse 1.25s ease-in-out infinite;
+  will-change: opacity;
+}
+
+/* Drifting background embers on Title Screen */
+@keyframes emberFloat {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 0, 0) scale(0.7);
+  }
+  18% {
+    opacity: var(--ember-opacity, 0.75);
+  }
+  80% {
+    opacity: var(--ember-opacity, 0.6);
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--ember-drift, 18px), -105vh, 0) scale(1.1);
+  }
+}
+
+.ember-particle {
+  animation: emberFloat var(--ember-duration, 10s) linear var(--ember-delay, 0s) infinite;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ember-particle,
+  .blood-wave-svg,
+  .low-hp-vignette {
+    animation: none;
+  }
+  .ember-particle {
+    opacity: 0.25;
+  }
+  .animate-card-slide-up {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Ensure Phaser canvas sits cleanly without distortion or scrollbars */
+#phaser-container {
+  width: 100vw;
+  height: 100vh;
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: hidden;
+  z-index: 1;
+}
+
+#phaser-container canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}

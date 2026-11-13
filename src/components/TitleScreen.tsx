@@ -1,0 +1,226 @@
+import React, { useEffect } from 'react';
+import { Play, ShoppingBag, Volume2, VolumeX, Coins, Settings } from 'lucide-react';
+import { getSavedCoins } from '../game/metaProgression';
+import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
+
+interface TitleScreenProps {
+  isMuted: boolean;
+  onStartGame: () => void;
+  onOpenShop: () => void;
+  onToggleMute: () => void;
+  onOpenSettings: () => void;
+}
+
+const EMBER_PARTICLES = Array.from({ length: 28 }, (_, i) => {
+  const seed = (i * 37 + 13) % 100;
+  const palettePick = i % 7;
+  let color = '#e5303a'; // fresh blood ember
+  let opacity = 0.65;
+  if (palettePick === 0) {
+    color = '#5de4ff'; // rare lantern wisp
+    opacity = 0.42;
+  } else if (palettePick === 2 || palettePick === 5) {
+    color = '#f2a93b'; // forge spark
+    opacity = 0.68;
+  } else if (palettePick === 4) {
+    color = '#b3121a'; // deep crimson ember
+    opacity = 0.72;
+  }
+
+  return {
+    id: i,
+    left: `${(i * 4.1 + (seed % 5)) % 98}%`,
+    size: 2 + (i % 3) * 1.4,
+    duration: `${8 + (i % 7) * 1.6}s`,
+    delay: `${-(i * 0.9)}s`,
+    drift: `${(i % 2 === 0 ? 1 : -1) * (12 + (seed % 28))}px`,
+    opacity,
+    color,
+  };
+});
+
+export const TitleScreen: React.FC<TitleScreenProps> = ({
+  isMuted,
+  onStartGame,
+  onOpenShop,
+  onToggleMute,
+  onOpenSettings,
+}) => {
+  const bankCoins = getSavedCoins();
+
+  // Allow Enter or Space to start
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' || e.code === 'Enter') {
+        onStartGame();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [onStartGame]);
+
+  return (
+    <div
+      className="relative w-full h-full min-h-screen flex flex-col justify-between items-center safe-area-pad select-none z-30 overflow-hidden bg-[#121316]"
+      style={{
+        backgroundImage:
+          'radial-gradient(circle at 50% 36%, rgba(58, 10, 14, 0.38) 0%, rgba(26, 28, 32, 0.42) 38%, rgba(12, 13, 16, 0.98) 76%)',
+      }}
+    >
+      {/* Drifting Forge & Blood Ember Particles */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
+        {EMBER_PARTICLES.map((p) => (
+          <span
+            key={p.id}
+            className="ember-particle absolute -bottom-4 rounded-full"
+            style={
+              {
+                left: p.left,
+                width: `${p.size}px`,
+                height: `${p.size}px`,
+                backgroundColor: p.color,
+                boxShadow: `0 0 ${p.size * 3}px ${p.color}`,
+                '--ember-duration': p.duration,
+                '--ember-delay': p.delay,
+                '--ember-drift': p.drift,
+                '--ember-opacity': p.opacity,
+              } as React.CSSProperties
+            }
+          />
+        ))}
+      </div>
+
+      {/* Top Bar: Bank Coins & 56px Iron Mute Button */}
+      <div className="relative z-10 w-full max-w-5xl flex items-center justify-between pt-1 px-1">
+        <ForgedIronFrame
+          seed="title-coins-panel"
+          dripCount={2}
+          maxDripLength={12}
+          contentClassName="px-4 py-2.5 flex items-center gap-2.5 min-h-[56px]"
+        >
+          <Coins className="w-4 h-4 text-[#f2a93b]" />
+          <span className="text-xs text-[#9c8e72] font-medium">Soul Coins</span>
+          <span className="font-mono-numbers font-semibold text-[#d8c9a8] text-sm">
+            {bankCoins}
+          </span>
+        </ForgedIronFrame>
+
+        <IronButton
+          seed="title-mute-btn"
+          dripCount={2}
+          onClick={onToggleMute}
+          className="w-14 h-14 min-h-[56px] min-w-[56px]"
+          aria-label={isMuted ? 'Unmute Sound' : 'Mute Sound'}
+          title={isMuted ? 'Unmute Sound' : 'Mute Sound'}
+        >
+          {isMuted ? (
+            <VolumeX className="w-5 h-5 text-[#e5303a]" />
+          ) : (
+            <Volume2 className="w-5 h-5 text-[#d8c9a8]" />
+          )}
+        </IronButton>
+      </div>
+
+      {/* Main Centerpiece */}
+      <div className="relative z-10 flex flex-col items-center max-w-md w-full text-center my-auto px-2">
+        {/* LAST LIGHT Logo with soft cyan lantern glow */}
+        <div className="relative mb-6">
+          <div
+            className="absolute -inset-x-10 -inset-y-4 rounded-full blur-3xl opacity-25 pointer-events-none"
+            style={{ background: 'radial-gradient(circle, #5de4ff 0%, transparent 70%)' }}
+            aria-hidden="true"
+          />
+          <h1
+            className="font-display font-black tracking-[0.16em] text-4xl sm:text-5xl md:text-6xl text-[#e8dcc2] whitespace-nowrap"
+            style={{
+              textShadow:
+                '0 2px 10px rgba(0, 0, 0, 0.95), 0 0 26px rgba(93, 228, 255, 0.35), 0 0 46px rgba(179, 18, 26, 0.25)',
+            }}
+          >
+            LAST LIGHT
+          </h1>
+          <div className="mt-3 flex items-center justify-center gap-3">
+            <span className="h-px w-14 bg-gradient-to-r from-transparent via-[#6b3a2a] to-[#b3121a]" />
+            <span className="text-[11px] font-medium tracking-[0.26em] uppercase text-[#9c8e72]">
+              Blood &amp; Iron
+            </span>
+            <span className="h-px w-14 bg-gradient-to-l from-transparent via-[#6b3a2a] to-[#b3121a]" />
+          </div>
+        </div>
+
+        {/* Hero Preview (Dark Warden with lantern glow) */}
+        <div className="flex flex-col items-center mb-7">
+          <div className="relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center mb-3">
+            <div
+              className="absolute inset-2 rounded-full blur-2xl opacity-35 pointer-events-none"
+              style={{
+                background: 'radial-gradient(circle, #5de4ff 0%, transparent 70%)',
+              }}
+              aria-hidden="true"
+            />
+            <img
+              src="/assets/aistudio/player_d0a77e5b.png"
+              alt="Dark Warden"
+              referrerPolicy="no-referrer"
+              className="relative w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.85)] transition-transform duration-200 hover:scale-105"
+            />
+          </div>
+
+          <ForgedIronFrame
+            seed="title-hero-nameplate"
+            dripCount={2}
+            maxDripLength={10}
+            contentClassName="px-5 py-2 text-xs font-display font-semibold tracking-wider text-[#d8c9a8]"
+          >
+            Dark Warden
+          </ForgedIronFrame>
+        </div>
+
+        {/* Primary Menu Iron Buttons: Play / Shop / Settings */}
+        <div className="flex flex-col gap-3 w-full max-w-sm">
+          <IronButton
+            seed="title-play-btn"
+            variant="blood"
+            dripCount={3}
+            onClick={onStartGame}
+            className="w-full min-h-[60px] font-display font-bold text-base tracking-[0.14em]"
+          >
+            <Play className="w-4 h-4 fill-[#e5303a] text-[#e5303a]" />
+            <span>PLAY</span>
+          </IronButton>
+
+          <div className="grid grid-cols-2 gap-3 w-full">
+            <IronButton
+              seed="title-shop-btn"
+              dripCount={2}
+              onClick={onOpenShop}
+              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+            >
+              <ShoppingBag className="w-4 h-4 text-[#f2a93b]" />
+              <span>Shop</span>
+            </IronButton>
+
+            <IronButton
+              seed="title-settings-btn"
+              dripCount={2}
+              onClick={onOpenSettings}
+              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+            >
+              <Settings className="w-4 h-4 text-[#d8c9a8]" />
+              <span>Settings</span>
+            </IronButton>
+          </div>
+        </div>
+      </div>
+
+      {/* Minimal Bottom Hint */}
+      <div className="relative z-10 w-full text-center text-xs text-[#8c7f67] pb-1">
+        <span>WASD or Drag to move</span>
+        <span className="mx-2 text-[#6b3a2a]" aria-hidden="true">·</span>
+        <span>Stand still to fire</span>
+        <span className="mx-2 text-[#6b3a2a]" aria-hidden="true">·</span>
+        <span>Esc to pause</span>
+      </div>
+    </div>
+  );
+};
