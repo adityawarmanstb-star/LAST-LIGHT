@@ -21,19 +21,15 @@ jobs:
           npm install --legacy-peer-deps @capacitor/core @capacitor/cli @capacitor/android @capacitor/app @capacitor/haptics
       - name: Build web
         run: npm run build
-            - name: Create Android project
+      - name: Create Android project
         run: |
-          if [ ! -f capacitor.config.ts ] && [ ! -f capacitor.config.json ]; then
-            npx cap init "Last Light" com.aditya.lastlight --web-dir dist
-          fi
-          if [ ! -f android/gradlew ]; then
-            rm -rf android
-            npx cap add android
-          fi
+          [ -f capacitor.config.ts ] || [ -f capacitor.config.json ] || npx cap init "Last Light" com.aditya.lastlight --web-dir dist
+          [ -f android/gradlew ] || (rm -rf android && npx cap add android)
           npx cap sync android
-                    - name: Lock portrait
+      - name: Lock portrait
         run: |
           grep -q screenOrientation android/app/src/main/AndroidManifest.xml || sed -i 's|<activity|<activity android:screenOrientation="portrait"|' android/app/src/main/AndroidManifest.xml
+      - name: Accept SDK licenses and install platform 36
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" || true
