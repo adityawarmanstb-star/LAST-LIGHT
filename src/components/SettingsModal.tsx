@@ -1,11 +1,6 @@
 import React from 'react';
-import { Volume2, VolumeX, X, Sparkles, Music, Zap, Sliders, Sun, Smartphone } from 'lucide-react';
+import { Volume2, VolumeX, X, Sparkles, Music, Zap, Sliders, Sun } from 'lucide-react';
 import { soundManager } from '../game/audio';
-import {
-  HAPTIC_DURATION_MAX_MS,
-  HAPTIC_DURATION_MIN_MS,
-  haptics,
-} from '../mobile/haptics';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 
 interface SettingsModalProps {
@@ -16,15 +11,11 @@ interface SettingsModalProps {
   sfxVolume: number;
   brightness: number;
   isMuted: boolean;
-  hapticsEnabled: boolean;
-  hapticDuration: number;
   onMasterVolumeChange: (val: number) => void;
   onMusicVolumeChange: (val: number) => void;
   onSfxVolumeChange: (val: number) => void;
   onBrightnessChange: (val: number) => void;
   onToggleMute: () => void;
-  onToggleHaptics: () => void;
-  onHapticDurationChange: (ms: number) => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -35,15 +26,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   sfxVolume,
   brightness,
   isMuted,
-  hapticsEnabled,
-  hapticDuration,
   onMasterVolumeChange,
   onMusicVolumeChange,
   onSfxVolumeChange,
   onBrightnessChange,
   onToggleMute,
-  onToggleHaptics,
-  onHapticDurationChange,
 }) => {
   if (!isOpen) return null;
 
@@ -62,12 +49,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     soundManager.playPlayerAttack();
   };
 
-  const handleHapticPreview = () => {
-    if (hapticsEnabled) {
-      haptics.tap('light');
-    }
-  };
-
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center safe-area-pad backdrop-blur-md select-none"
@@ -80,8 +61,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         seed="settings-modal-panel"
         dripCount={3}
         maxDripLength={20}
-        className="w-full max-w-md flex flex-col max-h-[90vh]"
-        contentClassName="relative p-6 sm:p-7 flex flex-col max-h-[90vh] overflow-y-auto"
+        className="w-full max-w-md"
+        contentClassName="relative p-6 sm:p-7"
       >
         {/* Close Button (56px touch target) */}
         <IronButton
@@ -95,7 +76,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </IronButton>
 
         {/* Header */}
-        <div className="flex items-center gap-3 mb-6 pr-16 shrink-0">
+        <div className="flex items-center gap-3 mb-6 pr-16">
           <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#3a3f47] flex items-center justify-center text-[#d8c9a8]">
             <Sliders className="w-5 h-5" />
           </div>
@@ -103,7 +84,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <h2 className="text-xl font-display font-bold tracking-wider text-[#d8c9a8]">
               SETTINGS
             </h2>
-            <p className="text-xs text-[#9c8e72]">Audio, light &amp; tactile controls</p>
+            <p className="text-xs text-[#9c8e72]">Audio &amp; lantern brightness</p>
           </div>
         </div>
 
@@ -236,74 +217,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <div className="h-px bg-[#3a3f47]/70 w-full" />
 
-          {/* Tactile Feedback Section */}
-          <div className="flex flex-col gap-4">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5">
-                <Smartphone
-                  className={`w-4 h-4 ${hapticsEnabled ? 'text-[#f2a93b]' : 'text-[#8e8168]'}`}
-                />
-                <div className="flex flex-col">
-                  <span className="text-xs font-semibold text-[#d8c9a8]">Tactile Feedback</span>
-                  <span className="text-[11px] text-[#8e8168]">
-                    {hapticsEnabled ? 'Haptics enabled on tap' : 'Haptics disabled'}
-                  </span>
-                </div>
-              </div>
-
-              <IronButton
-                seed="settings-haptics-toggle"
-                dripCount={0}
-                variant={hapticsEnabled ? 'blood' : 'default'}
-                onClick={() => {
-                  soundManager.playUiClick();
-                  onToggleHaptics();
-                }}
-                className="min-h-[56px] min-w-[92px] px-5 text-xs font-semibold"
-                aria-pressed={hapticsEnabled}
-                aria-label={hapticsEnabled ? 'Disable Tactile Feedback' : 'Enable Tactile Feedback'}
-              >
-                <span className={hapticsEnabled ? 'text-[#d8c9a8]' : 'text-[#8e8168]'}>
-                  {hapticsEnabled ? 'On' : 'Off'}
-                </span>
-              </IronButton>
-            </div>
-
-            {/* Vibration Duration / Intensity Slider */}
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between text-xs font-medium">
-                <span className="text-[#d8c9a8]">Pulse Intensity</span>
-                <span className="font-mono-numbers text-[#f2a93b] font-semibold">
-                  {hapticsEnabled ? `${hapticDuration} ms` : 'Off'}
-                </span>
-              </div>
-              <input
-                type="range"
-                min={HAPTIC_DURATION_MIN_MS}
-                max={HAPTIC_DURATION_MAX_MS}
-                step={1}
-                value={hapticDuration}
-                onChange={(e) => onHapticDurationChange(parseInt(e.target.value, 10))}
-                onPointerUp={handleHapticPreview}
-                onTouchEnd={handleHapticPreview}
-                onKeyUp={handleHapticPreview}
-                disabled={!hapticsEnabled}
-                style={
-                  {
-                    '--slider-accent': '#f2a93b',
-                    '--slider-glow': 'rgba(242, 169, 59, 0.45)',
-                  } as React.CSSProperties
-                }
-                className={`df-slider w-full cursor-pointer transition-opacity ${
-                  !hapticsEnabled ? 'opacity-40 cursor-not-allowed' : 'opacity-100'
-                }`}
-                aria-label="Haptic vibration duration"
-              />
-            </div>
-          </div>
-
-          <div className="h-px bg-[#3a3f47]/70 w-full" />
-
           {/* Mute Toggle Row */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
@@ -368,7 +281,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           variant="blood"
           dripCount={2}
           onClick={onClose}
-          className="w-full min-h-[56px] font-semibold text-sm tracking-wide shrink-0"
+          className="w-full min-h-[56px] font-semibold text-sm tracking-wide"
         >
           Done
         </IronButton>

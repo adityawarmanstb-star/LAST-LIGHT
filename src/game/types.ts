@@ -77,3 +77,32 @@ export interface DebugStats {
   currentMinute: number;
 }
 
+export type DailyMissionType =
+  | 'kill_enemies'
+  | 'survive_seconds'
+  | 'collect_coins'
+  | 'kill_elites'
+  | 'kill_bosses'
+  | 'reach_level'
+  | 'play_runs';
+
+export type DailyMissionCategory = 'combat' | 'survival' | 'treasure';
+
+export interface DailyMission {
+  id: string;
+  title: string;
+  description: string;
+  type: DailyMissionType;
+  category: DailyMissionCategory;
+  target: number;
+  progress: number;
+  rewardCoins: number;
+  completed: boolean;
+  claimed: boolean;
+  icon: 'skull' | 'clock' | 'coins' | 'crown' | 'sparkles' | 'flame';
+}
+
+export interface DailyMissionsState {
+  dateKey: string;
+  missions: DailyMission[];
+}

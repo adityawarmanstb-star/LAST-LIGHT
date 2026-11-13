@@ -8,6 +8,7 @@ import { TitleScreen } from './components/TitleScreen';
 import { HUD } from './components/HUD';
 import { LevelUpModal } from './components/LevelUpModal';
 import { CampShopModal } from './components/CampShopModal';
+import { DailyMissionsModal } from './components/DailyMissionsModal';
 import { GameOverModal } from './components/GameOverModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ForgedIronFrame, IronButton } from './components/ForgedIronFrame';
@@ -18,19 +19,17 @@ import { BossInfo, DebugStats, EventWarningInfo, RunStats, UpgradeOption, Weapon
 import { Play, RotateCcw, Settings } from 'lucide-react';
 import { MainScene } from './game/scenes/MainScene';
 import { initCapacitorMobile } from './mobile/capacitorBridge';
-import { haptics } from './mobile/haptics';
 
 export default function App() {
   const [gameState, setGameState] = useState<'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('TITLE');
   const [showShop, setShowShop] = useState(false);
+  const [showMissions, setShowMissions] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [isMuted, setIsMuted] = useState<boolean>(soundManager.getMuted());
   const [masterVolume, setMasterVolume] = useState<number>(soundManager.getMasterVolume());
   const [musicVolume, setMusicVolume] = useState<number>(soundManager.getMusicVolume());
   const [sfxVolume, setSfxVolume] = useState<number>(soundManager.getSfxVolume());
   const [brightness, setBrightness] = useState<number>(gameManager.getBrightness());
-  const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(haptics.isEnabled());
-  const [hapticDuration, setHapticDuration] = useState<number>(haptics.getDurationMs());
 
   // In-run state
   const [hp, setHp] = useState<number>(100);
@@ -66,6 +65,8 @@ export default function App() {
   gameStateRef.current = gameState;
   const showShopRef = useRef(showShop);
   showShopRef.current = showShop;
+  const showMissionsRef = useRef(showMissions);
+  showMissionsRef.current = showMissions;
   const showSettingsRef = useRef(showSettings);
   showSettingsRef.current = showSettings;
 
@@ -187,6 +188,10 @@ export default function App() {
           setShowSettings(false);
           return true;
         }
+        if (showMissionsRef.current) {
+          setShowMissions(false);
+          return true;
+        }
         if (showShopRef.current) {
           setShowShop(false);
           return true;
@@ -255,16 +260,6 @@ export default function App() {
   const handleBrightnessChange = (val: number) => {
     gameManager.setBrightness(val);
     setBrightness(val);
-  };
-
-  const handleToggleHaptics = () => {
-    const next = haptics.toggle();
-    setHapticsEnabled(next);
-  };
-
-  const handleHapticDurationChange = (ms: number) => {
-    const saved = haptics.setDurationMs(ms);
-    setHapticDuration(saved);
   };
 
   const handleOpenSettings = () => {
@@ -338,8 +333,10 @@ export default function App() {
       {gameState === 'TITLE' && (
         <TitleScreen
           isMuted={isMuted}
+          isModalOpen={showShop || showSettings || showMissions}
           onStartGame={handleStartGame}
           onOpenShop={() => setShowShop(true)}
+          onOpenMissions={() => setShowMissions(true)}
           onToggleMute={handleToggleMute}
           onOpenSettings={() => setShowSettings(true)}
         />
@@ -440,7 +437,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal: Settings (Master / Music / SFX / Brightness / Tactile Feedback) */}
+      {/* Modal: Settings (Master / Music / SFX / Brightness Sliders & Mute Toggle) */}
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
@@ -449,15 +446,11 @@ export default function App() {
         sfxVolume={sfxVolume}
         brightness={brightness}
         isMuted={isMuted}
-        hapticsEnabled={hapticsEnabled}
-        hapticDuration={hapticDuration}
         onMasterVolumeChange={handleMasterVolumeChange}
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
         onBrightnessChange={handleBrightnessChange}
         onToggleMute={handleToggleMute}
-        onToggleHaptics={handleToggleHaptics}
-        onHapticDurationChange={handleHapticDurationChange}
       />
 
       {/* Modal: Level-Up Card Selection */}
@@ -472,9 +465,16 @@ export default function App() {
       {gameState === 'GAME_OVER' && runSummary && (
         <GameOverModal
           stats={runSummary}
+          isModalOpen={showShop || showMissions}
           onRestart={handleStartGame}
           onOpenShop={() => setShowShop(true)}
+          onOpenMissions={() => setShowMissions(true)}
         />
+      )}
+
+      {/* Modal: Daily Missions */}
+      {showMissions && (
+        <DailyMissionsModal onClose={() => setShowMissions(false)} />
       )}
 
       {/* Modal: Permanent Camp Upgrades Forge */}

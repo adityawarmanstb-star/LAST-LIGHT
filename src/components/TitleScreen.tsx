@@ -1,12 +1,15 @@
-import React, { useEffect } from 'react';
-import { Play, ShoppingBag, Volume2, VolumeX, Coins, Settings } from 'lucide-react';
-import { getSavedCoins } from '../game/metaProgression';
+import React, { useEffect, useState } from 'react';
+import { Play, ShoppingBag, Volume2, VolumeX, Coins, Settings, ScrollText } from 'lucide-react';
+import { getSavedCoins, subscribeCoins } from '../game/metaProgression';
+import { dailyMissions } from '../game/dailyMissions';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 
 interface TitleScreenProps {
   isMuted: boolean;
+  isModalOpen?: boolean;
   onStartGame: () => void;
   onOpenShop: () => void;
+  onOpenMissions: () => void;
   onToggleMute: () => void;
   onOpenSettings: () => void;
 }
@@ -41,23 +44,40 @@ const EMBER_PARTICLES = Array.from({ length: 28 }, (_, i) => {
 
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   isMuted,
+  isModalOpen = false,
   onStartGame,
   onOpenShop,
+  onOpenMissions,
   onToggleMute,
   onOpenSettings,
 }) => {
-  const bankCoins = getSavedCoins();
+  const [bankCoins, setBankCoins] = useState<number>(() => getSavedCoins());
+  const [unclaimedMissions, setUnclaimedMissions] = useState<number>(() =>
+    dailyMissions.getUnclaimedCount()
+  );
 
-  // Allow Enter or Space to start
+  useEffect(() => {
+    const unsubCoins = subscribeCoins(setBankCoins);
+    const unsubMissions = dailyMissions.subscribe(() => {
+      setUnclaimedMissions(dailyMissions.getUnclaimedCount());
+    });
+    return () => {
+      unsubCoins();
+      unsubMissions();
+    };
+  }, []);
+
+  // Allow Enter or Space to start when no modal overlay is open
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isModalOpen) return;
       if (e.code === 'Space' || e.code === 'Enter') {
         onStartGame();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onStartGame]);
+  }, [onStartGame, isModalOpen]);
 
   return (
     <div
@@ -191,6 +211,21 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
           <div className="grid grid-cols-2 gap-3 w-full">
             <IronButton
+              seed="title-missions-btn"
+              dripCount={2}
+              onClick={onOpenMissions}
+              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+            >
+              <ScrollText className="w-4 h-4 text-[#f2a93b]" />
+              <span>Missions</span>
+              {unclaimedMissions > 0 && (
+                <span className="ml-0.5 min-w-[20px] h-5 px-1.5 rounded-full bg-[#b3121a] border border-[#f2a93b] text-[11px] font-mono-numbers font-bold text-[#f2a93b] inline-flex items-center justify-center shadow-[0_0_8px_rgba(242,169,59,0.55)]">
+                  {unclaimedMissions}
+                </span>
+              )}
+            </IronButton>
+
+            <IronButton
               seed="title-shop-btn"
               dripCount={2}
               onClick={onOpenShop}
@@ -199,17 +234,17 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               <ShoppingBag className="w-4 h-4 text-[#f2a93b]" />
               <span>Shop</span>
             </IronButton>
-
-            <IronButton
-              seed="title-settings-btn"
-              dripCount={2}
-              onClick={onOpenSettings}
-              className="w-full min-h-[56px] px-4 text-sm font-semibold"
-            >
-              <Settings className="w-4 h-4 text-[#d8c9a8]" />
-              <span>Settings</span>
-            </IronButton>
           </div>
+
+          <IronButton
+            seed="title-settings-btn"
+            dripCount={2}
+            onClick={onOpenSettings}
+            className="w-full min-h-[56px] px-4 text-sm font-semibold"
+          >
+            <Settings className="w-4 h-4 text-[#d8c9a8]" />
+            <span>Settings</span>
+          </IronButton>
         </div>
       </div>
 

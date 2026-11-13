@@ -1,6 +1,7 @@
-import React, { useRef, useState } from 'react';
-import { Coins, Skull, Heart, AlertTriangle } from 'lucide-react';
-import { BossInfo, DebugStats, EventWarningInfo, WeaponState } from '../game/types';
+import React, { useEffect, useRef, useState } from 'react';
+import { Coins, Skull, Heart, AlertTriangle, ScrollText } from 'lucide-react';
+import { dailyMissions } from '../game/dailyMissions';
+import { BossInfo, DailyMission, DebugStats, EventWarningInfo, WeaponState } from '../game/types';
 import { VirtualJoystick } from './VirtualJoystick';
 import { ForgedIronFrame } from './ForgedIronFrame';
 import { BloodHpBar } from './BloodHpBar';
@@ -51,7 +52,27 @@ export const HUD: React.FC<HUDProps> = ({
   onSpawnBossNow,
 }) => {
   const [showDebug, setShowDebug] = useState(false);
+  const [missionToast, setMissionToast] = useState<DailyMission | null>(null);
   const debugTapTimestampsRef = useRef<number[]>([]);
+
+  useEffect(() => {
+    let dismissTimer: number | null = null;
+    const unsub = dailyMissions.onMissionCompleted((mission) => {
+      setMissionToast(mission);
+      if (dismissTimer !== null) {
+        window.clearTimeout(dismissTimer);
+      }
+      dismissTimer = window.setTimeout(() => {
+        setMissionToast(null);
+      }, 3200);
+    });
+    return () => {
+      unsub();
+      if (dismissTimer !== null) {
+        window.clearTimeout(dismissTimer);
+      }
+    };
+  }, []);
 
   const handleDebugHotspotTap = () => {
     const now = Date.now();
@@ -347,6 +368,31 @@ export const HUD: React.FC<HUDProps> = ({
                 {eventWarning.title}
               </span>
               <span className="text-[11px] text-[#d8c9a8]">{eventWarning.subtitle}</span>
+            </div>
+          </ForgedIronFrame>
+        </div>
+      )}
+
+      {/* Non-blocking Daily Mission Completed Toast */}
+      {missionToast && !eventWarning && (
+        <div className="w-full max-w-sm mx-auto px-4 pointer-events-none">
+          <ForgedIronFrame
+            seed={`mission-toast-${missionToast.id}`}
+            dripCount={2}
+            maxDripLength={10}
+            borderColor="#f2a93b"
+            glowColor="#f2a93b"
+            glowStrength={10}
+            contentClassName="px-4 py-2 flex items-center gap-3 justify-center text-center"
+          >
+            <ScrollText className="w-4 h-4 text-[#f2a93b] shrink-0" />
+            <div className="flex flex-col">
+              <span className="font-display text-xs font-bold tracking-wider text-[#f2a93b]">
+                MISSION COMPLETE
+              </span>
+              <span className="text-[11px] text-[#d8c9a8]">
+                {missionToast.title} · +{missionToast.rewardCoins} Coins
+              </span>
             </div>
           </ForgedIronFrame>
         </div>

@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { soundManager } from '../audio';
 import { gameManager } from '../GameManager';
 import { calculateBasePlayerStats, saveCoins, getSavedCoins } from '../metaProgression';
+import { dailyMissions } from '../dailyMissions';
 import { BossInfo, PlayerStats, RunStats, UpgradeOption, WeaponState } from '../types';
 import { getAvailableUpgrades } from '../upgrades';
 
@@ -518,6 +519,7 @@ export class MainScene extends Phaser.Scene {
   private isGamePaused: boolean = false;
   private hitstopTimer: number = 0;
   private levelUpPulseSeq: number = 0;
+  private lastMissionSecondRecorded: number = 0;
 
   constructor() {
     super('MainScene');
@@ -571,6 +573,8 @@ export class MainScene extends Phaser.Scene {
     this.darknessFallsTimerMs = 0;
     this.enemyProjectilePool = [];
     this.enemyTrailPool = [];
+    this.lastMissionSecondRecorded = 0;
+    dailyMissions.ensureToday();
   }
 
   preload() {
@@ -1000,6 +1004,7 @@ export class MainScene extends Phaser.Scene {
 
     // Clean up activeScene reference on shutdown/restart
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      dailyMissions.flush();
       if (gameManager.activeScene === this) {
         gameManager.activeScene = null;
       }
@@ -1579,6 +1584,11 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.runTime += delta / 1000;
+    const wholeSec = Math.floor(this.runTime);
+    if (wholeSec > this.lastMissionSecondRecorded) {
+      this.lastMissionSecondRecorded = wholeSec;
+      dailyMissions.recordMax('survive_seconds', wholeSec);
+    }
 
     if (BALANCE.player.hpRegenPerSec > 0 && this.playerStats.currentHp < this.playerStats.maxHp) {
       this.playerStats.currentHp = Math.min(
@@ -3312,6 +3322,13 @@ export class MainScene extends Phaser.Scene {
 
   private killEnemy(enemy: Phaser.Physics.Arcade.Sprite, edata: EnemyData) {
     this.enemiesKilled++;
+    dailyMissions.recordIncrement('kill_enemies', 1);
+    if (edata.isElite) {
+      dailyMissions.recordIncrement('kill_elites', 1);
+    }
+    if (edata.type === 'boss') {
+      dailyMissions.recordIncrement('kill_bosses', 1);
+    }
     soundManager.playEnemyDeath();
 
     // Update kill combo streak (x1 to x5) and reset 3s decay timer
@@ -3455,6 +3472,7 @@ export class MainScene extends Phaser.Scene {
     } else if (type === 'coin') {
       soundManager.playCoinCollect();
       this.coinsEarned += value;
+      dailyMissions.recordIncrement('collect_coins', value);
       this.spawnParticleBurst(pickup.x, pickup.y, 5, 'fx_spark', 60, 140, 0.15, 0.28, 0xffd700);
     } else if (type === 'light_shard') {
       soundManager.playGemCollect();
@@ -3483,6 +3501,7 @@ export class MainScene extends Phaser.Scene {
     if (this.currentXp >= this.nextLevelXp) {
       this.currentXp -= this.nextLevelXp;
       this.playerLevel++;
+      dailyMissions.recordMax('reach_level', this.playerLevel);
       // +15% more XP needed each level
       this.nextLevelXp = Math.round(this.nextLevelXp * BALANCE.xp.xpGrowthMultiplier);
       this.triggerLevelUp();
@@ -3787,8 +3806,10 @@ export class MainScene extends Phaser.Scene {
 
     soundManager.playGameOverStinger();
 
-    // Bank earned coins to permanent storage
+    // Bank earned coins & flush Daily Missions on run completion
     saveCoins(getSavedCoins() + this.coinsEarned);
+    dailyMissions.recordIncrement('play_runs', 1);
+    dailyMissions.flush();
 
     this.tweens.add({
       targets: this.player,
@@ -3940,6 +3961,7 @@ export class MainScene extends Phaser.Scene {
   // Comprehensive pause / resume (physics, timers, tweens, animations, darkness, audio)
   public pauseGame() {
     this.isGamePaused = true;
+    dailyMissions.flush();
     this.physics.pause();
     this.time.paused = true;
     this.tweens.pauseAll();

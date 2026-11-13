@@ -76,6 +76,16 @@ export const INITIAL_UPGRADES: MetaUpgrade[] = [
   },
 ];
 
+type CoinsListener = (coins: number) => void;
+let coinsListeners: CoinsListener[] = [];
+
+export function subscribeCoins(cb: CoinsListener): () => void {
+  coinsListeners.push(cb);
+  return () => {
+    coinsListeners = coinsListeners.filter((l) => l !== cb);
+  };
+}
+
 export function getSavedCoins(): number {
   try {
     const val = localStorage.getItem(COINS_KEY);
@@ -91,6 +101,7 @@ export function saveCoins(coins: number): void {
   } catch {
     // ignore
   }
+  coinsListeners.forEach((l) => l(coins));
 }
 
 export function addCoins(amount: number): number {

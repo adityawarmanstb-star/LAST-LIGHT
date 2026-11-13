@@ -1,29 +1,50 @@
-import React, { useEffect } from 'react';
-import { RotateCcw, Coins, Skull, Clock, ShoppingBag } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { RotateCcw, Coins, Skull, Clock, ShoppingBag, ScrollText } from 'lucide-react';
+import { dailyMissions } from '../game/dailyMissions';
 import { RunStats } from '../game/types';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 
 interface GameOverModalProps {
   stats: RunStats;
+  isModalOpen?: boolean;
   onRestart: () => void;
   onOpenShop: () => void;
+  onOpenMissions: () => void;
 }
 
-export const GameOverModal: React.FC<GameOverModalProps> = ({ stats, onRestart, onOpenShop }) => {
+export const GameOverModal: React.FC<GameOverModalProps> = ({
+  stats,
+  isModalOpen = false,
+  onRestart,
+  onOpenShop,
+  onOpenMissions,
+}) => {
+  const [unclaimedMissions, setUnclaimedMissions] = useState<number>(() =>
+    dailyMissions.getUnclaimedCount()
+  );
+
+  useEffect(() => {
+    const unsub = dailyMissions.subscribe(() => {
+      setUnclaimedMissions(dailyMissions.getUnclaimedCount());
+    });
+    return unsub;
+  }, []);
+
   const minutes = Math.floor(stats.timeSurvived / 60);
   const seconds = stats.timeSurvived % 60;
   const timeFormatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 
-  // Allow Enter or Space for instant restart
+  // Allow Enter or Space for instant restart when no modal is open
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (isModalOpen) return;
       if (e.code === 'Space' || e.code === 'Enter') {
         onRestart();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [onRestart]);
+  }, [onRestart, isModalOpen]);
 
   return (
     <div
@@ -147,15 +168,32 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({ stats, onRestart, 
             <span>One more run</span>
           </IronButton>
 
-          <IronButton
-            seed="gameover-shop-btn"
-            dripCount={2}
-            onClick={onOpenShop}
-            className="w-full min-h-[56px] px-6 text-sm font-semibold"
-          >
-            <ShoppingBag className="w-4 h-4 text-[#f2a93b]" />
-            <span>Shop</span>
-          </IronButton>
+          <div className="grid grid-cols-2 gap-3 w-full">
+            <IronButton
+              seed="gameover-missions-btn"
+              dripCount={2}
+              onClick={onOpenMissions}
+              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+            >
+              <ScrollText className="w-4 h-4 text-[#f2a93b]" />
+              <span>Missions</span>
+              {unclaimedMissions > 0 && (
+                <span className="ml-0.5 min-w-[20px] h-5 px-1.5 rounded-full bg-[#b3121a] border border-[#f2a93b] text-[11px] font-mono-numbers font-bold text-[#f2a93b] inline-flex items-center justify-center shadow-[0_0_8px_rgba(242,169,59,0.55)]">
+                  {unclaimedMissions}
+                </span>
+              )}
+            </IronButton>
+
+            <IronButton
+              seed="gameover-shop-btn"
+              dripCount={2}
+              onClick={onOpenShop}
+              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+            >
+              <ShoppingBag className="w-4 h-4 text-[#f2a93b]" />
+              <span>Shop</span>
+            </IronButton>
+          </div>
         </div>
       </ForgedIronFrame>
     </div>
