@@ -16,6 +16,8 @@ interface WeatherParticle {
   y: number;
   vx: number;
   vy: number;
+  dx: number;
+  dy: number;
   size: number;
   length: number;
   alpha: number;
@@ -58,8 +60,8 @@ const WEATHER_CYCLE: readonly WeatherKind[] = ['embers', 'rain', 'ash', 'storm']
 const TIME_CYCLE_DURATION_SEC = 360; // Full 4-phase night cycle every 6 minutes
 const WEATHER_DURATION_MS = 55000;
 const WEATHER_FADE_MS = 3200;
-const MAX_WEATHER_PARTICLES = 68;
-const LOW_QUALITY_WEATHER_PARTICLES = 32;
+const MAX_WEATHER_PARTICLES = 44;
+const LOW_QUALITY_WEATHER_PARTICLES = 20;
 
 function lerpHexColor(c1: number, c2: number, t: number): number {
   const clamped = Math.max(0, Math.min(1, t));
@@ -91,6 +93,10 @@ export class AtmosphereOverlay {
   private bossBloodMoonBlend: number = 0;
   private lightningAlpha: number = 0;
   private nextLightningMs: number = 9000;
+  private lastFloorTintColor: number = -1;
+  private lastFloorTintAlpha: number = -1;
+  private lastFloorW: number = -1;
+  private lastFloorH: number = -1;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -123,6 +129,8 @@ export class AtmosphereOverlay {
         y: Math.random() * h,
         vx: 0,
         vy: 0,
+        dx: 0,
+        dy: 0,
         size: 1.5,
         length: 12,
         alpha: 0.4,
@@ -154,6 +162,8 @@ export class AtmosphereOverlay {
         p.y = randomY ? Math.random() * h : h + Math.random() * 24;
         p.vx = Phaser.Math.FloatBetween(-18, 18);
         p.vy = Phaser.Math.FloatBetween(-58, -24);
+        p.dx = 0;
+        p.dy = 0;
         p.size = Phaser.Math.FloatBetween(1.4, 2.8);
         p.length = 0;
         p.alpha = Phaser.Math.FloatBetween(0.28, 0.62);
@@ -166,6 +176,9 @@ export class AtmosphereOverlay {
         p.vy = Phaser.Math.FloatBetween(460, 620);
         p.size = 1.1;
         p.length = Phaser.Math.FloatBetween(14, 24);
+        const speedMag = Math.max(1, Math.hypot(p.vx, p.vy));
+        p.dx = (p.vx / speedMag) * p.length;
+        p.dy = (p.vy / speedMag) * p.length;
         p.alpha = Phaser.Math.FloatBetween(0.16, 0.34);
         break;
       }
@@ -176,6 +189,9 @@ export class AtmosphereOverlay {
         p.vy = Phaser.Math.FloatBetween(640, 820);
         p.size = 1.3;
         p.length = Phaser.Math.FloatBetween(20, 32);
+        const speedMag = Math.max(1, Math.hypot(p.vx, p.vy));
+        p.dx = (p.vx / speedMag) * p.length;
+        p.dy = (p.vy / speedMag) * p.length;
         p.alpha = Phaser.Math.FloatBetween(0.22, 0.44);
         break;
       }
@@ -184,6 +200,8 @@ export class AtmosphereOverlay {
         p.y = randomY ? Math.random() * h : -12 - Math.random() * 24;
         p.vx = Phaser.Math.FloatBetween(-14, 16);
         p.vy = Phaser.Math.FloatBetween(26, 54);
+        p.dx = 0;
+        p.dy = 0;
         p.size = Phaser.Math.FloatBetween(1.3, 2.7);
         p.length = 0;
         p.alpha = Phaser.Math.FloatBetween(0.22, 0.5);
@@ -242,9 +260,20 @@ export class AtmosphereOverlay {
       );
     }
 
-    this.floorTintGraphics.clear();
-    this.floorTintGraphics.fillStyle(tintColor, tintAlpha);
-    this.floorTintGraphics.fillRect(0, 0, w, h);
+    if (
+      tintColor !== this.lastFloorTintColor ||
+      Math.abs(tintAlpha - this.lastFloorTintAlpha) > 0.004 ||
+      w !== this.lastFloorW ||
+      h !== this.lastFloorH
+    ) {
+      this.lastFloorTintColor = tintColor;
+      this.lastFloorTintAlpha = tintAlpha;
+      this.lastFloorW = w;
+      this.lastFloorH = h;
+      this.floorTintGraphics.clear();
+      this.floorTintGraphics.fillStyle(tintColor, tintAlpha);
+      this.floorTintGraphics.fillRect(0, 0, w, h);
+    }
 
     // 2. Dynamic Weather Cycle (fade out -> switch -> fade in)
     this.weatherElapsedMs += deltaMs;
@@ -329,14 +358,11 @@ export class AtmosphereOverlay {
       if (drawAlpha <= 0.01) continue;
 
       if (activeWeather === 'rain' || activeWeather === 'storm') {
-        const speedMag = Math.max(1, Math.hypot(p.vx, p.vy));
-        const dx = (p.vx / speedMag) * p.length;
-        const dy = (p.vy / speedMag) * p.length;
         const color = activeWeather === 'storm' ? 0xb8dcf8 : 0x8db8dc;
         this.weatherGraphics.lineStyle(p.size, color, drawAlpha);
         this.weatherGraphics.beginPath();
         this.weatherGraphics.moveTo(p.x, p.y);
-        this.weatherGraphics.lineTo(p.x - dx, p.y - dy);
+        this.weatherGraphics.lineTo(p.x - p.dx, p.y - p.dy);
         this.weatherGraphics.strokePath();
       } else if (activeWeather === 'embers') {
         const emberColor =

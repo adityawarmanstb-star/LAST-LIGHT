@@ -8,7 +8,7 @@ interface BossHealthOverlayProps {
   playerLevel?: number;
 }
 
-export const BossHealthOverlay: React.FC<BossHealthOverlayProps> = ({
+const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
   boss,
   playerLevel = 1,
 }) => {
@@ -159,3 +159,5 @@ export const BossHealthOverlay: React.FC<BossHealthOverlayProps> = ({
     </div>
   );
 };
+
+export const BossHealthOverlay = React.memo(BossHealthOverlayComponent);

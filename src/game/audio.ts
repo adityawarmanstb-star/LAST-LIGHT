@@ -11,7 +11,7 @@
  * - gameover_full -> music_gameover_full_da1d4eab.ogg (plays on game-over screen)
  * Crossfades 1s between tracks.
  *
- * SFX (10 mapped events, .ogg with .wav fallback):
+ * SFX (10 mapped events, .ogg with .mp3 fallback):
  * - hit_spark, enemy_death, level_up, boss_slam, gem_pickup,
  *   lightning, blade, player_attack, brute_stomp, boss_attack
  * Random detune +-6%, throttled to 1 per 60ms per sound, max 16 simultaneous voices.
@@ -52,43 +52,43 @@ const MUSIC_ASSETS: Record<MusicTrackKey, { url: string; loop: boolean }> = {
 const SFX_ASSETS: Record<SfxKey, string[]> = {
   hit_spark: [
     './assets/aistudio/sfx_hit_spark_f2b00c4a.ogg',
-    './assets/aistudio/sfx_hit_spark_428d2bf5.wav',
+    './assets/aistudio/sfx_hit_spark_428d2bf5.mp3',
   ],
   enemy_death: [
     './assets/aistudio/sfx_enemy_death_0b385d1d.ogg',
-    './assets/aistudio/sfx_enemy_death_97ebef3d.wav',
+    './assets/aistudio/sfx_enemy_death_97ebef3d.mp3',
   ],
   level_up: [
     './assets/aistudio/sfx_level_up_c4693615.ogg',
-    './assets/aistudio/sfx_level_up_f5869cd9.wav',
+    './assets/aistudio/sfx_level_up_f5869cd9.mp3',
   ],
   boss_slam: [
     './assets/aistudio/sfx_boss_slam_b98315c3.ogg',
-    './assets/aistudio/sfx_boss_slam_3d583cef.wav',
+    './assets/aistudio/sfx_boss_slam_3d583cef.mp3',
   ],
   gem_pickup: [
     './assets/aistudio/sfx_gem_pickup_2c380ba2.ogg',
-    './assets/aistudio/sfx_gem_pickup_92932dab.wav',
+    './assets/aistudio/sfx_gem_pickup_92932dab.mp3',
   ],
   lightning: [
     './assets/aistudio/sfx_lightning_9c7cafb5.ogg',
-    './assets/aistudio/sfx_lightning_d0ad84af.wav',
+    './assets/aistudio/sfx_lightning_d0ad84af.mp3',
   ],
   blade: [
     './assets/aistudio/sfx_blade_de0968e0.ogg',
-    './assets/aistudio/sfx_blade_5758eb2a.wav',
+    './assets/aistudio/sfx_blade_5758eb2a.mp3',
   ],
   player_attack: [
     './assets/aistudio/sfx_player_attack_48ed15ce.ogg',
-    './assets/aistudio/sfx_player_attack_aa64bba5.wav',
+    './assets/aistudio/sfx_player_attack_aa64bba5.mp3',
   ],
   brute_stomp: [
     './assets/aistudio/sfx_brute_stomp_eb731150.ogg',
-    './assets/aistudio/sfx_brute_stomp_0b2a02d4.wav',
+    './assets/aistudio/sfx_brute_stomp_0b2a02d4.mp3',
   ],
   boss_attack: [
     './assets/aistudio/sfx_boss_attack_5241beeb.ogg',
-    './assets/aistudio/sfx_boss_attack_cf06081d.wav',
+    './assets/aistudio/sfx_boss_attack_cf06081d.mp3',
   ],
 };
 
@@ -433,7 +433,7 @@ class AudioManager {
       }
     });
 
-    // Load SFX (.ogg with .wav fallback)
+    // Load SFX (.ogg with .mp3 fallback)
     const sfxKeys = Object.keys(SFX_ASSETS) as SfxKey[];
     const sfxPromises = sfxKeys.map(async (key) => {
       if (this.sfxBuffers[key]) return;

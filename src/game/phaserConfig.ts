@@ -29,6 +29,22 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
     width: 540,
     height: 960,
     backgroundColor: '#08090d',
+    fps: {
+      target: 60,
+      min: 30,
+      smoothStep: true,
+    },
+    render: {
+      powerPreference: 'high-performance',
+      antialias: false,
+      antialiasGL: false,
+      roundPixels: true,
+      transparent: false,
+      stencil: false,
+      batchSize: 4096,
+      mipmapRegeneration: false,
+      desynchronized: true,
+    },
     audio: sharedCtx ? { context: sharedCtx } : undefined,
     loader: {
       imageLoadType: 'HTMLImageElement',

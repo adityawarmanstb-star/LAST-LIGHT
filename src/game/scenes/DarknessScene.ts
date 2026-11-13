@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { gameManager } from '../GameManager';
 import { LIGHT, MainScene } from './MainScene';
+import { computePointShadowOcclusion, WorldPillarData } from '../ShadowCasterSystem';
 
 interface LightSourceSlot {
   x: number;
@@ -9,9 +10,25 @@ interface LightSourceSlot {
   alpha: number;
 }
 
+function lerpHexColor(c1: number, c2: number, t: number): number {
+  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
+  const r1 = (c1 >> 16) & 0xff;
+  const g1 = (c1 >> 8) & 0xff;
+  const b1 = c1 & 0xff;
+  const r2 = (c2 >> 16) & 0xff;
+  const g2 = (c2 >> 8) & 0xff;
+  const b2 = c2 & 0xff;
+  const r = Math.round(r1 + (r2 - r1) * clamped);
+  const g = Math.round(g1 + (g2 - g1) * clamped);
+  const b = Math.round(b1 + (b2 - b1) * clamped);
+  return (r << 16) | (g << 8) | b;
+}
+
 export class DarknessScene extends Phaser.Scene {
   private darkRT!: Phaser.GameObjects.RenderTexture;
+  private shadowMaskGraphics!: Phaser.GameObjects.Graphics;
   private bossGlowSprite!: Phaser.GameObjects.Image;
+  private torchGlowPool: Phaser.GameObjects.Image[] = [];
   private fogLayer1!: Phaser.GameObjects.TileSprite;
   private fogLayer2!: Phaser.GameObjects.TileSprite;
   private eyeGraphics!: Phaser.GameObjects.Graphics;
@@ -27,14 +44,16 @@ export class DarknessScene extends Phaser.Scene {
   private currentLowHpScale: number = 1.0;
   private currentExternalRadiusMult: number = 1.0;
   private bloodFogBlend: number = 0;
+  private wasBloodFogTinted: boolean = false;
   private effectTimeMs: number = 0;
 
   // Level-up expanding reveal pulse
   private lastSeenLevelUpSeq: number = 0;
   private levelUpPulseRemainingMs: number = 0;
 
-  // Pre-allocated fixed pool of light sources (zero per-frame allocations, max 12)
+  // Pre-allocated fixed pool of light sources & player projectile scratch buffer (zero per-frame allocations)
   private lightSources: LightSourceSlot[] = [];
+  private playerProjScratch: Phaser.Physics.Arcade.Sprite[] = [];
 
   constructor() {
     super({ key: 'DarknessScene' });
@@ -104,6 +123,23 @@ export class DarknessScene extends Phaser.Scene {
       .setDepth(5);
     this.stripInteractivity(this.darkRT);
 
+    // Off-display Graphics buffer used to cast real-time shadow cones into darkRT
+    this.shadowMaskGraphics = this.make.graphics({ x: 0, y: 0 }, false);
+
+    // Pooled warm amber glows for world torches in darkness
+    this.torchGlowPool = [];
+    for (let i = 0; i < 8; i++) {
+      const tg = this.add
+        .image(0, 0, 'light_amber_glow')
+        .setOrigin(0.5, 0.5)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(6)
+        .setAlpha(0.28)
+        .setVisible(false);
+      this.stripInteractivity(tg);
+      this.torchGlowPool.push(tg);
+    }
+
     // Subtle amber glow for the boss so it stays visible from afar
     this.bossGlowSprite = this.add
       .image(0, 0, 'light_amber_glow')
@@ -144,6 +180,11 @@ export class DarknessScene extends Phaser.Scene {
         this.unsubQuality = null;
       }
       this.scale.off('resize', this.handleResize, this);
+      this.shadowMaskGraphics?.destroy();
+      for (let i = 0; i < this.torchGlowPool.length; i++) {
+        this.torchGlowPool[i].destroy();
+      }
+      this.torchGlowPool = [];
     });
 
     // Guarantee UIScene stays strictly above DarknessScene
@@ -285,31 +326,17 @@ export class DarknessScene extends Phaser.Scene {
         }
 
         if (this.bloodFogBlend > 0.01) {
-          const baseC1 = Phaser.Display.Color.IntegerToColor(LIGHT.fog.tint1);
-          const bloodC1 = Phaser.Display.Color.IntegerToColor(0xc81622);
-          const mix1 = Phaser.Display.Color.Interpolate.ColorWithColor(
-            baseC1,
-            bloodC1,
-            100,
-            Math.round(this.bloodFogBlend * 100)
-          );
-          const baseC2 = Phaser.Display.Color.IntegerToColor(LIGHT.fog.tint2);
-          const bloodC2 = Phaser.Display.Color.IntegerToColor(0xe5303a);
-          const mix2 = Phaser.Display.Color.Interpolate.ColorWithColor(
-            baseC2,
-            bloodC2,
-            100,
-            Math.round(this.bloodFogBlend * 100)
-          );
-          this.fogLayer1.setTint(Phaser.Display.Color.GetColor(mix1.r, mix1.g, mix1.b));
-          this.fogLayer2.setTint(Phaser.Display.Color.GetColor(mix2.r, mix2.g, mix2.b));
+          this.wasBloodFogTinted = true;
+          this.fogLayer1.setTint(lerpHexColor(LIGHT.fog.tint1, 0xc81622, this.bloodFogBlend));
+          this.fogLayer2.setTint(lerpHexColor(LIGHT.fog.tint2, 0xe5303a, this.bloodFogBlend));
           this.fogLayer1.setAlpha(
             Phaser.Math.Linear(LIGHT.fog.layer1Alpha, 0.22, this.bloodFogBlend)
           );
           this.fogLayer2.setAlpha(
             Phaser.Math.Linear(LIGHT.fog.layer2Alpha, 0.16, this.bloodFogBlend)
           );
-        } else {
+        } else if (this.wasBloodFogTinted) {
+          this.wasBloodFogTinted = false;
           this.fogLayer1.setTint(LIGHT.fog.tint1);
           this.fogLayer2.setTint(LIGHT.fog.tint2);
           this.fogLayer1.setAlpha(LIGHT.fog.layer1Alpha);
@@ -394,6 +421,33 @@ export class DarknessScene extends Phaser.Scene {
         );
       }
 
+      // Priority 2.5: World Torches (warm flickering pools cutting through darkness & shadows)
+      let torchGlowIdx = 0;
+      if (snap.torches && snap.torches.count > 0) {
+        const torches = snap.torches.items;
+        const tCount = snap.torches.count;
+        for (let i = 0; i < tCount; i++) {
+          const t = torches[i];
+          const tsx = t.x - scrollX;
+          const tsy = t.y - scrollY;
+          if (tsx < -t.radius || tsx > w + t.radius || tsy < -t.radius || tsy > h + t.radius) {
+            continue;
+          }
+          pushLight(t.x, t.y, t.radius, 0.94 * t.intensity);
+          if (torchGlowIdx < this.torchGlowPool.length) {
+            const tg = this.torchGlowPool[torchGlowIdx++];
+            const diam = t.radius * 2.05;
+            tg.setPosition(tsx, tsy)
+              .setDisplaySize(diam, diam)
+              .setAlpha(0.24 * t.intensity)
+              .setVisible(true);
+          }
+        }
+      }
+      for (let i = torchGlowIdx; i < this.torchGlowPool.length; i++) {
+        this.torchGlowPool[i].setVisible(false);
+      }
+
       // Priority 3: Active Boss (240px amber, visible from afar)
       if (snap.activeBoss && snap.activeBoss.active) {
         pushLight(snap.activeBoss.x, snap.activeBoss.y, LIGHT.sources.bossRadius, 1);
@@ -427,9 +481,12 @@ export class DarknessScene extends Phaser.Scene {
         }
       }
 
-      // Priority 3.5: All active Enemy Projectiles (50px radius) so they always stay visible in the dark
+      // Single scan over projectilesGroup: emit Enemy Projectiles immediately (Priority 3.5),
+      // and stash up to maxLightSources player projectiles for Priority 4 without re-iterating.
+      this.playerProjScratch.length = 0;
       if (snap.projectilesGroup && lightCount < LIGHT.maxLightSources) {
         const projs = snap.projectilesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+        const remainingSlots = LIGHT.maxLightSources - lightCount;
         for (let i = 0; i < projs.length && lightCount < LIGHT.maxLightSources; i++) {
           const proj = projs[i];
           if (!proj.active) continue;
@@ -439,45 +496,37 @@ export class DarknessScene extends Phaser.Scene {
           const pdata = proj.getData('data') as { isEnemy?: boolean } | undefined;
           if (pdata?.isEnemy) {
             pushLight(proj.x, proj.y, LIGHT.sources.enemyProjRadius, 0.95);
+          } else if (this.playerProjScratch.length < remainingSlots) {
+            this.playerProjScratch.push(proj);
           }
         }
       }
 
-    // Priority 4: Orbiting Blades & Active FX / Player Projectiles (80px for FX)
-    for (let i = 0; i < snap.orbitingBlades.length && lightCount < LIGHT.maxLightSources; i++) {
-      const b = snap.orbitingBlades[i];
-      if (b && b.active && b.visible) {
-        pushLight(b.x, b.y, LIGHT.sources.fxRadius, 0.85);
+      // Priority 4: Orbiting Blades & Active FX / Player Projectiles (80px for FX)
+      for (let i = 0; i < snap.orbitingBlades.length && lightCount < LIGHT.maxLightSources; i++) {
+        const b = snap.orbitingBlades[i];
+        if (b && b.active && b.visible) {
+          pushLight(b.x, b.y, LIGHT.sources.fxRadius, 0.85);
+        }
       }
-    }
 
-    if (snap.effectPool && lightCount < LIGHT.maxLightSources) {
-      for (let i = 0; i < snap.effectPool.length && lightCount < LIGHT.maxLightSources; i++) {
-        const fx = snap.effectPool[i];
-        if (fx.inUse && fx.sprite.active && fx.sprite.visible) {
-          const sx = fx.sprite.x - scrollX;
-          const sy = fx.sprite.y - scrollY;
-          if (sx >= -100 && sx <= w + 100 && sy >= -100 && sy <= h + 100) {
-            pushLight(fx.sprite.x, fx.sprite.y, LIGHT.sources.fxRadius, 0.9);
+      if (snap.effectPool && lightCount < LIGHT.maxLightSources) {
+        for (let i = 0; i < snap.effectPool.length && lightCount < LIGHT.maxLightSources; i++) {
+          const fx = snap.effectPool[i];
+          if (fx.inUse && fx.sprite.active && fx.sprite.visible) {
+            const sx = fx.sprite.x - scrollX;
+            const sy = fx.sprite.y - scrollY;
+            if (sx >= -100 && sx <= w + 100 && sy >= -100 && sy <= h + 100) {
+              pushLight(fx.sprite.x, fx.sprite.y, LIGHT.sources.fxRadius, 0.9);
+            }
           }
         }
       }
-    }
 
-    if (snap.projectilesGroup && lightCount < LIGHT.maxLightSources) {
-      const projs = snap.projectilesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
-      for (let i = 0; i < projs.length && lightCount < LIGHT.maxLightSources; i++) {
-        const proj = projs[i];
-        if (!proj.active) continue;
-        const sx = proj.x - scrollX;
-        const sy = proj.y - scrollY;
-        if (sx < -80 || sx > w + 80 || sy < -80 || sy > h + 80) continue;
-        const pdata = proj.getData('data') as { isEnemy?: boolean } | undefined;
-        if (!pdata?.isEnemy) {
-          pushLight(proj.x, proj.y, LIGHT.sources.fxRadius, 0.85);
-        }
+      for (let i = 0; i < this.playerProjScratch.length && lightCount < LIGHT.maxLightSources; i++) {
+        const proj = this.playerProjScratch[i];
+        pushLight(proj.x, proj.y, LIGHT.sources.fxRadius, 0.85);
       }
-    }
 
     // Priority 5: XP Gems, Light Shards & Chests within screen bounds
     if (snap.pickupsGroup && lightCount < LIGHT.maxLightSources) {
@@ -521,18 +570,10 @@ export class DarknessScene extends Phaser.Scene {
 
     if (this.darkRT && this.darkRT.scene && this.textures.exists('light_radial_soft')) {
       this.darkRT.clear();
-      let fillColor: number = LIGHT.darkColor;
-      if (this.bloodFogBlend > 0.01) {
-        const baseDark = Phaser.Display.Color.IntegerToColor(LIGHT.darkColor);
-        const bloodDark = Phaser.Display.Color.IntegerToColor(0x280409);
-        const mixedDark = Phaser.Display.Color.Interpolate.ColorWithColor(
-          baseDark,
-          bloodDark,
-          100,
-          Math.round(this.bloodFogBlend * 100)
-        );
-        fillColor = Phaser.Display.Color.GetColor(mixedDark.r, mixedDark.g, mixedDark.b);
-      }
+      const fillColor =
+        this.bloodFogBlend > 0.01
+          ? lerpHexColor(LIGHT.darkColor, 0x280409, this.bloodFogBlend)
+          : LIGHT.darkColor;
       this.darkRT.fill(fillColor, darkAlpha);
 
       const rtScale = this.currentRtScale;
@@ -552,6 +593,24 @@ export class DarknessScene extends Phaser.Scene {
           alpha: ls.alpha,
           blendMode: Phaser.BlendModes.ERASE,
         });
+
+        // Right after carving the Player Lantern pool (index 0), project real-time shadow cones
+        // cast by terrain pillars & boss into darkRT; subsequent torches/lights naturally cut through them.
+        if (i === 0 && this.shadowMaskGraphics) {
+          this.drawPlayerShadowMaskCones(
+            ls.x,
+            ls.y,
+            ls.radius,
+            scrollX,
+            scrollY,
+            rtScale,
+            fillColor,
+            darkAlpha * 0.82,
+            snap.pillars?.items ?? null,
+            snap.pillars?.count ?? 0,
+            snap.activeBoss && snap.activeBoss.active ? snap.activeBoss : null
+          );
+        }
       }
       this.darkRT.render();
     }
@@ -559,6 +618,12 @@ export class DarknessScene extends Phaser.Scene {
     // 5. Update Enemies Alpha (0.12 outside light -> 1.0 in 0.2s), Glowing Eye Dots & Edge Arrows
     this.eyeGraphics.clear();
     this.edgeArrowGraphics.clear();
+
+    const pillarItems = snap.pillars?.items ?? [];
+    const pillarCount = snap.pillars?.count ?? 0;
+    const hasActiveBoss = Boolean(snap.activeBoss && snap.activeBoss.active);
+    const bossX = hasActiveBoss ? snap.activeBoss!.x : 0;
+    const bossY = hasActiveBoss ? snap.activeBoss!.y : 0;
 
     if (snap.enemiesGroup) {
       const enemies = snap.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
@@ -568,11 +633,13 @@ export class DarknessScene extends Phaser.Scene {
         const enemy = enemies[i];
         if (!enemy.active) continue;
         const edata = enemy.getData('data') as
-          | { type: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss'; isElite?: boolean }
+          | { type: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss'; isElite?: boolean; lightVis?: number }
           | undefined;
         if (!edata) continue;
 
-        // Check if enemy is illuminated by any active light source
+        const isBossEnemy = edata.type === 'boss';
+
+        // Check if enemy is illuminated by any active light source, attenuated by pillar/boss cast shadows
         let maxLit = 0;
         for (let j = 0; j < lightCount; j++) {
           const ls = this.lightSources[j];
@@ -582,46 +649,62 @@ export class DarknessScene extends Phaser.Scene {
           const distSq = dx * dx + dy * dy;
           if (distSq < effR * effR) {
             const dist = Math.sqrt(distSq);
-            const litVal = Math.min(1, ((effR - dist) / (effR * 0.35)) * ls.alpha);
+            let litVal = Math.min(1, ((effR - dist) / (effR * 0.35)) * ls.alpha);
+            if (pillarCount > 0 || (hasActiveBoss && !isBossEnemy)) {
+              const occ = computePointShadowOcclusion(
+                ls.x,
+                ls.y,
+                enemy.x,
+                enemy.y,
+                pillarItems,
+                pillarCount,
+                isBossEnemy ? undefined : bossX,
+                isBossEnemy ? undefined : bossY,
+                isBossEnemy ? 0 : 48
+              );
+              litVal *= 1 - occ * 0.78;
+            }
             if (litVal > maxLit) maxLit = litVal;
           }
         }
 
-        const prevVis = (enemy.getData('lightVis') as number) ?? 0;
+        const prevVis = edata.lightVis ?? 0;
         const nextVis =
           maxLit > prevVis
             ? Math.min(maxLit, prevVis + fadeStep)
             : Math.max(maxLit, prevVis - fadeStep);
-        enemy.setData('lightVis', nextVis);
+        edata.lightVis = nextVis;
 
         // Sprite alpha 0.12 outside light, fading smoothly to 1.0 over 0.2s
-        enemy.setAlpha(Phaser.Math.Linear(LIGHT.enemies.darkAlpha, 1.0, nextVis));
+        const targetAlpha = Phaser.Math.Linear(LIGHT.enemies.darkAlpha, 1.0, nextVis);
+        if (Math.abs(enemy.alpha - targetAlpha) > 0.004) {
+          enemy.setAlpha(targetAlpha);
+        }
 
         const sx = enemy.x - scrollX;
         const sy = enemy.y - scrollY;
         const onScreen = sx >= 16 && sx <= w - 16 && sy >= 16 && sy <= h - 16;
 
-        // Pair of small glowing eye/accent dots visible at distance in the dark (extended by Night Eyes)
-        const eyeRange =
-          LIGHT.enemies.baseEyeGlowRange *
-          (snap.hasNightEyes ? LIGHT.enemies.nightEyesRangeMultiplier : 1.0);
-        const distToPlayer = Phaser.Math.Distance.Between(
-          snap.player.x,
-          snap.player.y,
-          enemy.x,
-          enemy.y
-        );
-        const eyeDistFade =
-          distToPlayer <= eyeRange * 0.72
-            ? 1
-            : Math.max(0, 1 - (distToPlayer - eyeRange * 0.72) / (eyeRange * 0.28));
-
-        if (onScreen && nextVis < 0.9 && eyeDistFade > 0.02) {
-          const baseEyeAlpha = (1 - nextVis * 0.85) * eyeDistFade;
-          const eyeAlpha = Math.min(
-            1,
-            baseEyeAlpha * (snap.hasNightEyes ? LIGHT.enemies.nightEyesAlphaBoost : 1.0)
-          );
+        if (onScreen && nextVis < 0.9) {
+          // Pair of small glowing eye/accent dots visible at distance in the dark (extended by Night Eyes)
+          const eyeRange =
+            LIGHT.enemies.baseEyeGlowRange *
+            (snap.hasNightEyes ? LIGHT.enemies.nightEyesRangeMultiplier : 1.0);
+          const dxP = enemy.x - snap.player.x;
+          const dyP = enemy.y - snap.player.y;
+          const distToPlayerSq = dxP * dxP + dyP * dyP;
+          if (distToPlayerSq < eyeRange * eyeRange) {
+            const distToPlayer = Math.sqrt(distToPlayerSq);
+            const eyeDistFade =
+              distToPlayer <= eyeRange * 0.72
+                ? 1
+                : Math.max(0, 1 - (distToPlayer - eyeRange * 0.72) / (eyeRange * 0.28));
+            if (eyeDistFade > 0.02) {
+              const baseEyeAlpha = (1 - nextVis * 0.85) * eyeDistFade;
+              const eyeAlpha = Math.min(
+                1,
+                baseEyeAlpha * (snap.hasNightEyes ? LIGHT.enemies.nightEyesAlphaBoost : 1.0)
+              );
           const eyeSizeMult = snap.hasNightEyes ? LIGHT.enemies.nightEyesSizeBoost : 1.0;
           const eyeColor = LIGHT.enemies.eyeColors[edata.type] ?? 0xc44cff;
           const facingDir = enemy.flipX ? -1 : 1;
@@ -668,6 +751,8 @@ export class DarknessScene extends Phaser.Scene {
           this.eyeGraphics.fillStyle(eyeColor, eyeAlpha);
           this.eyeGraphics.fillCircle(leftEyeX, eyeY, eyeRadius);
           this.eyeGraphics.fillCircle(rightEyeX, eyeY, eyeRadius);
+            }
+          }
         }
 
         // Screen-edge directional arrows for Boss & Elites when off-screen or in the dark
@@ -752,5 +837,91 @@ export class DarknessScene extends Phaser.Scene {
       backX - perpX * wing,
       backY - perpY * wing
     );
+  }
+
+  private drawPlayerShadowMaskCones(
+    lightWorldX: number,
+    lightWorldY: number,
+    lightRadius: number,
+    scrollX: number,
+    scrollY: number,
+    rtScale: number,
+    fillColor: number,
+    shadowAlpha: number,
+    pillars: readonly WorldPillarData[] | null,
+    pillarCount: number,
+    boss: Phaser.Physics.Arcade.Sprite | null
+  ) {
+    let hasShadows = false;
+    this.shadowMaskGraphics.clear();
+    this.shadowMaskGraphics.fillStyle(fillColor, shadowAlpha);
+
+    if (pillars && pillarCount > 0) {
+      for (let i = 0; i < pillarCount; i++) {
+        const p = pillars[i];
+        if (this.appendOccluderShadowQuad(lightWorldX, lightWorldY, lightRadius, p.x, p.y, p.radius * 0.92, scrollX, scrollY, rtScale)) {
+          hasShadows = true;
+        }
+      }
+    }
+
+    if (boss && boss.active) {
+      if (this.appendOccluderShadowQuad(lightWorldX, lightWorldY, lightRadius, boss.x, boss.y + 12, 46, scrollX, scrollY, rtScale)) {
+        hasShadows = true;
+      }
+    }
+
+    if (hasShadows) {
+      this.darkRT.draw(this.shadowMaskGraphics);
+    }
+  }
+
+  private appendOccluderShadowQuad(
+    lx: number,
+    ly: number,
+    lightRadius: number,
+    ox: number,
+    oy: number,
+    radius: number,
+    scrollX: number,
+    scrollY: number,
+    rtScale: number
+  ): boolean {
+    const dx = ox - lx;
+    const dy = oy - ly;
+    const distSq = dx * dx + dy * dy;
+    const maxReach = lightRadius + radius;
+    if (distSq >= maxReach * maxReach || distSq <= (radius + 4) * (radius + 4)) {
+      return false;
+    }
+
+    const dist = Math.sqrt(distSq);
+    const angle = Math.atan2(dy, dx);
+    const halfSpread = Math.asin(Math.min(0.92, radius / dist));
+    const shadowReach = Math.max(80, lightRadius * 1.05 - dist);
+
+    const perp1 = angle - Math.PI * 0.5;
+    const perp2 = angle + Math.PI * 0.5;
+    const n1x = (ox + Math.cos(perp1) * radius - scrollX) * rtScale;
+    const n1y = (oy + Math.sin(perp1) * radius - scrollY) * rtScale;
+    const n2x = (ox + Math.cos(perp2) * radius - scrollX) * rtScale;
+    const n2y = (oy + Math.sin(perp2) * radius - scrollY) * rtScale;
+
+    const farLen = shadowReach * rtScale;
+    const a1 = angle - halfSpread;
+    const a2 = angle + halfSpread;
+    const f1x = n1x + Math.cos(a1) * farLen;
+    const f1y = n1y + Math.sin(a1) * farLen;
+    const f2x = n2x + Math.cos(a2) * farLen;
+    const f2y = n2y + Math.sin(a2) * farLen;
+
+    this.shadowMaskGraphics.beginPath();
+    this.shadowMaskGraphics.moveTo(n1x, n1y);
+    this.shadowMaskGraphics.lineTo(f1x, f1y);
+    this.shadowMaskGraphics.lineTo(f2x, f2y);
+    this.shadowMaskGraphics.lineTo(n2x, n2y);
+    this.shadowMaskGraphics.closePath();
+    this.shadowMaskGraphics.fillPath();
+    return true;
   }
 }

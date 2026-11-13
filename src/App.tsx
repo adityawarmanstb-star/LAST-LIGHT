@@ -26,6 +26,7 @@ import {
   ActiveDynamicChallenge,
   BossInfo,
   DebugStats,
+  DpsSample,
   DynamicChallengeOffer,
   EventWarningInfo,
   RelicId,
@@ -90,6 +91,7 @@ export default function App() {
     playerDps: 0,
     currentMinute: 0,
   });
+  const [dpsHistory, setDpsHistory] = useState<DpsSample[]>([{ timeSec: 0, dps: 0 }]);
   const [eventWarning, setEventWarning] = useState<EventWarningInfo | null>(null);
 
   // Modals
@@ -98,6 +100,7 @@ export default function App() {
   const [runSummary, setRunSummary] = useState<RunStats | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const lastDpsSampleSecRef = useRef<number>(0);
   const handleTogglePauseRef = useRef<() => void>(() => {});
   const handleQuitToTitleRef = useRef<() => void>(() => {});
   const needsTapAudioResumeRef = useRef<boolean>(false);
@@ -141,6 +144,28 @@ export default function App() {
       setEquippedRelicIds(data.equippedRelicIds ?? []);
       setActiveRelicSynergies(data.activeRelicSynergies ?? []);
       setDebugStats(data.debug);
+
+      const sampleSec = Math.max(0, Math.floor(data.time));
+      const liveDps = Math.max(0, data.debug.playerDps);
+      if (sampleSec > lastDpsSampleSecRef.current) {
+        lastDpsSampleSecRef.current = sampleSec;
+        setDpsHistory((prev) => {
+          const next = [...prev, { timeSec: sampleSec, dps: liveDps }];
+          if (next.length > 360) {
+            const compacted: DpsSample[] = [];
+            for (let i = 0; i < next.length - 120; i += 2) {
+              compacted.push(next[i]);
+            }
+            for (let i = next.length - 120; i < next.length; i++) {
+              compacted.push(next[i]);
+            }
+            return compacted;
+          }
+          return next;
+        });
+      } else if (sampleSec === 0 && lastDpsSampleSecRef.current === 0 && liveDps > 0) {
+        setDpsHistory([{ timeSec: 0, dps: liveDps }]);
+      }
     });
 
     const unsubLevelUp = gameManager.onLevelUp((options, challengeOffer) => {
@@ -347,6 +372,8 @@ export default function App() {
     setDashCharges(1);
     setMaxDashCharges(1);
     setDashCooldownProgress(1);
+    lastDpsSampleSecRef.current = 0;
+    setDpsHistory([{ timeSec: 0, dps: 0 }]);
     const savedRelicIds = saveDataStore.read().equippedRelicIds;
     setEquippedRelicIds(savedRelicIds);
     setActiveRelicSynergies(getActiveRelicSynergies(savedRelicIds).map((s) => s.id));
@@ -523,6 +550,7 @@ export default function App() {
           equippedRelicIds={equippedRelicIds}
           activeRelicSynergies={activeRelicSynergies}
           debugStats={debugStats}
+          dpsHistory={dpsHistory}
           eventWarning={eventWarning}
           isMuted={isMuted}
           isPaused={gameState === 'PAUSED'}

@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, Skull, Heart, AlertTriangle, Wind, Gem } from 'lucide-react';
+import { Activity, Coins, Skull, Heart, AlertTriangle, Shield, Wind, Gem } from 'lucide-react';
 import {
   ActiveDynamicChallenge,
   BossInfo,
   DebugStats,
+  DpsSample,
   EventWarningInfo,
   RelicDefinition,
   RelicId,
@@ -16,6 +17,7 @@ import { ForgedIronFrame } from './ForgedIronFrame';
 import { BloodHpBar } from './BloodHpBar';
 import { BloodSplatterHit, BloodSplatterOverlay } from './BloodSplatterOverlay';
 import { BossHealthOverlay } from './BossHealthOverlay';
+import { PerformanceChart } from './PerformanceChart';
 import { CritImpactPayload, gameManager } from '../game/GameManager';
 import { haptics } from '../mobile/haptics';
 
@@ -43,6 +45,7 @@ interface HUDProps {
   equippedRelicIds?: RelicId[];
   activeRelicSynergies?: RelicSetId[];
   debugStats: DebugStats;
+  dpsHistory?: DpsSample[];
   eventWarning: EventWarningInfo | null;
   isMuted: boolean;
   isPaused: boolean;
@@ -53,7 +56,7 @@ interface HUDProps {
   onTriggerDash: () => void;
 }
 
-export const HUD: React.FC<HUDProps> = ({
+const HUDComponent: React.FC<HUDProps> = ({
   hp,
   maxHp,
   xp,
@@ -77,10 +80,12 @@ export const HUD: React.FC<HUDProps> = ({
   equippedRelicIds = [],
   activeRelicSynergies = [],
   debugStats,
+  dpsHistory = [],
   eventWarning,
   onSpawnBossNow,
   onTriggerDash,
 }) => {
+  const [activeHudTab, setActiveHudTab] = useState<'status' | 'performance'>('status');
   const [showDebug, setShowDebug] = useState(false);
   const debugTapTimestampsRef = useRef<number[]>([]);
   const prevCoinsRef = useRef<number>(coins);
@@ -322,13 +327,79 @@ export const HUD: React.FC<HUDProps> = ({
             <BloodHpBar hp={hp} maxHp={maxHp} />
           </ForgedIronFrame>
 
+          {/* Compact HUD Tab Switcher: Status / Performance */}
+          <div
+            role="tablist"
+            aria-label="HUD Panels"
+            className="pointer-events-auto inline-flex items-center self-start rounded-[8px] border border-[#3a3f47] bg-[#121418]/92 p-0.5 shadow-[0_6px_16px_rgba(0,0,0,0.65)]"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeHudTab === 'status'}
+              onPointerDown={() => haptics.tap('light')}
+              onClick={() => setActiveHudTab('status')}
+              className={`px-2.5 py-1 rounded-[6px] text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer ${
+                activeHudTab === 'status'
+                  ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
+                  : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
+              }`}
+            >
+              <Shield className="w-3 h-3 text-[#e5303a]" />
+              <span>Status</span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={activeHudTab === 'performance'}
+              onPointerDown={() => haptics.tap('light')}
+              onClick={() => setActiveHudTab('performance')}
+              className={`px-2.5 py-1 rounded-[6px] text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer ${
+                activeHudTab === 'performance'
+                  ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
+                  : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
+              }`}
+            >
+              <Activity className="w-3 h-3 text-[#5de4ff]" />
+              <span>Performance</span>
+            </button>
+          </div>
+
+          {activeHudTab === 'performance' && (
+            <ForgedIronFrame
+              seed="hud-performance-panel"
+              dripCount={2}
+              maxDripLength={12}
+              borderColor="#3a3f47"
+              className="pointer-events-auto w-[268px] sm:w-[292px]"
+              contentClassName="px-3 py-2.5 flex flex-col gap-1.5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-display text-[11px] font-bold tracking-wider uppercase text-[#d8c9a8] flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-[#e5303a]" />
+                  Run DPS Curve
+                </span>
+                <span className="text-[10px] font-mono-numbers text-[#8e8168]">
+                  {debugStats.killsPerMin} kills/m
+                </span>
+              </div>
+              <PerformanceChart
+                samples={dpsHistory}
+                currentDps={debugStats.playerDps}
+                width={260}
+                height={128}
+              />
+            </ForgedIronFrame>
+          )}
+
           {/* Kill Combo, Pressure & Light Status indicators */}
-          {(combo > 1 ||
-            isUnderPressure ||
-            lightShardRemainingSec > 0 ||
-            redShardRemainingSec > 0 ||
-            darknessFallsRemainingSec > 0 ||
-            bloodFogRemainingSec > 0) && (
+          {activeHudTab === 'status' &&
+            (combo > 1 ||
+              isUnderPressure ||
+              lightShardRemainingSec > 0 ||
+              redShardRemainingSec > 0 ||
+              darknessFallsRemainingSec > 0 ||
+              bloodFogRemainingSec > 0) && (
             <div className="flex flex-wrap items-center gap-2 text-[11px] max-w-[260px]">
               {combo > 1 && (
                 <ForgedIronFrame
@@ -423,7 +494,7 @@ export const HUD: React.FC<HUDProps> = ({
           )}
 
           {/* Active Dynamic Challenge Pact Tracker */}
-          {activeChallenge && (
+          {activeHudTab === 'status' && activeChallenge && (
             <ForgedIronFrame
               seed={`hud-challenge-${activeChallenge.id}`}
               dripCount={2}
@@ -723,3 +794,5 @@ export const HUD: React.FC<HUDProps> = ({
     </div>
   );
 };
+
+export const HUD = React.memo(HUDComponent);

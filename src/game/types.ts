@@ -147,6 +147,11 @@ export interface DebugStats {
   currentMinute: number;
 }
 
+export interface DpsSample {
+  timeSec: number;
+  dps: number;
+}
+
 export type DailyMissionType =
   | 'kill_enemies'
   | 'survive_seconds'

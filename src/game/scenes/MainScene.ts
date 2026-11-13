@@ -8,6 +8,7 @@ import { bestiary } from '../bestiary';
 import { haptics } from '../../mobile/haptics';
 import { CameraController } from '../CameraController';
 import { AtmosphereOverlay } from '../AtmosphereOverlay';
+import { ShadowCasterSystem } from '../ShadowCasterSystem';
 import {
   ActiveDynamicChallenge,
   BossInfo,
@@ -172,7 +173,7 @@ const ELITE_AURA_STYLE: Record<
 // =========================================================================
 export const LIGHT = {
   renderTextureScale: 0.5,         // Half-resolution RenderTexture scaled 2x
-  maxLightSources: 12,             // Hard cap on active light sources per frame
+  maxLightSources: 16,             // Hard cap on active light sources per frame (player, torches, boss, FX)
   darkColor: 0x050814,             // Deep blue-black darkness fill
   fillAlpha: 0.88,                 // Base darkness fill opacity (88%)
   maxDarknessOutsideLights: 0.85,  // Minimum visibility: never darker than 85% outside lights
@@ -446,6 +447,12 @@ interface EnemyData {
   chargeVy?: number;
   chargeTimerMs?: number;
   telegraphingUntilMs?: number;
+  phase?: number;
+  lightVis?: number;
+  shadowShade?: number;
+  baseScale?: number;
+  lastStompFrame?: number;
+  tintResetAtMs?: number;
 }
 
 interface ProjectileData {
@@ -485,6 +492,8 @@ export class MainScene extends Phaser.Scene {
   // World & Floor
   private floor!: Phaser.GameObjects.TileSprite;
   private lightVignette!: Phaser.GameObjects.Graphics;
+  private lanternGlowSprite!: Phaser.GameObjects.Image;
+  private hadEdgeVignette: boolean = false;
 
   // Player
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -515,11 +524,15 @@ export class MainScene extends Phaser.Scene {
   private particlePool: Particle[] = [];
   private readonly MAX_PARTICLES = 200;
 
-  // Enemy Projectile & Ghost Trail Pools
+  // Enemy Projectile, Player Projectile, Pickup, Enemy & Ghost Trail Pools
   private enemyProjectilePool: Phaser.Physics.Arcade.Sprite[] = [];
   private enemyTrailPool: Phaser.GameObjects.Sprite[] = [];
+  private playerProjectilePool: Phaser.Physics.Arcade.Sprite[] = [];
+  private pickupPool: Phaser.Physics.Arcade.Sprite[] = [];
+  private enemyPool: Phaser.Physics.Arcade.Sprite[] = [];
   private readonly MAX_ENEMY_PROJECTILES = 24;
   private readonly MAX_ENEMY_TRAILS = 64;
+  private readonly MAX_ACTIVE_XP_GEMS = 70;
 
   // Skill & Impact Effect Pool (Cap at 40 active effects)
   private effectPool: EffectPoolItem[] = [];
@@ -530,9 +543,10 @@ export class MainScene extends Phaser.Scene {
   private projectilesGroup!: Phaser.Physics.Arcade.Group;
   private pickupsGroup!: Phaser.Physics.Arcade.Group;
 
-  // Camera & Atmosphere controllers
+  // Camera, Atmosphere & Dynamic Shadow-Casting controllers
   private cameraController!: CameraController;
   private atmosphereOverlay: AtmosphereOverlay | null = null;
+  private shadowSystem: ShadowCasterSystem | null = null;
 
   // Floating text pool
   private floatingTexts: FloatingText[] = [];
@@ -590,6 +604,7 @@ export class MainScene extends Phaser.Scene {
   private comboTimerMs: number = 0;
   private recentDamageLog: Array<{ timeMs: number; amount: number }> = [];
   private lastStatsEmitMs: number = 0;
+  private lastBossEmitMs: number = 0;
 
   // Timeline Events State
   private triggeredEvents: Set<string> = new Set();
@@ -708,8 +723,14 @@ export class MainScene extends Phaser.Scene {
     this.challengesCompletedCount = 0;
     this.enemyProjectilePool = [];
     this.enemyTrailPool = [];
+    this.playerProjectilePool = [];
+    this.pickupPool = [];
+    this.enemyPool = [];
+    this.lastBossEmitMs = 0;
+    this.hadEdgeVignette = false;
     this.floatingTexts = [];
     this.atmosphereOverlay = null;
+    this.shadowSystem = null;
     this.lastMissionSecondRecorded = 0;
     this.lowFpsDurationMs = 0;
     gameManager.setQualityTier('high');
@@ -718,86 +739,81 @@ export class MainScene extends Phaser.Scene {
 
   preload() {
     // Load player spritesheets (frame size 234x218)
-    this.load.spritesheet('player_walk', './assets/aistudio/player_walk_sheet_bb06b026.png', {
+    this.load.spritesheet('player_walk', './assets/aistudio/player_walk_sheet_bb06b026.webp', {
       frameWidth: 234,
       frameHeight: 218,
     });
-    this.load.spritesheet('player_attack', './assets/aistudio/player_attack_sheet_dd4b205b.png', {
+    this.load.spritesheet('player_attack', './assets/aistudio/player_attack_sheet_dd4b205b.webp', {
       frameWidth: 234,
       frameHeight: 218,
     });
 
     // Load monster spritesheets
-    this.load.spritesheet('brute_walk_sheet', './assets/aistudio/brute_walk_sheet_1167a56d.png', {
+    this.load.spritesheet('brute_walk_sheet', './assets/aistudio/brute_walk_sheet_1167a56d.webp', {
       frameWidth: 300,
       frameHeight: 222,
     });
-    this.load.spritesheet('imp_run_sheet', './assets/aistudio/imp_run_sheet_6bc12170.png', {
+    this.load.spritesheet('imp_run_sheet', './assets/aistudio/imp_run_sheet_6bc12170.webp', {
       frameWidth: 344,
       frameHeight: 197,
     });
-    this.load.spritesheet('spitter_walk_sheet', './assets/aistudio/spitter_walk_sheet_be385db7.png', {
+    this.load.spritesheet('spitter_walk_sheet', './assets/aistudio/spitter_walk_sheet_be385db7.webp', {
       frameWidth: 183,
       frameHeight: 273,
     });
-    this.load.spritesheet('boss_idle_sheet', './assets/aistudio/boss_idle_sheet_45eee864.png', {
+    this.load.spritesheet('boss_idle_sheet', './assets/aistudio/boss_idle_sheet_45eee864.webp', {
       frameWidth: 409,
       frameHeight: 253,
     });
-    this.load.spritesheet('boss_attack_sheet', './assets/aistudio/boss_attack_sheet_8e2697fa.png', {
+    this.load.spritesheet('boss_attack_sheet', './assets/aistudio/boss_attack_sheet_8e2697fa.webp', {
       frameWidth: 409,
       frameHeight: 253,
     });
 
     // Load all actual sprite attachments (keep fx_bolt and fx_ring as static fallbacks)
-    this.load.image('player', './assets/aistudio/player_d0a77e5b.png');
-    this.load.image('floor', './assets/aistudio/floor_2087ed42.png');
-    this.load.image('enemy_wisp', './assets/aistudio/enemy_wisp_7d3c48f3.png');
-    this.load.image('enemy_imp', './assets/aistudio/enemy_imp_60271be1.png');
-    this.load.image('enemy_spitter', './assets/aistudio/enemy_spitter_51ce3872.png');
-    this.load.image('enemy_brute', './assets/aistudio/enemy_brute_01eebbc9.png');
-    this.load.image('boss', './assets/aistudio/boss_a9bb7d84.png');
-    this.load.image('gem', './assets/aistudio/gem_dc28f9c8.png');
-    this.load.image('coin', './assets/aistudio/coin_3bd84bab.png');
-    this.load.image('fx_blade', './assets/aistudio/fx_blade_16a5dfcb.png');
-    this.load.image('fx_bolt', './assets/aistudio/fx_bolt_be8b486b.png');
-    this.load.image('fx_ring', './assets/aistudio/fx_ring_7bdbb43c.png');
-    this.load.image('fx_spark', './assets/aistudio/fx_spark_3ee901cb.png');
+    this.load.image('player', './assets/aistudio/player_d0a77e5b.webp');
+    this.load.image('floor', './assets/aistudio/floor_2087ed42.webp');
+    this.load.image('enemy_wisp', './assets/aistudio/enemy_wisp_7d3c48f3.webp');
+    this.load.image('enemy_imp', './assets/aistudio/enemy_imp_60271be1.webp');
+    this.load.image('enemy_spitter', './assets/aistudio/enemy_spitter_51ce3872.webp');
+    this.load.image('enemy_brute', './assets/aistudio/enemy_brute_01eebbc9.webp');
+    this.load.image('boss', './assets/aistudio/boss_a9bb7d84.webp');
+    this.load.image('gem', './assets/aistudio/gem_dc28f9c8.webp');
+    this.load.image('coin', './assets/aistudio/coin_3bd84bab.webp');
+    this.load.image('fx_bolt', './assets/aistudio/fx_bolt_be8b486b.webp');
+    this.load.image('fx_ring', './assets/aistudio/fx_ring_7bdbb43c.webp');
+    this.load.image('fx_spark', './assets/aistudio/fx_spark_3ee901cb.webp');
 
-    // Load Skill / Impact FX Spritesheets (replaced with new sheets)
-    this.load.spritesheet('fx_spark_sheet', './assets/aistudio/fx_spark_sheet_cecbd959.png', {
+    // Load Skill / Impact FX Spritesheets
+    this.load.spritesheet('fx_spark_sheet', './assets/aistudio/fx_spark_sheet_cecbd959.webp', {
       frameWidth: 192,
       frameHeight: 108,
     });
-    this.load.spritesheet('fx_death_sheet', './assets/aistudio/fx_death_sheet_bc303348.png', {
+    this.load.spritesheet('fx_death_sheet', './assets/aistudio/fx_death_sheet_bc303348.webp', {
       frameWidth: 384,
       frameHeight: 216,
     });
-    this.load.spritesheet('fx_ring_sheet', './assets/aistudio/fx_ring_sheet_84634a3f.png', {
+    this.load.spritesheet('fx_ring_sheet', './assets/aistudio/fx_ring_sheet_84634a3f.webp', {
       frameWidth: 512,
       frameHeight: 288,
     });
-    this.load.spritesheet('fx_slam_sheet', './assets/aistudio/fx_slam_sheet_61043650.png', {
+    this.load.spritesheet('fx_slam_sheet', './assets/aistudio/fx_slam_sheet_61043650.webp', {
       frameWidth: 448,
       frameHeight: 252,
     });
-    this.load.spritesheet('fx_gem_sheet', './assets/aistudio/fx_gem_sheet_a8e4a0d7.png', {
+    this.load.spritesheet('fx_gem_sheet', './assets/aistudio/fx_gem_sheet_a8e4a0d7.webp', {
       frameWidth: 128,
       frameHeight: 128,
     });
-    this.load.spritesheet('fx_blade_sheet', './assets/aistudio/fx_blade_sheet_3e86389b.png', {
+    this.load.spritesheet('fx_blade_spin_sheet', './assets/aistudio/fx_blade_spin_sheet_46489d73.webp', {
       frameWidth: 256,
       frameHeight: 256,
     });
-    this.load.spritesheet('fx_blade_spin_sheet', './assets/aistudio/fx_blade_spin_sheet_46489d73.png', {
-      frameWidth: 256,
-      frameHeight: 256,
-    });
-    this.load.spritesheet('fx_lightning_sheet', './assets/aistudio/fx_lightning_sheet_03b57c80.png', {
+    this.load.spritesheet('fx_lightning_sheet', './assets/aistudio/fx_lightning_sheet_03b57c80.webp', {
       frameWidth: 384,
       frameHeight: 216,
     });
-    this.load.spritesheet('fx_spitter_orb_sheet', './assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.png', {
+    this.load.spritesheet('fx_spitter_orb_sheet', './assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.webp', {
       frameWidth: 128,
       frameHeight: 128,
     });
@@ -815,6 +831,9 @@ export class MainScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(0);
     this.floor.disableInteractive();
+
+    // 1b. Dynamic World Torches, Ruined Pillars & Real-Time Shadow-Casting System
+    this.shadowSystem = new ShadowCasterSystem(this, width / 2, height / 2);
 
     // 2. Groups
     this.enemiesGroup = this.physics.add.group();
@@ -1101,7 +1120,33 @@ export class MainScene extends Phaser.Scene {
       }
     });
 
+    // Procedural radial cyan lantern glow texture (renders as 1 GPU quad instead of 4 CPU Graphics circles)
+    if (!this.textures.exists('light_cyan_glow')) {
+      const size = 256;
+      const tex = this.textures.createCanvas('light_cyan_glow', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        const half = size / 2;
+        const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+        grad.addColorStop(0.0, 'rgba(207, 250, 254, 0.34)');
+        grad.addColorStop(0.18, 'rgba(103, 232, 249, 0.22)');
+        grad.addColorStop(0.42, 'rgba(56, 189, 248, 0.12)');
+        grad.addColorStop(0.72, 'rgba(34, 211, 238, 0.05)');
+        grad.addColorStop(1.0, 'rgba(34, 211, 238, 0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, size, size);
+        tex.refresh();
+      }
+    }
+
     // 7. Light Vignette / Lantern Glow Layer & Dynamic Weather/Time-of-Day Atmosphere Overlay
+    this.lanternGlowSprite = this.add
+      .image(width / 2, height / 2, 'light_cyan_glow')
+      .setDepth(15)
+      .setScrollFactor(0)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    this.lanternGlowSprite.disableInteractive();
+
     this.lightVignette = this.add.graphics().setDepth(15).setScrollFactor(0);
     this.lightVignette.disableInteractive();
     this.atmosphereOverlay = new AtmosphereOverlay(this);
@@ -1216,6 +1261,8 @@ export class MainScene extends Phaser.Scene {
       achievements.flush();
       this.atmosphereOverlay?.destroy();
       this.atmosphereOverlay = null;
+      this.shadowSystem?.destroy();
+      this.shadowSystem = null;
       if (gameManager.activeScene === this) {
         gameManager.activeScene = null;
       }
@@ -1691,13 +1738,16 @@ export class MainScene extends Phaser.Scene {
   private triggerChainLightning(source: Phaser.Physics.Arcade.Sprite, chainDamage: number) {
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     let target: Phaser.Physics.Arcade.Sprite | null = null;
-    let closestDist = 260;
+    let closestDistSq = 260 * 260;
 
-    for (const e of enemies) {
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
       if (!e.active || e === source) continue;
-      const d = Phaser.Math.Distance.Between(source.x, source.y, e.x, e.y);
-      if (d < closestDist) {
-        closestDist = d;
+      const dx = e.x - source.x;
+      const dy = e.y - source.y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < closestDistSq) {
+        closestDistSq = dSq;
         target = e;
       }
     }
@@ -2011,6 +2061,38 @@ export class MainScene extends Phaser.Scene {
     // 8. Update Enemies & AI
     this.updateEnemies(time, delta);
 
+    // 8b. Update World Torches/Pillars & Cast Real-Time Dynamic Shadows on Terrain & Enemies
+    if (this.shadowSystem) {
+      const cam = this.cameras.main;
+      const isLowQuality = gameManager.getQualityTier() === 'low';
+      this.shadowSystem.updateWorldProps(
+        cam.scrollX,
+        cam.scrollY,
+        this.scale.width,
+        this.scale.height,
+        time * 0.001,
+        delta,
+        isLowQuality,
+        (ex, ey) => {
+          this.spawnParticleBurst(ex, ey, 1, 'fx_spark', 14, 38, 0.1, 0.2, 0xff9b3d, 340);
+        }
+      );
+
+      const standBonus = this.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1;
+      const playerLightRadius = LIGHT.player.baseRadius * standBonus * this.getLightRadiusMultiplier();
+      this.shadowSystem.renderDynamicShadows({
+        player: this.player,
+        playerLightRadius,
+        enemies: this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[],
+        boss: this.activeBoss,
+        camX: cam.scrollX,
+        camY: cam.scrollY,
+        viewW: this.scale.width,
+        viewH: this.scale.height,
+        isLowQuality,
+      });
+    }
+
     // 9. Update Pickups Magnet & 12s Gem Expiry
     this.updatePickups(delta);
 
@@ -2034,8 +2116,8 @@ export class MainScene extends Phaser.Scene {
     // 13. Enemy Spawning & Timeline Events
     this.handleEnemySpawning(time);
 
-    // 14. Periodic Stats Sync with UI (every ~100ms)
-    if (time - this.lastStatsEmitMs >= 100) {
+    // 14. Periodic Stats Sync with UI (~115ms)
+    if (time - this.lastStatsEmitMs >= 115) {
       this.lastStatsEmitMs = time;
       this.emitStatsUpdate();
     }
@@ -2141,6 +2223,7 @@ export class MainScene extends Phaser.Scene {
         this.stanceRing.setPosition(this.player.x, this.player.y + 36);
         this.stanceRing.setAlpha(0.16);
       }
+      this.shadowSystem?.resolvePillarPushout(this.player, 18);
       return;
     }
 
@@ -2210,13 +2293,15 @@ export class MainScene extends Phaser.Scene {
     } else if (vx > 5) {
       this.player.setFlipX(false);
     }
+
+    // Smoothly slide player around solid ruined pillars
+    this.shadowSystem?.resolvePillarPushout(this.player, 18);
   }
 
   // -------------------------------------------------------------
   // Lantern Glow Overlay, Low-HP Heartbeat, Pressure Aura & Edge Flash
   // -------------------------------------------------------------
   private updateLanternOverlay() {
-    this.lightVignette.clear();
     const w = this.scale.width;
     const h = this.scale.height;
 
@@ -2227,22 +2312,41 @@ export class MainScene extends Phaser.Scene {
     const pulse = this.lanternPulse.alpha; // 0.6 <-> 1.0
     const lightMult = this.getLightRadiusMultiplier();
 
-    // Soft cyan lantern glow pulses (alpha 0.6 <-> 1.0); global darkness is handled by DarknessScene
-    this.lightVignette.fillStyle(0x22d3ee, 0.05 * pulse);
-    this.lightVignette.fillCircle(px, py, 280 * lightMult);
-
-    this.lightVignette.fillStyle(0x38bdf8, 0.08 * pulse);
-    this.lightVignette.fillCircle(px, py, 190 * lightMult);
-
-    this.lightVignette.fillStyle(0x67e8f9, 0.14 * pulse);
-    this.lightVignette.fillCircle(px, py, 100 * lightMult);
-
-    this.lightVignette.fillStyle(0xcffafe, 0.22 * pulse);
-    this.lightVignette.fillCircle(px, py, 40 * lightMult);
+    // Soft cyan lantern glow rendered via a single GPU quad (replaces 4 CPU-tessellated Graphics circles)
+    if (this.lanternGlowSprite) {
+      this.lanternGlowSprite.setPosition(px, py);
+      this.lanternGlowSprite.setScale(2.1875 * lightMult);
+      this.lanternGlowSprite.setAlpha(pulse);
+    }
 
     // "Pressure" aura when standing still >4s
     const targetPressureAlpha = this.isUnderPressure ? 1 : 0;
     this.pressureAuraAlpha = Phaser.Math.Linear(this.pressureAuraAlpha, targetPressureAlpha, 0.08);
+
+    // Low-HP (<40%) slowly reddening vignette with heartbeat-like double pulse
+    const hpRatio = this.playerStats.currentHp / Math.max(1, this.playerStats.maxHp);
+    const targetLowHp =
+      hpRatio < SPAWN_TIMELINE.feel.lowHpThreshold
+        ? (SPAWN_TIMELINE.feel.lowHpThreshold - hpRatio) / SPAWN_TIMELINE.feel.lowHpThreshold
+        : 0;
+    this.lowHpVignetteAlpha = Phaser.Math.Linear(this.lowHpVignetteAlpha, targetLowHp, 0.03);
+
+    const hasEdge =
+      this.pressureAuraAlpha > 0.02 ||
+      this.lowHpVignetteAlpha > 0.01 ||
+      this.screenEdgeFlashAlpha > 0.01;
+
+    if (!hasEdge) {
+      if (this.hadEdgeVignette) {
+        this.hadEdgeVignette = false;
+        this.lightVignette.clear();
+      }
+      return;
+    }
+
+    this.hadEdgeVignette = true;
+    this.lightVignette.clear();
+
     if (this.pressureAuraAlpha > 0.02) {
       const wave = 0.65 + 0.35 * Math.sin(this.time.now * 0.008);
       const pAlpha = this.pressureAuraAlpha * 0.32 * wave;
@@ -2252,16 +2356,8 @@ export class MainScene extends Phaser.Scene {
       this.lightVignette.strokeRect(0, 0, w, h);
     }
 
-    // Low-HP (<40%) slowly reddening vignette with heartbeat-like double pulse
-    const hpRatio = this.playerStats.currentHp / Math.max(1, this.playerStats.maxHp);
-    const targetLowHp =
-      hpRatio < SPAWN_TIMELINE.feel.lowHpThreshold
-        ? (SPAWN_TIMELINE.feel.lowHpThreshold - hpRatio) / SPAWN_TIMELINE.feel.lowHpThreshold
-        : 0;
-    this.lowHpVignetteAlpha = Phaser.Math.Linear(this.lowHpVignetteAlpha, targetLowHp, 0.03);
     if (this.lowHpVignetteAlpha > 0.01) {
       const beatPhase = (this.time.now % SPAWN_TIMELINE.feel.heartbeatPeriodMs) / SPAWN_TIMELINE.feel.heartbeatPeriodMs;
-      // Double-thump heartbeat envelope (lub-dub)
       const lub = Math.exp(-Math.pow((beatPhase - 0.14) / 0.06, 2));
       const dub = 0.75 * Math.exp(-Math.pow((beatPhase - 0.32) / 0.06, 2));
       const heartbeat = 0.45 + 0.55 * Math.min(1, lub + dub);
@@ -2272,7 +2368,6 @@ export class MainScene extends Phaser.Scene {
       this.lightVignette.strokeRect(0, 0, w, h);
     }
 
-    // Event warning screen-edge red flash
     if (this.screenEdgeFlashAlpha > 0.01) {
       this.lightVignette.lineStyle(28, 0xe5484d, this.screenEdgeFlashAlpha * 0.7);
       this.lightVignette.strokeRect(0, 0, w, h);
@@ -2365,9 +2460,10 @@ export class MainScene extends Phaser.Scene {
       const vx = Math.cos(angle) * speed;
       const vy = Math.sin(angle) * speed;
 
-      const proj = this.projectilesGroup.create(this.player.x, this.player.y, 'fx_bolt') as Phaser.Physics.Arcade.Sprite;
+      const proj = this.acquirePlayerProjectile(this.player.x, this.player.y, 'fx_bolt');
       proj.setDepth(22);
       proj.setBlendMode(Phaser.BlendModes.ADD);
+      proj.clearTint();
       proj.setScale(0.42);
       proj.setRotation(angle);
 
@@ -2426,7 +2522,7 @@ export class MainScene extends Phaser.Scene {
       const vx = Math.cos(angle) * speed;
       const vy = Math.sin(angle) * speed;
 
-      const proj = this.projectilesGroup.create(this.player.x, this.player.y, 'fx_bolt') as Phaser.Physics.Arcade.Sprite;
+      const proj = this.acquirePlayerProjectile(this.player.x, this.player.y, 'fx_bolt');
       proj.setDepth(22);
       proj.setBlendMode(Phaser.BlendModes.ADD);
       proj.setTint(0x22ffff);
@@ -2484,6 +2580,13 @@ export class MainScene extends Phaser.Scene {
     this.bladeAngle += speed;
 
     const radius = 95;
+    const hitRadiusSq = 45 * 45;
+    const nearby = canDealDamage
+      ? (this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])
+      : null;
+    const now = this.time.now;
+    const dmg = canDealDamage ? Math.round(blades.damage * this.playerStats.damageMultiplier) : 0;
+
     for (let i = 0; i < count; i++) {
       const angle = this.bladeAngle + (i * Math.PI * 2) / count;
       const bx = this.player.x + Math.cos(angle) * radius;
@@ -2495,19 +2598,18 @@ export class MainScene extends Phaser.Scene {
       blade.setAlpha(canDealDamage ? 1.0 : 0.28);
       blade.anims.timeScale = canDealDamage ? 1.25 : 0.85;
 
-      if (!canDealDamage) continue;
+      if (!nearby) continue;
 
-      // Slicing check on nearby enemies (only while standing still if ORBIT_BLADES_NEED_STANDING)
-      const nearby = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
-      for (const enemy of nearby) {
+      // Slicing check on nearby enemies using squared distance (only while standing still if ORBIT_BLADES_NEED_STANDING)
+      for (let j = 0; j < nearby.length; j++) {
+        const enemy = nearby[j];
         if (!enemy.active) continue;
-        const dist = Phaser.Math.Distance.Between(bx, by, enemy.x, enemy.y);
-        if (dist < 45) {
-          const lastHit = enemy.getData('lastBladeHit') || 0;
-          const now = this.time.now;
+        const dx = enemy.x - bx;
+        const dy = enemy.y - by;
+        if (dx * dx + dy * dy < hitRadiusSq) {
+          const lastHit = (enemy.getData('lastBladeHit') as number) || 0;
           if (now - lastHit > 280) {
             enemy.setData('lastBladeHit', now);
-            const dmg = Math.round(blades.damage * this.playerStats.damageMultiplier);
             this.damageEnemy(enemy, dmg, false, Math.cos(angle) * 120, Math.sin(angle) * 120);
             soundManager.playBladeSlash();
             this.spawnSparkHitEffect(bx, by);
@@ -2533,6 +2635,7 @@ export class MainScene extends Phaser.Scene {
 
     const maxScale = 1.8 + ring.level * 0.25;
     const maxRadius = maxScale * 140;
+    const maxRadiusSq = maxRadius * maxRadius;
 
     this.tweens.add({
       targets: ringSprite,
@@ -2550,11 +2653,13 @@ export class MainScene extends Phaser.Scene {
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     const dmg = Math.round(ring.damage * this.playerStats.damageMultiplier);
 
-    for (const enemy of enemies) {
+    for (let i = 0; i < enemies.length; i++) {
+      const enemy = enemies[i];
       if (!enemy.active) continue;
-      const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, enemy.x, enemy.y);
-      if (dist <= maxRadius) {
-        const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, enemy.x, enemy.y);
+      const dx = enemy.x - this.player.x;
+      const dy = enemy.y - this.player.y;
+      if (dx * dx + dy * dy <= maxRadiusSq) {
+        const angle = Math.atan2(dy, dx);
         const kx = Math.cos(angle) * 220;
         const ky = Math.sin(angle) * 220;
         this.damageEnemy(enemy, dmg, false, kx, ky);
@@ -2581,9 +2686,10 @@ export class MainScene extends Phaser.Scene {
       const vx = Math.cos(angle) * speed;
       const vy = Math.sin(angle) * speed;
 
-      const proj = this.projectilesGroup.create(this.player.x, this.player.y, 'fx_spark') as Phaser.Physics.Arcade.Sprite;
+      const proj = this.acquirePlayerProjectile(this.player.x, this.player.y, 'fx_spark');
       proj.setDepth(22);
       proj.setBlendMode(Phaser.BlendModes.ADD);
+      proj.clearTint();
       proj.setScale(0.48);
       proj.setRotation(angle);
 
@@ -2686,7 +2792,7 @@ export class MainScene extends Phaser.Scene {
         if (data.isEnemy) {
           this.releaseEnemyProjectile(proj);
         } else {
-          proj.destroy();
+          this.releasePlayerProjectile(proj);
         }
         continue;
       }
@@ -2747,11 +2853,24 @@ export class MainScene extends Phaser.Scene {
       this.eliteAuraGraphics.clear();
     }
 
-    for (const enemy of enemies) {
+    for (let i = 0; i < enemies.length; i++) {
+      const enemy = enemies[i];
       if (!enemy.active) continue;
 
       const edata = enemy.getData('data') as EnemyData;
       if (!edata) continue;
+
+      // Zero-allocation hit-flash tint restoration
+      if (edata.tintResetAtMs && time >= edata.tintResetAtMs) {
+        edata.tintResetAtMs = 0;
+        if (enemy.getData('enraged')) {
+          enemy.setTint(0xff7a7a);
+        } else if (edata.isElite) {
+          enemy.setTint((ELITE_AURA_STYLE[edata.type] ?? ELITE_AURA_STYLE.brute).spriteTint);
+        } else {
+          enemy.clearTint();
+        }
+      }
 
       // Elite distinct multi-layered pulsing aura & orbiting sigil nodes
       if (edata.isElite && this.eliteAuraGraphics) {
@@ -2787,8 +2906,10 @@ export class MainScene extends Phaser.Scene {
         edata.knockbackY *= 0.88;
       }
 
-      const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
-      const angle = Phaser.Math.Angle.Between(enemy.x, enemy.y, this.player.x, this.player.y);
+      const dxToPlayer = this.player.x - enemy.x;
+      const dyToPlayer = this.player.y - enemy.y;
+      const distSq = dxToPlayer * dxToPlayer + dyToPlayer * dyToPlayer;
+      const angle = Math.atan2(dyToPlayer, dxToPlayer);
       const effectiveSpeed = edata.speed * globalEnemySpeedFactor;
 
       // Stampede linear charge override
@@ -2805,28 +2926,36 @@ export class MainScene extends Phaser.Scene {
       }
 
       // All standard enemies flip toward the player
-      enemy.setFlipX(this.player.x < enemy.x);
+      enemy.setFlipX(dxToPlayer < 0);
 
       // Enemy specific behaviors
       switch (edata.type) {
         case 'wisp': {
-          const phase = (enemy.getData('phase') as number) || 0;
+          const phase = edata.phase ?? 0;
           const hoverOffset = Math.sin(time * 0.007 + phase) * 35;
-          const perpAngle = angle + Math.PI / 2;
+          const cosA = Math.cos(angle);
+          const sinA = Math.sin(angle);
           enemy.setVelocity(
-            Math.cos(angle) * effectiveSpeed + Math.cos(perpAngle) * hoverOffset,
-            Math.sin(angle) * effectiveSpeed + Math.sin(perpAngle) * hoverOffset
+            cosA * effectiveSpeed - sinA * hoverOffset,
+            sinA * effectiveSpeed + cosA * hoverOffset
+          );
+          const baseScale = edata.baseScale ?? 0.36;
+          const wobble = Math.sin(time * 0.015 + phase);
+          enemy.setScale(
+            baseScale * (0.925 - wobble * 0.075),
+            baseScale * (1.03 + wobble * 0.03)
           );
           break;
         }
 
         case 'imp': {
-          const phase = (enemy.getData('phase') as number) || 0;
+          const phase = edata.phase ?? 0;
           const zigzag = Math.sin(time * 0.012 + phase) * 45;
-          const perpAngle = angle + Math.PI / 2;
+          const cosA = Math.cos(angle);
+          const sinA = Math.sin(angle);
           enemy.setVelocity(
-            Math.cos(angle) * effectiveSpeed + Math.cos(perpAngle) * zigzag,
-            Math.sin(angle) * effectiveSpeed + Math.sin(perpAngle) * zigzag
+            cosA * effectiveSpeed - sinA * zigzag,
+            sinA * effectiveSpeed + cosA * zigzag
           );
           if (!enemy.anims.isPlaying || enemy.anims.currentAnim?.key !== 'imp_run') {
             enemy.play('imp_run', true);
@@ -2838,9 +2967,9 @@ export class MainScene extends Phaser.Scene {
           const isTelegraphing = (edata.telegraphingUntilMs ?? 0) > time;
           if (isTelegraphing) {
             enemy.setVelocity(0, 0);
-          } else if (dist > 300) {
+          } else if (distSq > 300 * 300) {
             enemy.setVelocity(Math.cos(angle) * effectiveSpeed, Math.sin(angle) * effectiveSpeed);
-          } else if (dist < 220) {
+          } else if (distSq < 220 * 220) {
             enemy.setVelocity(-Math.cos(angle) * effectiveSpeed * 0.8, -Math.sin(angle) * effectiveSpeed * 0.8);
           } else {
             enemy.setVelocity(0, 0);
@@ -2851,7 +2980,7 @@ export class MainScene extends Phaser.Scene {
           }
 
           // Spitter fires dodgeable orb after a 0.5s ground line telegraph
-          if (time - edata.lastAttack > 2600 && dist < 440) {
+          if (time - edata.lastAttack > 2600 && distSq < 440 * 440) {
             edata.lastAttack = time;
             edata.telegraphingUntilMs = time + SPAWN_TIMELINE.pressure.telegraphDurationMs;
             this.queueTelegraph({
@@ -2876,6 +3005,16 @@ export class MainScene extends Phaser.Scene {
           if (!enemy.anims.isPlaying || enemy.anims.currentAnim?.key !== 'brute_walk') {
             enemy.play('brute_walk', true);
           }
+          const rawFrame = enemy.anims.currentFrame?.textureFrame;
+          const fIdx = typeof rawFrame === 'number' ? rawFrame : -1;
+          if ((fIdx === 4 || fIdx === 13) && edata.lastStompFrame !== fIdx) {
+            edata.lastStompFrame = fIdx;
+            if (distSq < 450 * 450) {
+              soundManager.playBruteStomp();
+            }
+          } else if (fIdx !== 4 && fIdx !== 13) {
+            edata.lastStompFrame = fIdx;
+          }
           break;
         }
 
@@ -2884,10 +3023,12 @@ export class MainScene extends Phaser.Scene {
           const hpRatio = edata.hp / Math.max(1, edata.maxHp);
           const isEnraged = hpRatio <= 0.5;
           const isCritical = hpRatio <= 0.25;
+          let forceBossEmit = false;
 
           if (isEnraged && !enemy.getData('enraged')) {
             enemy.setData('enraged', true);
             enemy.setTint(0xff7a7a);
+            forceBossEmit = true;
             soundManager.playBossWarning();
             this.cameraController.shakeFromBossProximity(
               enemy.x,
@@ -2934,7 +3075,7 @@ export class MainScene extends Phaser.Scene {
               speed: 0,
               tint: 0xe5484d,
             });
-          } else if (!isAttacking && dist < 640) {
+          } else if (!isAttacking && distSq < 640 * 640) {
             // Escalating Void Volley: 5-way normally, 7-way critical burst below 25% HP
             const volleyCooldown = isCritical ? 1250 : isEnraged ? 1450 : 1950;
             const lastVolley = (enemy.getData('lastBossVolley') as number) || 0;
@@ -2989,17 +3130,24 @@ export class MainScene extends Phaser.Scene {
             this.spawnParticleBurst(enemy.x, enemy.y, 18, 'fx_ring', 90, 220, 0.2, 0.4, 0xe5303a);
           }
 
-          // Emit boss update to UI
-          gameManager.emitBossUpdate({
-            name: bossTier > 1 ? `The Void Titan Tier ${bossTier}` : 'The Void Titan',
-            currentHp: Math.max(0, Math.round(edata.hp)),
-            maxHp: edata.maxHp,
-            active: true,
-            recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 15,
-            enraged: isEnraged,
-          });
+          // Throttled boss update to UI (max ~10Hz instead of 60Hz React re-renders)
+          if (forceBossEmit || time - this.lastBossEmitMs >= 100) {
+            this.lastBossEmitMs = time;
+            gameManager.emitBossUpdate({
+              name: bossTier > 1 ? `The Void Titan Tier ${bossTier}` : 'The Void Titan',
+              currentHp: Math.max(0, Math.round(edata.hp)),
+              maxHp: edata.maxHp,
+              active: true,
+              recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 15,
+              enraged: isEnraged,
+            });
+          }
           break;
         }
+      }
+
+      if (this.shadowSystem && edata.type !== 'wisp' && edata.type !== 'boss') {
+        this.shadowSystem.resolvePillarPushout(enemy, 16);
       }
     }
   }
@@ -3044,6 +3192,90 @@ export class MainScene extends Phaser.Scene {
     proj.setActive(true);
     proj.setVisible(true);
     return proj;
+  }
+
+  private acquirePlayerProjectile(
+    x: number,
+    y: number,
+    texture: string
+  ): Phaser.Physics.Arcade.Sprite {
+    let proj = this.playerProjectilePool.find((p) => !p.active);
+    if (!proj) {
+      proj = this.projectilesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
+      proj.disableInteractive();
+      this.playerProjectilePool.push(proj);
+    } else {
+      proj.setTexture(texture);
+      proj.enableBody(true, x, y, true, true);
+      proj.setAlpha(1);
+    }
+    return proj;
+  }
+
+  private releasePlayerProjectile(proj: Phaser.Physics.Arcade.Sprite) {
+    proj.clearTint();
+    proj.disableBody(true, true);
+    proj.setActive(false);
+    proj.setVisible(false);
+  }
+
+  private acquireEnemy(
+    x: number,
+    y: number,
+    texture: string
+  ): Phaser.Physics.Arcade.Sprite {
+    let enemy = this.enemyPool.find((e) => !e.active);
+    if (!enemy) {
+      enemy = this.enemiesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
+      enemy.disableInteractive();
+      this.enemyPool.push(enemy);
+    } else {
+      enemy.anims.stop();
+      enemy.clearTint();
+      enemy.setAlpha(1);
+      enemy.setFlipX(false);
+      enemy.setTexture(texture);
+      enemy.enableBody(true, x, y, true, true);
+    }
+    return enemy;
+  }
+
+  private releaseEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
+    this.tweens.killTweensOf(enemy);
+    enemy.anims.stop();
+    enemy.clearTint();
+    enemy.setAlpha(1);
+    enemy.setData('data', null);
+    enemy.setData('lastBladeHit', 0);
+    enemy.disableBody(true, true);
+    enemy.setActive(false);
+    enemy.setVisible(false);
+  }
+
+  private acquirePickup(
+    x: number,
+    y: number,
+    texture: string
+  ): Phaser.Physics.Arcade.Sprite {
+    let p = this.pickupPool.find((item) => !item.active);
+    if (!p) {
+      p = this.pickupsGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
+      p.disableInteractive();
+      this.pickupPool.push(p);
+    } else {
+      p.setTexture(texture);
+      p.enableBody(true, x, y, true, true);
+      p.setAlpha(1);
+      p.clearTint();
+    }
+    return p;
+  }
+
+  private releasePickup(p: Phaser.Physics.Arcade.Sprite) {
+    p.setAlpha(1);
+    p.disableBody(true, true);
+    p.setActive(false);
+    p.setVisible(false);
   }
 
   private releaseEnemyProjectile(proj: Phaser.Physics.Arcade.Sprite) {
@@ -3619,11 +3851,13 @@ export class MainScene extends Phaser.Scene {
     const damage = Math.max(1, Math.round(baseDmg * dmgMultiplier));
     const speed = Math.round(baseSpeed * speedMultiplier);
 
-    const enemy = this.enemiesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
+    const enemy = this.acquireEnemy(x, y, texture);
     enemy.setDepth(options?.isElite ? 20 : 18);
     enemy.setScale(scale);
     if (options?.isElite) {
       enemy.setTint((ELITE_AURA_STYLE[type] ?? ELITE_AURA_STYLE.brute).spriteTint);
+    } else {
+      enemy.clearTint();
     }
 
     // Hitbox smaller than sprite
@@ -3647,6 +3881,7 @@ export class MainScene extends Phaser.Scene {
 
     const baseGemValue = type === 'brute' ? 5 : type === 'spitter' ? 3 : 1;
     const eliteGemValue = Math.max(10, baseGemValue * ELITE_VARIANTS.xpMultiplier);
+    const phase = Math.random() * 1000;
 
     const edata: EnemyData = {
       type,
@@ -3665,11 +3900,13 @@ export class MainScene extends Phaser.Scene {
       chargeVx: options?.chargeVx,
       chargeVy: options?.chargeVy,
       chargeTimerMs: options?.chargeTimerMs,
+      phase,
+      lightVis: 0,
+      baseScale: scale,
+      lastStompFrame: -1,
     };
     enemy.setData('data', edata);
-
-    // Randomize phase per enemy so a crowd doesn't move in sync
-    enemy.setData('phase', Math.random() * 1000);
+    enemy.setData('lastBladeHit', 0);
 
     // Play spritesheet animations and randomize start frame so crowds are not in sync
     if (type === 'imp') {
@@ -3678,46 +3915,9 @@ export class MainScene extends Phaser.Scene {
     } else if (type === 'brute') {
       enemy.play('brute_walk');
       enemy.anims.setProgress(Math.random());
-      enemy.on(
-        Phaser.Animations.Events.ANIMATION_UPDATE,
-        (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
-          const fIdx =
-            typeof frame.textureFrame === 'number'
-              ? frame.textureFrame
-              : parseInt(String(frame.textureFrame), 10);
-          if (fIdx === 4 || fIdx === 13) {
-            const dist = Phaser.Math.Distance.Between(enemy.x, enemy.y, this.player.x, this.player.y);
-            if (dist < 450) {
-              soundManager.playBruteStomp();
-            }
-          }
-        }
-      );
     } else if (type === 'spitter') {
       enemy.play('spitter_walk');
       enemy.anims.setProgress(Math.random());
-    }
-
-    // Keep Pass 1-4 tweens only where they don't fight sprite animation (wisp has no spritesheet)
-    if (type === 'wisp') {
-      this.tweens.add({
-        targets: enemy,
-        scaleX: scale * 0.85,
-        duration: 160,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Quad.easeInOut',
-        delay: Math.random() * 160,
-      });
-      this.tweens.add({
-        targets: enemy,
-        scaleY: scale * 1.06,
-        duration: 220,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.easeInOut',
-        delay: Math.random() * 220,
-      });
     }
   }
 
@@ -3866,7 +4066,7 @@ export class MainScene extends Phaser.Scene {
 
     pdata.pierce--;
     if (pdata.pierce <= 0) {
-      proj.destroy();
+      this.releasePlayerProjectile(proj);
     }
   }
 
@@ -3913,17 +4113,7 @@ export class MainScene extends Phaser.Scene {
       enemy.setTint(0xffffff);
     }
 
-    this.time.delayedCall(isCrit ? 95 : 70, () => {
-      if (enemy.active) {
-        if (enemy.getData('enraged')) {
-          enemy.setTint(0xff7a7a);
-        } else if (edata.isElite) {
-          enemy.setTint((ELITE_AURA_STYLE[edata.type] ?? ELITE_AURA_STYLE.brute).spriteTint);
-        } else {
-          enemy.clearTint();
-        }
-      }
-    });
+    edata.tintResetAtMs = this.time.now + (isCrit ? 95 : 70);
 
     // Spawn floating damage text
     this.showDamageNumber(enemy.x, enemy.y - 20, damage, isCrit);
@@ -4062,9 +4252,11 @@ export class MainScene extends Phaser.Scene {
       } else {
         soundManager.playGameplay();
       }
+      enemy.destroy();
+      return;
     }
 
-    enemy.destroy();
+    this.releaseEnemy(enemy);
   }
 
   private checkHordeFrenzyTrigger(): void {
@@ -4120,6 +4312,31 @@ export class MainScene extends Phaser.Scene {
     type: 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard',
     value: number
   ) {
+    // Cap active XP gems to keep overlap physics & lighting fast at 60 FPS; merge excess XP into nearest gem
+    if (type === 'gem' && this.pickupsGroup) {
+      const pickups = this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+      let gemCount = 0;
+      let mergeTarget: Phaser.Physics.Arcade.Sprite | null = null;
+      let minDistSq = Infinity;
+      for (let i = 0; i < pickups.length; i++) {
+        const item = pickups[i];
+        if (!item.active || item.getData('type') !== 'gem') continue;
+        gemCount++;
+        const dx = item.x - x;
+        const dy = item.y - y;
+        const dSq = dx * dx + dy * dy;
+        if (dSq < minDistSq) {
+          minDistSq = dSq;
+          mergeTarget = item;
+        }
+      }
+      if (gemCount >= this.MAX_ACTIVE_XP_GEMS && mergeTarget) {
+        mergeTarget.setData('value', ((mergeTarget.getData('value') as number) || 1) + value);
+        mergeTarget.setData('life', 0);
+        return;
+      }
+    }
+
     const texture =
       type === 'chest'
         ? 'pickup_chest'
@@ -4128,40 +4345,36 @@ export class MainScene extends Phaser.Scene {
           : type === 'red_shard'
             ? 'pickup_red_shard'
             : type;
-    const pickup = this.pickupsGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
-    pickup.setDepth(
-      type === 'chest' || type === 'light_shard' || type === 'red_shard' ? 19 : 17
-    );
-    pickup.setScale(
+    const baseScale =
       type === 'chest'
         ? 1.0
         : type === 'light_shard' || type === 'red_shard'
           ? 0.95
           : type === 'coin'
             ? 0.38
-            : 0.36
+            : 0.36;
+
+    const pickup = this.acquirePickup(x, y, texture);
+    pickup.setDepth(
+      type === 'chest' || type === 'light_shard' || type === 'red_shard' ? 19 : 17
     );
+    pickup.setScale(baseScale);
+    pickup.setAlpha(1);
     pickup.setData('type', type);
     pickup.setData('value', value);
     pickup.setData('life', 0);
-
-    // Gentle pulse tween
-    this.tweens.add({
-      targets: pickup,
-      scaleX: pickup.scaleX * 1.15,
-      scaleY: pickup.scaleY * 1.15,
-      duration: 500,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
+    pickup.setData('baseScale', baseScale);
   }
 
   private updatePickups(delta: number) {
     const pickups = this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     const magnetDist = this.playerStats.magnetRadius;
+    const magnetDistSq = magnetDist * magnetDist;
+    const dtSec = delta * 0.001;
+    const pulseWave = Math.sin(this.time.now * 0.006) * 0.08;
 
-    for (const p of pickups) {
+    for (let i = 0; i < pickups.length; i++) {
+      const p = pickups[i];
       if (!p.active) continue;
       const type = p.getData('type') as 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard';
 
@@ -4170,7 +4383,7 @@ export class MainScene extends Phaser.Scene {
         const expireMs = type === 'red_shard' ? 16000 : SPAWN_TIMELINE.pressure.gemExpireMs;
         const life = ((p.getData('life') as number) || 0) + delta;
         if (life >= expireMs) {
-          p.destroy();
+          this.releasePickup(p);
           continue;
         }
         p.setData('life', life);
@@ -4179,13 +4392,21 @@ export class MainScene extends Phaser.Scene {
         }
       }
 
+      if (type === 'chest' || type === 'light_shard' || type === 'red_shard') {
+        const baseScale = (p.getData('baseScale') as number) || 0.95;
+        p.setScale(baseScale * (1 + pulseWave));
+      }
+
       if (type !== 'chest' && type !== 'red_shard') {
-        const dist = Phaser.Math.Distance.Between(p.x, p.y, this.player.x, this.player.y);
-        if (dist <= magnetDist) {
-          const angle = Phaser.Math.Angle.Between(p.x, p.y, this.player.x, this.player.y);
+        const dx = this.player.x - p.x;
+        const dy = this.player.y - p.y;
+        const distSq = dx * dx + dy * dy;
+        if (distSq <= magnetDistSq && distSq > 0.01) {
+          const dist = Math.sqrt(distSq);
           const spd = Phaser.Math.Linear(300, 750, 1 - dist / magnetDist);
-          p.x += (Math.cos(angle) * spd * delta) / 1000;
-          p.y += (Math.sin(angle) * spd * delta) / 1000;
+          const step = (spd * dtSec) / dist;
+          p.x += dx * step;
+          p.y += dy * step;
         }
       }
     }
@@ -4239,12 +4460,12 @@ export class MainScene extends Phaser.Scene {
     } else if (type === 'chest') {
       soundManager.playCoinCollect();
       this.spawnParticleBurst(pickup.x, pickup.y, 24, 'fx_ring', 90, 220, 0.25, 0.45, 0xf2a93b);
-      pickup.destroy();
+      this.releasePickup(pickup);
       this.triggerLevelUp();
       return;
     }
 
-    pickup.destroy();
+    this.releasePickup(pickup);
   }
 
   // -------------------------------------------------------------
@@ -4723,13 +4944,16 @@ export class MainScene extends Phaser.Scene {
   private getNearestEnemy(range: number): Phaser.Physics.Arcade.Sprite | null {
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     let nearest: Phaser.Physics.Arcade.Sprite | null = null;
-    let minDist = range;
+    let minDistSq = range * range;
 
-    for (const e of enemies) {
+    for (let i = 0; i < enemies.length; i++) {
+      const e = enemies[i];
       if (!e.active) continue;
-      const d = Phaser.Math.Distance.Between(this.player.x, this.player.y, e.x, e.y);
-      if (d < minDist) {
-        minDist = d;
+      const dx = e.x - this.player.x;
+      const dy = e.y - this.player.y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq < minDistSq) {
+        minDistSq = dSq;
         nearest = e;
       }
     }
@@ -4869,8 +5093,18 @@ export class MainScene extends Phaser.Scene {
   private emitStatsUpdate() {
     const now = this.time.now;
     const windowMs = 3000;
-    this.recentDamageLog = this.recentDamageLog.filter((entry) => now - entry.timeMs <= windowMs);
-    const recentDamageSum = this.recentDamageLog.reduce((sum, entry) => sum + entry.amount, 0);
+    // In-place compaction + sum (zero temporary filter array allocation)
+    let writeIdx = 0;
+    let recentDamageSum = 0;
+    const log = this.recentDamageLog;
+    for (let i = 0; i < log.length; i++) {
+      const entry = log[i];
+      if (now - entry.timeMs <= windowMs) {
+        log[writeIdx++] = entry;
+        recentDamageSum += entry.amount;
+      }
+    }
+    log.length = writeIdx;
 
     const fps = Math.round(this.game?.loop?.actualFps || 0);
     const enemyCount = this.enemiesGroup ? this.enemiesGroup.countActive(true) : 0;
@@ -4977,6 +5211,8 @@ export class MainScene extends Phaser.Scene {
       projectilesGroup: this.projectilesGroup,
       effectPool: this.effectPool,
       orbitingBlades: this.orbitingBlades,
+      torches: this.shadowSystem ? this.shadowSystem.getTorchesSnapshot() : null,
+      pillars: this.shadowSystem ? this.shadowSystem.getPillarsSnapshot() : null,
       levelUpPulseSeq: this.levelUpPulseSeq,
       lightRadiusMultiplier: this.getLightRadiusMultiplier(),
       hasNightEyes: this.hasNightEyes,
