@@ -1,90 +1,41 @@
-name: Build Android Debug APK
-
+name: Build Android APK
 on:
-  push:
-    branches: ["main", "master"]
   workflow_dispatch:
-
+  push:
+    branches: [main]
 jobs:
-  build-apk:
+  build:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: "20"
-
-      - name: Setup Java JDK 17
-        uses: actions/setup-java@v4
+          node-version: 22
+      - uses: actions/setup-java@v4
         with:
-          distribution: "temurin"
-          java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Fix AI Studio package.json & relative paths
+          distribution: temurin
+          java-version: 21
+      - name: Install dependencies
         run: |
-          node -e '
-            const fs = require("fs");
-            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
-            if (pkg.dependencies) {
-              delete pkg.dependencies["express"];
-              delete pkg.dependencies["dotenv"];
-              delete pkg.dependencies["@google/genai"];
-              delete pkg.dependencies["motion"];
-              pkg.dependencies["phaser"] = "^3.88.2";
-              pkg.dependencies["vite"] = "^6.3.5";
-              pkg.dependencies["@vitejs/plugin-react"] = "^4.4.1";
-              pkg.dependencies["@tailwindcss/vite"] = "^4.1.4";
-            }
-            if (pkg.devDependencies) {
-              delete pkg.devDependencies["tsx"];
-              delete pkg.devDependencies["esbuild"];
-              delete pkg.devDependencies["autoprefixer"];
-              pkg.devDependencies["typescript"] = "^5.8.3";
-            }
-            fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2));
-          '
-          # Ubah path aset absolut (/assets/...) menjadi relatif (./assets/...) agar terbaca di WebView Android
-          find src -type f \( -name "*.ts" -o -name "*.tsx" -o -name "*.css" \) -exec sed -i "s|'/assets/|'./assets/|g; s|\"/assets/|\"./assets/|g" {} +
-
-      - name: Install Web Dependencies
-        run: npm install --legacy-peer-deps
-
-      - name: Build Web Game
-        run: npx vite build --base=./
-
-      - name: Initialize Capacitor & Generate Android Project
+          npm install
+          npm install @capacitor/core @capacitor/cli @capacitor/android @capacitor/app @capacitor/haptics
+      - name: Build web
+        run: npm run build
+      - name: Create Android project
         run: |
-          npm install @capacitor/core@^6.1.2 @capacitor/cli@^6.1.2 @capacitor/android@^6.1.2 --legacy-peer-deps
-          if [ ! -f "capacitor.config.json" ] && [ ! -f "capacitor.config.ts" ]; then
-            npx cap init "Last Light" "com.pomolikids.lastlight" --web-dir=dist
-          fi
-          if [ ! -d "android" ]; then
-            npx cap add android
-          fi
+          npx cap init "Last Light" com.aditya.lastlight --web-dir dist
+          npx cap add android
           npx cap sync android
-
-      - name: Lock Landscape Orientation in AndroidManifest
+      - name: Lock portrait
+        run: sed -i 's|<activity|<activity android:screenOrientation="portrait"|' android/app/src/main/AndroidManifest.xml
+      - name: Accept SDK licenses, install platform 36
         run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if [ -f "$MANIFEST" ]; then
-            sed -i 's/android:name=".MainActivity"/android:name=".MainActivity" android:screenOrientation="sensorLandscape"/g' "$MANIFEST"
-          fi
-
-      - name: Build Debug APK
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew assembleDebug
-
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36" "build-tools;36.0.0" || true
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+      - uses: actions/upload-artifact@v4
         with:
-          name: Last-Light-2D-Survivor-debug-apk
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          name: last-light-apk
+          path: android/app/build/outputs/apk/debug/*.apk
