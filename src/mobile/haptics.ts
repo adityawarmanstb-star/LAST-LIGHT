@@ -1,44 +1,17 @@
 import { Capacitor } from '@capacitor/core';
-import { Haptics, ImpactStyle } from '@capacitor/haptics';
+import { Haptics, ImpactStyle, NotificationType } from '@capacitor/haptics';
+import { saveDataStore } from '../game/saveData';
 
 export type HapticPulseStyle = 'light' | 'medium' | 'heavy' | 'selection';
 
-const HAPTICS_STORAGE_KEY = 'last_light_haptics_enabled';
 const MIN_PULSE_INTERVAL_MS = 25;
-
-const PULSE_DURATION_MS: Record<HapticPulseStyle, number> = {
-  selection: 10,
-  light: 14,
-  medium: 22,
-  heavy: 32,
-};
-
-function isAndroidPlatform(): boolean {
-  if (typeof window === 'undefined') return false;
-  if (Capacitor.getPlatform() === 'android') return true;
-  if (typeof navigator !== 'undefined') {
-    return /android/i.test(navigator.userAgent);
-  }
-  return false;
-}
 
 class HapticFeedbackManager {
   private enabled: boolean;
   private lastTriggerAtMs = 0;
 
   constructor() {
-    this.enabled = this.loadEnabledState();
-  }
-
-  private loadEnabledState(): boolean {
-    try {
-      if (typeof window === 'undefined' || !window.localStorage) return true;
-      const saved = window.localStorage.getItem(HAPTICS_STORAGE_KEY);
-      if (saved === null) return true;
-      return saved === 'true';
-    } catch {
-      return true;
-    }
+    this.enabled = saveDataStore.read().settings.hapticsEnabled;
   }
 
   public isEnabled(): boolean {
@@ -47,13 +20,9 @@ class HapticFeedbackManager {
 
   public setEnabled(next: boolean): void {
     this.enabled = next;
-    try {
-      if (typeof window !== 'undefined' && window.localStorage) {
-        window.localStorage.setItem(HAPTICS_STORAGE_KEY, String(next));
-      }
-    } catch {
-      // Ignore storage failures
-    }
+    saveDataStore.update((draft) => {
+      draft.settings.hapticsEnabled = next;
+    });
   }
 
   public toggle(): boolean {
@@ -66,11 +35,11 @@ class HapticFeedbackManager {
   }
 
   /**
-   * Triggers a short tactile vibration pulse on Android devices.
-   * Safe no-op on desktop/non-Android environments or when disabled.
+   * Triggers a short tactile vibration pulse using @capacitor/haptics on native mobile.
+   * Strict no-op in browsers or when disabled.
    */
   public tap(style: HapticPulseStyle = 'light'): void {
-    if (!this.enabled || !isAndroidPlatform()) {
+    if (!this.enabled || !Capacitor.isNativePlatform()) {
       return;
     }
 
@@ -80,17 +49,35 @@ class HapticFeedbackManager {
     }
     this.lastTriggerAtMs = now;
 
-    const durationMs = PULSE_DURATION_MS[style];
-
-    if (Capacitor.isNativePlatform()) {
-      void this.triggerNativePulse(style, durationMs);
-      return;
-    }
-
-    this.triggerWebVibrate(durationMs);
+    void this.triggerNativePulse(style);
   }
 
-  private async triggerNativePulse(style: HapticPulseStyle, durationMs: number): Promise<void> {
+  /**
+   * Haptic feedback pulse when the player takes damage.
+   */
+  public onPlayerHit(): void {
+    this.tap('medium');
+  }
+
+  /**
+   * Haptic feedback pulse when the player levels up.
+   */
+  public onLevelUp(): void {
+    if (!this.enabled || !Capacitor.isNativePlatform()) {
+      return;
+    }
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this.lastTriggerAtMs < MIN_PULSE_INTERVAL_MS) {
+      return;
+    }
+    this.lastTriggerAtMs = now;
+
+    void Haptics.notification({ type: NotificationType.Success }).catch(() => {
+      void this.triggerNativePulse('heavy');
+    });
+  }
+
+  private async triggerNativePulse(style: HapticPulseStyle): Promise<void> {
     try {
       if (style === 'selection') {
         await Haptics.selectionChanged();
@@ -105,20 +92,10 @@ class HapticFeedbackManager {
       }
     } catch {
       try {
-        await Haptics.vibrate({ duration: durationMs });
+        await Haptics.vibrate({ duration: style === 'heavy' ? 30 : style === 'medium' ? 20 : 12 });
       } catch {
-        this.triggerWebVibrate(durationMs);
+        // Silently ignore if unavailable
       }
-    }
-  }
-
-  private triggerWebVibrate(durationMs: number): void {
-    try {
-      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
-        navigator.vibrate(durationMs);
-      }
-    } catch {
-      // Silently ignore if vibration is blocked or unsupported
     }
   }
 }

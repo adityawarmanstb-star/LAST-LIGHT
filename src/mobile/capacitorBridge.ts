@@ -50,7 +50,7 @@ export function initCapacitorMobile(callbacks: CapacitorBridgeCallbacks): () => 
     soundManager.onUserGesture();
     const handled = callbacks.onBackButton();
     if (!handled) {
-      void CapApp.minimizeApp();
+      void CapApp.exitApp();
     }
   }).then((handle) => {
     if (disposed) {

@@ -179,7 +179,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               aria-hidden="true"
             />
             <img
-              src="/assets/aistudio/player_d0a77e5b.png"
+              src="./assets/aistudio/player_d0a77e5b.png"
               alt="Dark Warden"
               referrerPolicy="no-referrer"
               className="relative w-24 h-24 sm:w-28 sm:h-28 object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.85)] transition-transform duration-200 hover:scale-105"

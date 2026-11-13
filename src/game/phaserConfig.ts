@@ -6,6 +6,12 @@ import { UIScene } from './scenes/UIScene';
 import { gameManager } from './GameManager';
 import { soundManager } from './audio';
 
+export const MAX_DEVICE_PIXEL_RATIO = 2;
+
+export function getCappedDpr(): number {
+  return Math.min(typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1, MAX_DEVICE_PIXEL_RATIO);
+}
+
 export function createPhaserGame(parentContainerId: string): Phaser.Game {
   // If an existing game instance is running, destroy it first cleanly
   if (gameManager.phaserGame) {
@@ -20,10 +26,14 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
   const config: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
     parent: parentContainerId,
-    width: window.innerWidth,
-    height: window.innerHeight,
+    width: 540,
+    height: 960,
     backgroundColor: '#08090d',
     audio: sharedCtx ? { context: sharedCtx } : undefined,
+    loader: {
+      imageLoadType: 'HTMLImageElement',
+      maxRetries: 2,
+    },
     physics: {
       default: 'arcade',
       arcade: {
@@ -32,8 +42,10 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       },
     },
     scale: {
-      mode: Phaser.Scale.RESIZE,
+      mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
+      width: 540,
+      height: 960,
     },
     // Persistent AudioScene -> MainScene (bottom) -> DarknessScene (middle) -> UIScene (top)
     scene: [AudioScene, MainScene, DarknessScene, UIScene],

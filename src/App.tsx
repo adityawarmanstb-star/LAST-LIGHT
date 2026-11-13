@@ -19,6 +19,7 @@ import { BossInfo, DebugStats, EventWarningInfo, RunStats, UpgradeOption, Weapon
 import { Play, RotateCcw, Settings } from 'lucide-react';
 import { MainScene } from './game/scenes/MainScene';
 import { initCapacitorMobile } from './mobile/capacitorBridge';
+import { haptics } from './mobile/haptics';
 
 export default function App() {
   const [gameState, setGameState] = useState<'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('TITLE');
@@ -30,6 +31,7 @@ export default function App() {
   const [musicVolume, setMusicVolume] = useState<number>(soundManager.getMusicVolume());
   const [sfxVolume, setSfxVolume] = useState<number>(soundManager.getSfxVolume());
   const [brightness, setBrightness] = useState<number>(gameManager.getBrightness());
+  const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(() => haptics.isEnabled());
 
   // In-run state
   const [hp, setHp] = useState<number>(100);
@@ -61,6 +63,8 @@ export default function App() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const handleTogglePauseRef = useRef<() => void>(() => {});
+  const handleQuitToTitleRef = useRef<() => void>(() => {});
+  const needsTapAudioResumeRef = useRef<boolean>(false);
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
   const showShopRef = useRef(showShop);
@@ -143,13 +147,16 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Auto-pause when tab is hidden/blurred; recover audio context when returning
+  // Auto-pause game, timers, and audio when backgrounded; resume audio on tap/focus return
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
+        needsTapAudioResumeRef.current = true;
         if (gameStateRef.current === 'PLAYING') {
           console.log('pause pressed');
           handleTogglePauseRef.current();
+        } else {
+          soundManager.pauseAudio();
         }
       } else if (gameStateRef.current !== 'PAUSED') {
         soundManager.handleFocusReturn();
@@ -169,14 +176,49 @@ export default function App() {
       }
     };
 
+    const handleFirstTapAfterReturn = () => {
+      if (needsTapAudioResumeRef.current) {
+        needsTapAudioResumeRef.current = false;
+        soundManager.onUserGesture();
+        if (gameStateRef.current !== 'PAUSED') {
+          soundManager.resumeAudio();
+        }
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
     window.addEventListener('blur', handleBlur);
     window.addEventListener('focus', handleFocus);
+    window.addEventListener('pointerdown', handleFirstTapAfterReturn, { passive: true });
+    window.addEventListener('touchstart', handleFirstTapAfterReturn, { passive: true });
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
       window.removeEventListener('blur', handleBlur);
       window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('pointerdown', handleFirstTapAfterReturn);
+      window.removeEventListener('touchstart', handleFirstTapAfterReturn);
+    };
+  }, []);
+
+  // Mobile WebView hardening: disable long-press context menu & pinch-zoom gestures
+  useEffect(() => {
+    const preventContextMenu = (e: MouseEvent) => e.preventDefault();
+    const preventGesture = (e: Event) => e.preventDefault();
+    const preventPinchZoom = (e: TouchEvent) => {
+      if (e.touches.length > 1 && e.cancelable) {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('contextmenu', preventContextMenu);
+    document.addEventListener('gesturestart', preventGesture);
+    document.addEventListener('touchmove', preventPinchZoom, { passive: false });
+
+    return () => {
+      document.removeEventListener('contextmenu', preventContextMenu);
+      document.removeEventListener('gesturestart', preventGesture);
+      document.removeEventListener('touchmove', preventPinchZoom);
     };
   }, []);
 
@@ -200,9 +242,14 @@ export default function App() {
           handleTogglePauseRef.current();
           return true;
         }
+        if (gameStateRef.current === 'GAME_OVER') {
+          handleQuitToTitleRef.current();
+          return true;
+        }
         return false;
       },
       onAppBackground: () => {
+        needsTapAudioResumeRef.current = true;
         if (gameStateRef.current === 'PLAYING') {
           handleTogglePauseRef.current();
         } else {
@@ -211,7 +258,7 @@ export default function App() {
       },
       onAppForeground: () => {
         if (gameStateRef.current !== 'PAUSED') {
-          soundManager.resumeAudio();
+          soundManager.handleFocusReturn();
         }
       },
     });
@@ -262,6 +309,11 @@ export default function App() {
     setBrightness(val);
   };
 
+  const handleToggleHaptics = () => {
+    const next = haptics.toggle();
+    setHapticsEnabled(next);
+  };
+
   const handleOpenSettings = () => {
     soundManager.playUiClick();
     if (gameState === 'PLAYING') {
@@ -310,6 +362,7 @@ export default function App() {
     soundManager.resumeAudio();
     soundManager.playMenu();
   };
+  handleQuitToTitleRef.current = handleQuitToTitle;
 
   const handleSelectUpgrade = (option: UpgradeOption) => {
     setLevelUpOptions(null);
@@ -437,7 +490,7 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal: Settings (Master / Music / SFX / Brightness Sliders & Mute Toggle) */}
+      {/* Modal: Settings (Master / Music / SFX / Brightness / Haptics Sliders & Toggles) */}
       <SettingsModal
         isOpen={showSettings}
         onClose={() => setShowSettings(false)}
@@ -446,11 +499,13 @@ export default function App() {
         sfxVolume={sfxVolume}
         brightness={brightness}
         isMuted={isMuted}
+        hapticsEnabled={hapticsEnabled}
         onMasterVolumeChange={handleMasterVolumeChange}
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
         onBrightnessChange={handleBrightnessChange}
         onToggleMute={handleToggleMute}
+        onToggleHaptics={handleToggleHaptics}
       />
 
       {/* Modal: Level-Up Card Selection */}

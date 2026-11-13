@@ -3,6 +3,7 @@ import { soundManager } from '../audio';
 import { gameManager } from '../GameManager';
 import { calculateBasePlayerStats, saveCoins, getSavedCoins } from '../metaProgression';
 import { dailyMissions } from '../dailyMissions';
+import { haptics } from '../../mobile/haptics';
 import { BossInfo, PlayerStats, RunStats, UpgradeOption, WeaponState } from '../types';
 import { getAvailableUpgrades } from '../upgrades';
 
@@ -520,6 +521,10 @@ export class MainScene extends Phaser.Scene {
   private hitstopTimer: number = 0;
   private levelUpPulseSeq: number = 0;
   private lastMissionSecondRecorded: number = 0;
+  private lowFpsDurationMs: number = 0;
+  private readonly LOW_FPS_THRESHOLD = 45;
+  private readonly LOW_FPS_TRIGGER_MS = 3000;
+  private readonly LOW_QUALITY_MAX_PARTICLES = 90;
 
   constructor() {
     super('MainScene');
@@ -574,91 +579,93 @@ export class MainScene extends Phaser.Scene {
     this.enemyProjectilePool = [];
     this.enemyTrailPool = [];
     this.lastMissionSecondRecorded = 0;
+    this.lowFpsDurationMs = 0;
+    gameManager.setQualityTier('high');
     dailyMissions.ensureToday();
   }
 
   preload() {
     // Load player spritesheets (frame size 234x218)
-    this.load.spritesheet('player_walk', '/assets/aistudio/player_walk_sheet_bb06b026.png', {
+    this.load.spritesheet('player_walk', './assets/aistudio/player_walk_sheet_bb06b026.png', {
       frameWidth: 234,
       frameHeight: 218,
     });
-    this.load.spritesheet('player_attack', '/assets/aistudio/player_attack_sheet_dd4b205b.png', {
+    this.load.spritesheet('player_attack', './assets/aistudio/player_attack_sheet_dd4b205b.png', {
       frameWidth: 234,
       frameHeight: 218,
     });
 
     // Load monster spritesheets
-    this.load.spritesheet('brute_walk_sheet', '/assets/aistudio/brute_walk_sheet_1167a56d.png', {
+    this.load.spritesheet('brute_walk_sheet', './assets/aistudio/brute_walk_sheet_1167a56d.png', {
       frameWidth: 300,
       frameHeight: 222,
     });
-    this.load.spritesheet('imp_run_sheet', '/assets/aistudio/imp_run_sheet_6bc12170.png', {
+    this.load.spritesheet('imp_run_sheet', './assets/aistudio/imp_run_sheet_6bc12170.png', {
       frameWidth: 344,
       frameHeight: 197,
     });
-    this.load.spritesheet('spitter_walk_sheet', '/assets/aistudio/spitter_walk_sheet_be385db7.png', {
+    this.load.spritesheet('spitter_walk_sheet', './assets/aistudio/spitter_walk_sheet_be385db7.png', {
       frameWidth: 183,
       frameHeight: 273,
     });
-    this.load.spritesheet('boss_idle_sheet', '/assets/aistudio/boss_idle_sheet_45eee864.png', {
+    this.load.spritesheet('boss_idle_sheet', './assets/aistudio/boss_idle_sheet_45eee864.png', {
       frameWidth: 409,
       frameHeight: 253,
     });
-    this.load.spritesheet('boss_attack_sheet', '/assets/aistudio/boss_attack_sheet_8e2697fa.png', {
+    this.load.spritesheet('boss_attack_sheet', './assets/aistudio/boss_attack_sheet_8e2697fa.png', {
       frameWidth: 409,
       frameHeight: 253,
     });
 
     // Load all actual sprite attachments (keep fx_bolt and fx_ring as static fallbacks)
-    this.load.image('player', '/assets/aistudio/player_d0a77e5b.png');
-    this.load.image('floor', '/assets/aistudio/floor_2087ed42.png');
-    this.load.image('enemy_wisp', '/assets/aistudio/enemy_wisp_7d3c48f3.png');
-    this.load.image('enemy_imp', '/assets/aistudio/enemy_imp_60271be1.png');
-    this.load.image('enemy_spitter', '/assets/aistudio/enemy_spitter_51ce3872.png');
-    this.load.image('enemy_brute', '/assets/aistudio/enemy_brute_01eebbc9.png');
-    this.load.image('boss', '/assets/aistudio/boss_a9bb7d84.png');
-    this.load.image('gem', '/assets/aistudio/gem_dc28f9c8.png');
-    this.load.image('coin', '/assets/aistudio/coin_3bd84bab.png');
-    this.load.image('fx_blade', '/assets/aistudio/fx_blade_16a5dfcb.png');
-    this.load.image('fx_bolt', '/assets/aistudio/fx_bolt_be8b486b.png');
-    this.load.image('fx_ring', '/assets/aistudio/fx_ring_7bdbb43c.png');
-    this.load.image('fx_spark', '/assets/aistudio/fx_spark_3ee901cb.png');
+    this.load.image('player', './assets/aistudio/player_d0a77e5b.png');
+    this.load.image('floor', './assets/aistudio/floor_2087ed42.png');
+    this.load.image('enemy_wisp', './assets/aistudio/enemy_wisp_7d3c48f3.png');
+    this.load.image('enemy_imp', './assets/aistudio/enemy_imp_60271be1.png');
+    this.load.image('enemy_spitter', './assets/aistudio/enemy_spitter_51ce3872.png');
+    this.load.image('enemy_brute', './assets/aistudio/enemy_brute_01eebbc9.png');
+    this.load.image('boss', './assets/aistudio/boss_a9bb7d84.png');
+    this.load.image('gem', './assets/aistudio/gem_dc28f9c8.png');
+    this.load.image('coin', './assets/aistudio/coin_3bd84bab.png');
+    this.load.image('fx_blade', './assets/aistudio/fx_blade_16a5dfcb.png');
+    this.load.image('fx_bolt', './assets/aistudio/fx_bolt_be8b486b.png');
+    this.load.image('fx_ring', './assets/aistudio/fx_ring_7bdbb43c.png');
+    this.load.image('fx_spark', './assets/aistudio/fx_spark_3ee901cb.png');
 
     // Load Skill / Impact FX Spritesheets (replaced with new sheets)
-    this.load.spritesheet('fx_spark_sheet', '/assets/aistudio/fx_spark_sheet_cecbd959.png', {
+    this.load.spritesheet('fx_spark_sheet', './assets/aistudio/fx_spark_sheet_cecbd959.png', {
       frameWidth: 192,
       frameHeight: 108,
     });
-    this.load.spritesheet('fx_death_sheet', '/assets/aistudio/fx_death_sheet_bc303348.png', {
+    this.load.spritesheet('fx_death_sheet', './assets/aistudio/fx_death_sheet_bc303348.png', {
       frameWidth: 384,
       frameHeight: 216,
     });
-    this.load.spritesheet('fx_ring_sheet', '/assets/aistudio/fx_ring_sheet_84634a3f.png', {
+    this.load.spritesheet('fx_ring_sheet', './assets/aistudio/fx_ring_sheet_84634a3f.png', {
       frameWidth: 512,
       frameHeight: 288,
     });
-    this.load.spritesheet('fx_slam_sheet', '/assets/aistudio/fx_slam_sheet_61043650.png', {
+    this.load.spritesheet('fx_slam_sheet', './assets/aistudio/fx_slam_sheet_61043650.png', {
       frameWidth: 448,
       frameHeight: 252,
     });
-    this.load.spritesheet('fx_gem_sheet', '/assets/aistudio/fx_gem_sheet_a8e4a0d7.png', {
+    this.load.spritesheet('fx_gem_sheet', './assets/aistudio/fx_gem_sheet_a8e4a0d7.png', {
       frameWidth: 128,
       frameHeight: 128,
     });
-    this.load.spritesheet('fx_blade_sheet', '/assets/aistudio/fx_blade_sheet_3e86389b.png', {
+    this.load.spritesheet('fx_blade_sheet', './assets/aistudio/fx_blade_sheet_3e86389b.png', {
       frameWidth: 256,
       frameHeight: 256,
     });
-    this.load.spritesheet('fx_blade_spin_sheet', '/assets/aistudio/fx_blade_spin_sheet_46489d73.png', {
+    this.load.spritesheet('fx_blade_spin_sheet', './assets/aistudio/fx_blade_spin_sheet_46489d73.png', {
       frameWidth: 256,
       frameHeight: 256,
     });
-    this.load.spritesheet('fx_lightning_sheet', '/assets/aistudio/fx_lightning_sheet_03b57c80.png', {
+    this.load.spritesheet('fx_lightning_sheet', './assets/aistudio/fx_lightning_sheet_03b57c80.png', {
       frameWidth: 384,
       frameHeight: 216,
     });
-    this.load.spritesheet('fx_spitter_orb_sheet', '/assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.png', {
+    this.load.spritesheet('fx_spitter_orb_sheet', './assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.png', {
       frameWidth: 128,
       frameHeight: 128,
     });
@@ -1115,8 +1122,12 @@ export class MainScene extends Phaser.Scene {
     tint?: number,
     maxLifeOverrideMs?: number
   ) {
+    const isLowQuality = gameManager.getQualityTier() === 'low';
+    const effectiveCount = isLowQuality ? Math.max(1, Math.round(count * 0.5)) : count;
+    const poolCap = isLowQuality ? this.LOW_QUALITY_MAX_PARTICLES : this.particlePool.length;
     let spawned = 0;
-    for (const p of this.particlePool) {
+    for (let i = 0; i < poolCap; i++) {
+      const p = this.particlePool[i];
       if (!p.active) {
         p.active = true;
         p.sprite.setTexture(texture);
@@ -1144,7 +1155,7 @@ export class MainScene extends Phaser.Scene {
         p.sprite.setRotation(angle);
 
         spawned++;
-        if (spawned >= count) break;
+        if (spawned >= effectiveCount) break;
       }
     }
   }
@@ -1573,6 +1584,17 @@ export class MainScene extends Phaser.Scene {
   // -------------------------------------------------------------
   update(time: number, rawDelta: number) {
     if (this.isDead || this.isGamePaused) return;
+
+    // Auto-quality monitor: reduce particle density & darkness RT resolution if FPS < 45 for 3s
+    const currentFps = this.game?.loop?.actualFps || 0;
+    if (currentFps > 0 && currentFps < this.LOW_FPS_THRESHOLD) {
+      this.lowFpsDurationMs += rawDelta;
+      if (this.lowFpsDurationMs >= this.LOW_FPS_TRIGGER_MS && gameManager.getQualityTier() !== 'low') {
+        gameManager.setQualityTier('low');
+      }
+    } else {
+      this.lowFpsDurationMs = 0;
+    }
 
     // Clamp delta time to avoid frame skips
     const delta = Math.min(rawDelta, 50);
@@ -2278,8 +2300,9 @@ export class MainScene extends Phaser.Scene {
         }
         proj.setData('trailTimerMs', trailTimer);
 
-        // Emit small magenta particles (max 3 per frame total, 300ms life)
-        if (magentaParticlesThisFrame < 3) {
+        // Emit small magenta particles (max 3 per frame total in high quality, 1 in low quality; 300ms life)
+        const maxMagentaParticles = gameManager.getQualityTier() === 'low' ? 1 : 3;
+        if (magentaParticlesThisFrame < maxMagentaParticles) {
           const ox = proj.x + Phaser.Math.Between(-10, 10);
           const oy = proj.y + Phaser.Math.Between(-10, 10);
           this.spawnParticleBurst(ox, oy, 1, 'fx_spark', 20, 65, 0.1, 0.2, 0xff44ee, 300);
@@ -3511,6 +3534,7 @@ export class MainScene extends Phaser.Scene {
   private triggerLevelUp() {
     this.levelUpPulseSeq++;
     soundManager.playLevelUp();
+    haptics.onLevelUp();
     this.spawnLevelUpRingEffect(this.player.x, this.player.y);
     this.cameras.main.flash(300, 255, 255, 255);
 
@@ -3741,6 +3765,7 @@ export class MainScene extends Phaser.Scene {
 
     this.playerStats.currentHp -= amount;
     soundManager.playPlayerHurt();
+    haptics.onPlayerHit();
 
     // Hitstop & Camera Shake
     this.hitstopTimer = 50;

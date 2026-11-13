@@ -18,6 +18,8 @@
  * Missing or failed sounds fail silently.
  */
 
+import { saveDataStore } from './saveData';
+
 export type MusicTrackKey =
   | 'menu'
   | 'gameplay'
@@ -39,54 +41,54 @@ export type SfxKey =
   | 'boss_attack';
 
 const MUSIC_ASSETS: Record<MusicTrackKey, { url: string; loop: boolean }> = {
-  menu: { url: '/assets/aistudio/music_menu_4ebf239b.ogg', loop: true },
-  gameplay: { url: '/assets/aistudio/music_gameplay_32515426.ogg', loop: true },
-  intense: { url: '/assets/aistudio/music_intense_7e7a5d7c.ogg', loop: true },
-  boss: { url: '/assets/aistudio/music_boss_45df2c32.ogg', loop: true },
-  stinger_gameover: { url: '/assets/aistudio/stinger_gameover_ea455e6e.ogg', loop: false },
-  gameover_full: { url: '/assets/aistudio/music_gameover_full_da1d4eab.ogg', loop: true },
+  menu: { url: './assets/aistudio/music_menu_4ebf239b.ogg', loop: true },
+  gameplay: { url: './assets/aistudio/music_gameplay_32515426.ogg', loop: true },
+  intense: { url: './assets/aistudio/music_intense_7e7a5d7c.ogg', loop: true },
+  boss: { url: './assets/aistudio/music_boss_45df2c32.ogg', loop: true },
+  stinger_gameover: { url: './assets/aistudio/stinger_gameover_ea455e6e.ogg', loop: false },
+  gameover_full: { url: './assets/aistudio/music_gameover_full_da1d4eab.ogg', loop: true },
 };
 
 const SFX_ASSETS: Record<SfxKey, string[]> = {
   hit_spark: [
-    '/assets/aistudio/sfx_hit_spark_f2b00c4a.ogg',
-    '/assets/aistudio/sfx_hit_spark_428d2bf5.wav',
+    './assets/aistudio/sfx_hit_spark_f2b00c4a.ogg',
+    './assets/aistudio/sfx_hit_spark_428d2bf5.wav',
   ],
   enemy_death: [
-    '/assets/aistudio/sfx_enemy_death_0b385d1d.ogg',
-    '/assets/aistudio/sfx_enemy_death_97ebef3d.wav',
+    './assets/aistudio/sfx_enemy_death_0b385d1d.ogg',
+    './assets/aistudio/sfx_enemy_death_97ebef3d.wav',
   ],
   level_up: [
-    '/assets/aistudio/sfx_level_up_c4693615.ogg',
-    '/assets/aistudio/sfx_level_up_f5869cd9.wav',
+    './assets/aistudio/sfx_level_up_c4693615.ogg',
+    './assets/aistudio/sfx_level_up_f5869cd9.wav',
   ],
   boss_slam: [
-    '/assets/aistudio/sfx_boss_slam_b98315c3.ogg',
-    '/assets/aistudio/sfx_boss_slam_3d583cef.wav',
+    './assets/aistudio/sfx_boss_slam_b98315c3.ogg',
+    './assets/aistudio/sfx_boss_slam_3d583cef.wav',
   ],
   gem_pickup: [
-    '/assets/aistudio/sfx_gem_pickup_2c380ba2.ogg',
-    '/assets/aistudio/sfx_gem_pickup_92932dab.wav',
+    './assets/aistudio/sfx_gem_pickup_2c380ba2.ogg',
+    './assets/aistudio/sfx_gem_pickup_92932dab.wav',
   ],
   lightning: [
-    '/assets/aistudio/sfx_lightning_9c7cafb5.ogg',
-    '/assets/aistudio/sfx_lightning_d0ad84af.wav',
+    './assets/aistudio/sfx_lightning_9c7cafb5.ogg',
+    './assets/aistudio/sfx_lightning_d0ad84af.wav',
   ],
   blade: [
-    '/assets/aistudio/sfx_blade_de0968e0.ogg',
-    '/assets/aistudio/sfx_blade_5758eb2a.wav',
+    './assets/aistudio/sfx_blade_de0968e0.ogg',
+    './assets/aistudio/sfx_blade_5758eb2a.wav',
   ],
   player_attack: [
-    '/assets/aistudio/sfx_player_attack_48ed15ce.ogg',
-    '/assets/aistudio/sfx_player_attack_aa64bba5.wav',
+    './assets/aistudio/sfx_player_attack_48ed15ce.ogg',
+    './assets/aistudio/sfx_player_attack_aa64bba5.wav',
   ],
   brute_stomp: [
-    '/assets/aistudio/sfx_brute_stomp_eb731150.ogg',
-    '/assets/aistudio/sfx_brute_stomp_0b2a02d4.wav',
+    './assets/aistudio/sfx_brute_stomp_eb731150.ogg',
+    './assets/aistudio/sfx_brute_stomp_0b2a02d4.wav',
   ],
   boss_attack: [
-    '/assets/aistudio/sfx_boss_attack_5241beeb.ogg',
-    '/assets/aistudio/sfx_boss_attack_cf06081d.wav',
+    './assets/aistudio/sfx_boss_attack_5241beeb.ogg',
+    './assets/aistudio/sfx_boss_attack_cf06081d.wav',
   ],
 };
 
@@ -138,36 +140,11 @@ class AudioManager {
   // Settings Persistence (Master / Music / SFX / Mute)
   // -------------------------------------------------------------
   private loadSettings() {
-    try {
-      const storedMuted = localStorage.getItem('last_light_muted');
-      this.isMuted = storedMuted === 'true';
-
-      const storedMaster = localStorage.getItem('last_light_master_volume');
-      if (storedMaster !== null && storedMaster !== '') {
-        const v = parseFloat(storedMaster);
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.masterVolume = v;
-        }
-      }
-
-      const storedMusic = localStorage.getItem('last_light_music_volume');
-      if (storedMusic !== null && storedMusic !== '') {
-        const v = parseFloat(storedMusic);
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.musicVolume = v;
-        }
-      }
-
-      const storedSfx = localStorage.getItem('last_light_sfx_volume');
-      if (storedSfx !== null && storedSfx !== '') {
-        const v = parseFloat(storedSfx);
-        if (!Number.isNaN(v) && v >= 0 && v <= 1) {
-          this.sfxVolume = v;
-        }
-      }
-    } catch {
-      // ignore storage errors
-    }
+    const { settings } = saveDataStore.read();
+    this.isMuted = settings.muted;
+    this.masterVolume = settings.masterVolume;
+    this.musicVolume = settings.musicVolume;
+    this.sfxVolume = settings.sfxVolume;
   }
 
   public getMasterVolume(): number {
@@ -176,11 +153,9 @@ class AudioManager {
 
   public setMasterVolume(val: number) {
     this.masterVolume = Math.max(0, Math.min(1, val));
-    try {
-      localStorage.setItem('last_light_master_volume', String(this.masterVolume));
-    } catch {
-      // ignore
-    }
+    saveDataStore.update((draft) => {
+      draft.settings.masterVolume = this.masterVolume;
+    });
     this.applyMasterGain();
   }
 
@@ -190,11 +165,9 @@ class AudioManager {
 
   public setMusicVolume(val: number) {
     this.musicVolume = Math.max(0, Math.min(1, val));
-    try {
-      localStorage.setItem('last_light_music_volume', String(this.musicVolume));
-    } catch {
-      // ignore
-    }
+    saveDataStore.update((draft) => {
+      draft.settings.musicVolume = this.musicVolume;
+    });
     if (this.musicGain && this.ctx) {
       this.musicGain.gain.setValueAtTime(this.musicVolume, this.ctx.currentTime);
     }
@@ -206,11 +179,9 @@ class AudioManager {
 
   public setSfxVolume(val: number) {
     this.sfxVolume = Math.max(0, Math.min(1, val));
-    try {
-      localStorage.setItem('last_light_sfx_volume', String(this.sfxVolume));
-    } catch {
-      // ignore
-    }
+    saveDataStore.update((draft) => {
+      draft.settings.sfxVolume = this.sfxVolume;
+    });
     if (this.sfxGain && this.ctx) {
       this.sfxGain.gain.setValueAtTime(this.sfxVolume, this.ctx.currentTime);
     }
@@ -222,11 +193,9 @@ class AudioManager {
 
   public setMuted(muted: boolean): boolean {
     this.isMuted = muted;
-    try {
-      localStorage.setItem('last_light_muted', String(this.isMuted));
-    } catch {
-      // ignore
-    }
+    saveDataStore.update((draft) => {
+      draft.settings.muted = this.isMuted;
+    });
     this.applyMasterGain();
     return this.isMuted;
   }

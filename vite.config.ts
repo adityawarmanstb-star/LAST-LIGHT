@@ -6,7 +6,7 @@ import { defineConfig } from 'vite';
 export default defineConfig(() => {
   return {
     plugins: [react(), tailwindcss()],
-    base: '/',
+    base: './',
     build: {
       outDir: 'dist',
       emptyOutDir: true,

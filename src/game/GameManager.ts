@@ -1,4 +1,7 @@
 import { BossInfo, DebugStats, EventWarningInfo, RunStats, UpgradeOption, WeaponState } from './types';
+import { saveDataStore } from './saveData';
+
+export type QualityTier = 'high' | 'low';
 
 export interface HudStatsPayload {
   hp: number;
@@ -25,8 +28,7 @@ type EventWarningCallback = (warning: EventWarningInfo | null) => void;
 type PauseToggleCallback = () => void;
 type PauseStateCallback = (isPaused: boolean) => void;
 type BrightnessCallback = (brightness: number) => void;
-
-const BRIGHTNESS_STORAGE_KEY = 'lastlight_brightness';
+type QualityCallback = (tier: QualityTier) => void;
 
 class GameManager {
   private statsListeners: StatsCallback[] = [];
@@ -37,6 +39,7 @@ class GameManager {
   private pauseToggleListeners: PauseToggleCallback[] = [];
   private pauseStateListeners: PauseStateCallback[] = [];
   private brightnessListeners: BrightnessCallback[] = [];
+  private qualityListeners: QualityCallback[] = [];
 
   public activeScene: Phaser.Scene | null = null;
   public activeUiScene: Phaser.Scene | null = null;
@@ -44,22 +47,8 @@ class GameManager {
 
   // Joystick state from touch
   public joystickVector = { x: 0, y: 0 };
-  private brightness: number = this.loadBrightness();
-
-  private loadBrightness(): number {
-    try {
-      const raw = localStorage.getItem(BRIGHTNESS_STORAGE_KEY);
-      if (raw !== null) {
-        const parsed = parseFloat(raw);
-        if (!Number.isNaN(parsed)) {
-          return Math.max(0.5, Math.min(1.5, parsed));
-        }
-      }
-    } catch {
-      // Ignore storage access failures
-    }
-    return 1.0;
-  }
+  private brightness: number = saveDataStore.read().settings.brightness;
+  private qualityTier: QualityTier = 'high';
 
   public getBrightness(): number {
     return this.brightness;
@@ -68,11 +57,9 @@ class GameManager {
   public setBrightness(val: number) {
     const clamped = Math.max(0.5, Math.min(1.5, val));
     this.brightness = clamped;
-    try {
-      localStorage.setItem(BRIGHTNESS_STORAGE_KEY, String(clamped));
-    } catch {
-      // Ignore storage errors
-    }
+    saveDataStore.update((draft) => {
+      draft.settings.brightness = clamped;
+    });
     this.brightnessListeners.forEach((l) => l(clamped));
   }
 
@@ -80,6 +67,23 @@ class GameManager {
     this.brightnessListeners.push(cb);
     return () => {
       this.brightnessListeners = this.brightnessListeners.filter((l) => l !== cb);
+    };
+  }
+
+  public getQualityTier(): QualityTier {
+    return this.qualityTier;
+  }
+
+  public setQualityTier(tier: QualityTier) {
+    if (this.qualityTier === tier) return;
+    this.qualityTier = tier;
+    this.qualityListeners.forEach((l) => l(tier));
+  }
+
+  public onQualityChange(cb: QualityCallback) {
+    this.qualityListeners.push(cb);
+    return () => {
+      this.qualityListeners = this.qualityListeners.filter((l) => l !== cb);
     };
   }
 

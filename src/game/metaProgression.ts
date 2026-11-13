@@ -1,7 +1,5 @@
 import { MetaUpgrade, PlayerStats } from './types';
-
-const COINS_KEY = 'last_light_coins_v1';
-const UPGRADES_KEY = 'last_light_meta_v1';
+import { saveDataStore } from './saveData';
 
 export const INITIAL_UPGRADES: MetaUpgrade[] = [
   {
@@ -87,54 +85,41 @@ export function subscribeCoins(cb: CoinsListener): () => void {
 }
 
 export function getSavedCoins(): number {
-  try {
-    const val = localStorage.getItem(COINS_KEY);
-    return val ? parseInt(val, 10) || 0 : 0;
-  } catch {
-    return 0;
-  }
+  return saveDataStore.read().coins;
 }
 
 export function saveCoins(coins: number): void {
-  try {
-    localStorage.setItem(COINS_KEY, String(coins));
-  } catch {
-    // ignore
-  }
-  coinsListeners.forEach((l) => l(coins));
+  const safe = Number.isFinite(coins) && coins >= 0 ? Math.floor(coins) : 0;
+  const updated = saveDataStore.update((draft) => {
+    draft.coins = safe;
+  });
+  coinsListeners.forEach((l) => l(updated.coins));
 }
 
 export function addCoins(amount: number): number {
-  const current = getSavedCoins();
-  const updated = current + amount;
+  const safeDelta = Number.isFinite(amount) ? Math.floor(amount) : 0;
+  const updated = Math.max(0, getSavedCoins() + safeDelta);
   saveCoins(updated);
   return updated;
 }
 
 export function getSavedUpgrades(): MetaUpgrade[] {
-  try {
-    const val = localStorage.getItem(UPGRADES_KEY);
-    if (!val) return INITIAL_UPGRADES;
-    const parsed = JSON.parse(val) as Record<string, number>;
-    return INITIAL_UPGRADES.map((u) => ({
-      ...u,
-      currentRank: parsed[u.id] !== undefined ? Math.min(parsed[u.id], u.maxRank) : 0,
-    }));
-  } catch {
-    return INITIAL_UPGRADES;
-  }
+  const saved = saveDataStore.read().upgrades;
+  return INITIAL_UPGRADES.map((u) => ({
+    ...u,
+    currentRank:
+      saved[u.id] !== undefined ? Math.max(0, Math.min(saved[u.id], u.maxRank)) : 0,
+  }));
 }
 
 export function saveUpgrades(upgrades: MetaUpgrade[]): void {
-  try {
+  saveDataStore.update((draft) => {
     const record: Record<string, number> = {};
     upgrades.forEach((u) => {
       record[u.id] = u.currentRank;
     });
-    localStorage.setItem(UPGRADES_KEY, JSON.stringify(record));
-  } catch {
-    // ignore
-  }
+    draft.upgrades = record;
+  });
 }
 
 export function purchaseUpgrade(upgradeId: string): { success: boolean; newCoins: number; upgrades: MetaUpgrade[] } {

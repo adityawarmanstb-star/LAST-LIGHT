@@ -1,4 +1,5 @@
 import { addCoins, getSavedCoins } from './metaProgression';
+import { saveDataStore } from './saveData';
 import {
   DailyMission,
   DailyMissionCategory,
@@ -6,7 +7,6 @@ import {
   DailyMissionType,
 } from './types';
 
-const DAILY_MISSIONS_STORAGE_KEY = 'last_light_daily_missions_v1';
 const FLUSH_DEBOUNCE_MS = 1000;
 
 interface MissionTemplate {
@@ -272,29 +272,17 @@ class DailyMissionsManager {
 
   private loadOrCreateForToday(): DailyMissionsState {
     const today = getTodayDateKey();
-    try {
-      const raw = localStorage.getItem(DAILY_MISSIONS_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as DailyMissionsState;
-        if (
-          parsed &&
-          parsed.dateKey === today &&
-          Array.isArray(parsed.missions) &&
-          parsed.missions.length === 3
-        ) {
-          return {
-            dateKey: parsed.dateKey,
-            missions: parsed.missions.map((m) => ({
-              ...m,
-              progress: Math.min(m.target, Math.max(0, Number(m.progress) || 0)),
-              completed: Boolean(m.completed || m.progress >= m.target),
-              claimed: Boolean(m.claimed),
-            })),
-          };
-        }
-      }
-    } catch {
-      // Ignore malformed storage and regenerate cleanly
+    const saved = saveDataStore.read().dailyMissions;
+    if (saved && saved.dateKey === today && Array.isArray(saved.missions) && saved.missions.length === 3) {
+      return {
+        dateKey: saved.dateKey,
+        missions: saved.missions.map((m) => ({
+          ...m,
+          progress: Math.min(m.target, Math.max(0, Number(m.progress) || 0)),
+          completed: Boolean(m.completed || m.progress >= m.target),
+          claimed: Boolean(m.claimed),
+        })),
+      };
     }
 
     const fresh: DailyMissionsState = {
@@ -306,12 +294,10 @@ class DailyMissionsManager {
   }
 
   private saveToStorage(state: DailyMissionsState): void {
-    try {
-      localStorage.setItem(DAILY_MISSIONS_STORAGE_KEY, JSON.stringify(state));
-      this.dirty = false;
-    } catch {
-      // Ignore storage failures
-    }
+    saveDataStore.update((draft) => {
+      draft.dailyMissions = cloneState(state);
+    });
+    this.dirty = false;
   }
 
   public ensureToday(): DailyMissionsState {

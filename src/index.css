@@ -27,6 +27,14 @@
     overflow: hidden;
     touch-action: none;
     overscroll-behavior: none;
+    overscroll-behavior-y: none;
+    overscroll-behavior-x: none;
+  }
+
+  * {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
 
   body {
@@ -211,20 +219,18 @@ input[type='range'].df-slider::-webkit-slider-thumb:active {
   }
 }
 
-/* Ensure Phaser canvas sits cleanly without distortion or scrollbars */
+/* Ensure Phaser canvas respects Scale.FIT + autoCenter cleanly */
 #phaser-container {
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
   overflow: hidden;
+  background-color: #08090d;
   z-index: 1;
 }
 
 #phaser-container canvas {
   display: block;
-  width: 100% !important;
-  height: 100% !important;
-  object-fit: cover;
+  touch-action: none;
 }

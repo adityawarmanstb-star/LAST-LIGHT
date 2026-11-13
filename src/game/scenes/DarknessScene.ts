@@ -18,7 +18,9 @@ export class DarknessScene extends Phaser.Scene {
   private edgeArrowGraphics!: Phaser.GameObjects.Graphics;
 
   private brightness: number = gameManager.getBrightness();
+  private currentRtScale: number = LIGHT.renderTextureScale;
   private unsubBrightness: (() => void) | null = null;
+  private unsubQuality: (() => void) | null = null;
 
   // Smooth player light state
   private currentStandBonus: number = 1.2;
@@ -87,13 +89,17 @@ export class DarknessScene extends Phaser.Scene {
       .setAlpha(LIGHT.fog.layer2Alpha);
     this.stripInteractivity(this.fogLayer2);
 
-    // Half-resolution RenderTexture scaled up 2x for 60fps mobile performance
-    const halfW = Math.max(1, Math.ceil(w * LIGHT.renderTextureScale));
-    const halfH = Math.max(1, Math.ceil(h * LIGHT.renderTextureScale));
+    // Adaptive RenderTexture resolution scaled up cleanly for mobile performance
+    this.currentRtScale =
+      gameManager.getQualityTier() === 'low'
+        ? LIGHT.renderTextureScale * 0.5
+        : LIGHT.renderTextureScale;
+    const halfW = Math.max(1, Math.ceil(w * this.currentRtScale));
+    const halfH = Math.max(1, Math.ceil(h * this.currentRtScale));
     this.darkRT = this.add
       .renderTexture(0, 0, halfW, halfH)
       .setOrigin(0, 0)
-      .setScale(1 / LIGHT.renderTextureScale)
+      .setScale(1 / this.currentRtScale)
       .setDepth(5);
     this.stripInteractivity(this.darkRT);
 
@@ -119,12 +125,22 @@ export class DarknessScene extends Phaser.Scene {
       this.brightness = val;
     });
 
+    this.unsubQuality = gameManager.onQualityChange((tier) => {
+      this.currentRtScale =
+        tier === 'low' ? LIGHT.renderTextureScale * 0.5 : LIGHT.renderTextureScale;
+      this.resizeDarkRT(this.scale.width, this.scale.height);
+    });
+
     this.scale.on('resize', this.handleResize, this);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.unsubBrightness) {
         this.unsubBrightness();
         this.unsubBrightness = null;
+      }
+      if (this.unsubQuality) {
+        this.unsubQuality();
+        this.unsubQuality = null;
       }
       this.scale.off('resize', this.handleResize, this);
     });
@@ -135,16 +151,22 @@ export class DarknessScene extends Phaser.Scene {
     }
   }
 
+  private resizeDarkRT(width: number, height: number) {
+    if (!this.darkRT) return;
+    const w = Math.max(2, width);
+    const h = Math.max(2, height);
+    const scaledW = Math.max(1, Math.ceil(w * this.currentRtScale));
+    const scaledH = Math.max(1, Math.ceil(h * this.currentRtScale));
+    this.darkRT.resize(scaledW, scaledH);
+    this.darkRT.setScale(1 / this.currentRtScale);
+  }
+
   private handleResize(gameSize: Phaser.Structs.Size) {
     const w = Math.max(2, gameSize.width);
     const h = Math.max(2, gameSize.height);
     if (this.fogLayer1) this.fogLayer1.setSize(w, h);
     if (this.fogLayer2) this.fogLayer2.setSize(w, h);
-    if (this.darkRT) {
-      const halfW = Math.max(1, Math.ceil(w * LIGHT.renderTextureScale));
-      const halfH = Math.max(1, Math.ceil(h * LIGHT.renderTextureScale));
-      this.darkRT.resize(halfW, halfH);
-    }
+    this.resizeDarkRT(w, h);
   }
 
   private ensureRadialLightTexture() {
@@ -429,7 +451,7 @@ export class DarknessScene extends Phaser.Scene {
       this.darkRT.clear();
       this.darkRT.fill(LIGHT.darkColor, darkAlpha);
 
-      const rtScale = LIGHT.renderTextureScale;
+      const rtScale = this.currentRtScale;
       const rtW = this.darkRT.width;
       const rtH = this.darkRT.height;
 
@@ -442,7 +464,7 @@ export class DarknessScene extends Phaser.Scene {
           continue;
         }
         this.darkRT.stamp('light_radial_soft', undefined, halfX, halfY, {
-          scale: ls.radius / 256,
+          scale: (ls.radius * rtScale) / 128,
           alpha: ls.alpha,
           blendMode: Phaser.BlendModes.ERASE,
         });

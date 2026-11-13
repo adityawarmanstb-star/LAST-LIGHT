@@ -1,5 +1,5 @@
 import React from 'react';
-import { Volume2, VolumeX, X, Sparkles, Music, Zap, Sliders, Sun } from 'lucide-react';
+import { Volume2, VolumeX, X, Sparkles, Music, Zap, Sliders, Sun, Smartphone } from 'lucide-react';
 import { soundManager } from '../game/audio';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 
@@ -11,11 +11,13 @@ interface SettingsModalProps {
   sfxVolume: number;
   brightness: number;
   isMuted: boolean;
+  hapticsEnabled: boolean;
   onMasterVolumeChange: (val: number) => void;
   onMusicVolumeChange: (val: number) => void;
   onSfxVolumeChange: (val: number) => void;
   onBrightnessChange: (val: number) => void;
   onToggleMute: () => void;
+  onToggleHaptics: () => void;
 }
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -26,11 +28,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   sfxVolume,
   brightness,
   isMuted,
+  hapticsEnabled,
   onMasterVolumeChange,
   onMusicVolumeChange,
   onSfxVolumeChange,
   onBrightnessChange,
   onToggleMute,
+  onToggleHaptics,
 }) => {
   if (!isOpen) return null;
 
@@ -245,6 +249,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             >
               <span className={isMuted ? 'text-[#e5303a]' : 'text-[#d8c9a8]'}>
                 {isMuted ? 'Unmute' : 'Mute'}
+              </span>
+            </IronButton>
+          </div>
+
+          {/* Haptic Feedback Toggle Row */}
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5">
+              <Smartphone
+                className={`w-4 h-4 ${hapticsEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'}`}
+              />
+              <div className="flex flex-col">
+                <span className="text-xs font-semibold text-[#d8c9a8]">Haptic Feedback</span>
+                <span className="text-[11px] text-[#8e8168]">
+                  {hapticsEnabled ? 'Vibrates on hit & level-up' : 'Vibration disabled'}
+                </span>
+              </div>
+            </div>
+
+            <IronButton
+              seed="settings-haptics-toggle"
+              dripCount={0}
+              variant={hapticsEnabled ? 'default' : 'blood'}
+              onClick={() => {
+                soundManager.playUiClick();
+                onToggleHaptics();
+              }}
+              className="min-h-[56px] px-5 text-xs font-semibold"
+            >
+              <span className={hapticsEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'}>
+                {hapticsEnabled ? 'On' : 'Off'}
               </span>
             </IronButton>
           </div>
