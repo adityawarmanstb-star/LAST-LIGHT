@@ -10,9 +10,14 @@ import {
   Sun,
   Smartphone,
   BookOpen,
+  Monitor,
+  Gauge,
+  Cpu,
 } from 'lucide-react';
 import { soundManager } from '../game/audio';
 import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
+import { GraphicsConfig } from '../game/GameManager';
+import { ResolutionQualityMode, TargetFpsOption } from '../game/saveData';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -23,14 +28,24 @@ interface SettingsModalProps {
   brightness: number;
   isMuted: boolean;
   hapticsEnabled: boolean;
+  graphicsConfig: GraphicsConfig;
   onMasterVolumeChange: (val: number) => void;
   onMusicVolumeChange: (val: number) => void;
   onSfxVolumeChange: (val: number) => void;
   onBrightnessChange: (val: number) => void;
   onToggleMute: () => void;
   onToggleHaptics: () => void;
+  onGraphicsConfigChange: (partial: Partial<GraphicsConfig>) => void;
   onOpenHowToPlay: () => void;
 }
+
+const FPS_OPTIONS: TargetFpsOption[] = [60, 90, 120];
+const RESOLUTION_OPTIONS: { id: ResolutionQualityMode; label: string; hint: string }[] = [
+  { id: 'auto', label: 'Auto', hint: 'Dynamic' },
+  { id: 'performance', label: '90 FPS', hint: '810p' },
+  { id: 'fhd', label: 'FHD+', hint: '1080p' },
+  { id: 'ultra_4k', label: '4K UHD', hint: '2160p' },
+];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -41,12 +56,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   brightness,
   isMuted,
   hapticsEnabled,
+  graphicsConfig,
   onMasterVolumeChange,
   onMusicVolumeChange,
   onSfxVolumeChange,
   onBrightnessChange,
   onToggleMute,
   onToggleHaptics,
+  onGraphicsConfigChange,
   onOpenHowToPlay,
 }) => {
   if (!isOpen) return null;
@@ -79,34 +96,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         dripCount={3}
         maxDripLength={20}
         className="w-full max-w-md max-h-[90vh] flex flex-col"
-        contentClassName="relative p-6 sm:p-7 overflow-y-auto"
+        contentClassName="flex flex-col max-h-[90vh] overflow-hidden"
       >
-        {/* Close Button (56px touch target) */}
-        <IronButton
-          seed="settings-close-btn"
-          dripCount={0}
-          onClick={onClose}
-          className="absolute top-4 right-4 w-14 h-14 min-h-[56px] min-w-[56px] z-20"
-          aria-label="Close Settings"
-        >
-          <X className="w-4 h-4 text-[#d8c9a8]" />
-        </IronButton>
+        {/* Fixed Header */}
+        <div className="flex items-center justify-between gap-3 p-5 sm:p-6 border-b border-[#3a3f47]/80 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#3a3f47] flex items-center justify-center text-[#d8c9a8] shrink-0">
+              <Sliders className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2 className="text-xl font-display font-bold tracking-wider text-[#d8c9a8] truncate">
+                SETTINGS
+              </h2>
+              <p className="text-xs text-[#9c8e72] truncate">
+                Audio, display &amp; 90Hz / 4K tuning
+              </p>
+            </div>
+          </div>
 
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6 pr-16">
-          <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#3a3f47] flex items-center justify-center text-[#d8c9a8]">
-            <Sliders className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-display font-bold tracking-wider text-[#d8c9a8]">
-              SETTINGS
-            </h2>
-            <p className="text-xs text-[#9c8e72]">Audio &amp; lantern brightness</p>
-          </div>
+          <IronButton
+            seed="settings-close-btn"
+            dripCount={0}
+            onClick={onClose}
+            className="w-14 h-14 min-h-[56px] min-w-[56px] shrink-0"
+            aria-label="Close Settings"
+          >
+            <X className="w-4 h-4 text-[#d8c9a8]" />
+          </IronButton>
         </div>
 
-        {/* Sliders & Controls */}
-        <div className="flex flex-col gap-5 mb-6">
+        {/* Scrollable Body */}
+        <div className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-5">
           {/* Master Volume */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs font-medium">
@@ -296,6 +316,171 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </IronButton>
           </div>
 
+          <div className="h-px bg-[#3a3f47]/70 w-full" />
+
+          {/* Graphics, 90Hz/120Hz & 4K Upscaler Section */}
+          <div className="flex flex-col gap-3.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-display font-bold tracking-wider text-[#d8c9a8] flex items-center gap-2">
+                <Monitor className="w-4 h-4 text-[#5de4ff]" />
+                <span>GRAPHICS &amp; 4K ENGINE</span>
+              </span>
+              <span className="text-[11px] text-[#9c8e72] font-mono-numbers">
+                {graphicsConfig.targetFps}Hz Target
+              </span>
+            </div>
+
+            {/* Target FPS Selector */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-[11px] text-[#9c8e72]">
+                <span className="flex items-center gap-1.5">
+                  <Gauge className="w-3.5 h-3.5 text-[#f2a93b]" />
+                  <span>Target Frame Rate</span>
+                </span>
+                <span className="text-[#d8c9a8] font-medium">Android Smooth Lock</span>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                {FPS_OPTIONS.map((fps) => {
+                  const selected = graphicsConfig.targetFps === fps;
+                  return (
+                    <IronButton
+                      key={fps}
+                      seed={`settings-fps-${fps}`}
+                      dripCount={0}
+                      variant={selected ? 'blood' : 'default'}
+                      onClick={() => {
+                        soundManager.playUiClick();
+                        onGraphicsConfigChange({ targetFps: fps });
+                      }}
+                      className="min-h-[46px] px-2 text-xs font-semibold"
+                    >
+                      <span className={selected ? 'text-[#5de4ff]' : 'text-[#d8c9a8]'}>
+                        {fps} FPS
+                      </span>
+                    </IronButton>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Render Resolution & 4K Scaling Selector */}
+            <div className="flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-[11px] text-[#9c8e72]">
+                <span>Render Resolution</span>
+                <span className="text-[#8e8168]">
+                  {graphicsConfig.resolutionMode === 'ultra_4k'
+                    ? 'Native 2160x3840 4K'
+                    : graphicsConfig.resolutionMode === 'auto'
+                      ? 'Adaptive DRS'
+                      : 'Locked Scale'}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {RESOLUTION_OPTIONS.map((opt) => {
+                  const selected = graphicsConfig.resolutionMode === opt.id;
+                  return (
+                    <IronButton
+                      key={opt.id}
+                      seed={`settings-res-${opt.id}`}
+                      dripCount={0}
+                      variant={selected ? 'blood' : 'default'}
+                      onClick={() => {
+                        soundManager.playUiClick();
+                        onGraphicsConfigChange({ resolutionMode: opt.id });
+                      }}
+                      className="min-h-[48px] px-2 text-xs"
+                    >
+                      <div className="flex flex-col items-center leading-tight">
+                        <span
+                          className={`font-semibold ${
+                            selected ? 'text-[#f2a93b]' : 'text-[#d8c9a8]'
+                          }`}
+                        >
+                          {opt.label}
+                        </span>
+                        <span className="text-[10px] text-[#9c8e72]">{opt.hint}</span>
+                      </div>
+                    </IronButton>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* GPU Edge-Adaptive 4K Upscaler (RCAS) */}
+            <div className="flex items-center justify-between gap-3 pt-0.5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Sparkles
+                  className={`w-4 h-4 shrink-0 ${
+                    graphicsConfig.upscalerEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
+                  }`}
+                />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold text-[#d8c9a8]">GPU 4K Upscaler</span>
+                  <span className="text-[11px] text-[#8e8168] truncate">
+                    Contrast-adaptive edge sharpening
+                  </span>
+                </div>
+              </div>
+
+              <IronButton
+                seed="settings-upscaler-toggle"
+                dripCount={0}
+                variant={graphicsConfig.upscalerEnabled ? 'default' : 'blood'}
+                onClick={() => {
+                  soundManager.playUiClick();
+                  onGraphicsConfigChange({ upscalerEnabled: !graphicsConfig.upscalerEnabled });
+                }}
+                className="min-h-[48px] px-5 text-xs font-semibold shrink-0"
+              >
+                <span
+                  className={
+                    graphicsConfig.upscalerEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
+                  }
+                >
+                  {graphicsConfig.upscalerEnabled ? 'On' : 'Off'}
+                </span>
+              </IronButton>
+            </div>
+
+            {/* Frame Generation & Temporal Pacing */}
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <Cpu
+                  className={`w-4 h-4 shrink-0 ${
+                    graphicsConfig.frameGenEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
+                  }`}
+                />
+                <div className="flex flex-col min-w-0">
+                  <span className="text-xs font-semibold text-[#d8c9a8]">Frame Gen &amp; Pacing</span>
+                  <span className="text-[11px] text-[#8e8168] truncate">
+                    Temporal lighting &amp; zero-drop smoothing
+                  </span>
+                </div>
+              </div>
+
+              <IronButton
+                seed="settings-framegen-toggle"
+                dripCount={0}
+                variant={graphicsConfig.frameGenEnabled ? 'default' : 'blood'}
+                onClick={() => {
+                  soundManager.playUiClick();
+                  onGraphicsConfigChange({ frameGenEnabled: !graphicsConfig.frameGenEnabled });
+                }}
+                className="min-h-[48px] px-5 text-xs font-semibold shrink-0"
+              >
+                <span
+                  className={
+                    graphicsConfig.frameGenEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
+                  }
+                >
+                  {graphicsConfig.frameGenEnabled ? 'On' : 'Off'}
+                </span>
+              </IronButton>
+            </div>
+          </div>
+
+          <div className="h-px bg-[#3a3f47]/70 w-full" />
+
           {/* Preview Audio Row */}
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-[#9c8e72]">Preview Audio</span>
@@ -304,7 +489,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 seed="settings-test-attack"
                 dripCount={0}
                 onClick={handleTestShoot}
-                className="min-h-[56px] px-4 text-xs font-medium"
+                className="min-h-[52px] px-4 text-xs font-medium"
               >
                 <Zap className="w-3.5 h-3.5 text-[#e5303a]" />
                 <span>Attack</span>
@@ -313,7 +498,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 seed="settings-test-gem"
                 dripCount={0}
                 onClick={handleTestSfx}
-                className="min-h-[56px] px-4 text-xs font-medium"
+                className="min-h-[52px] px-4 text-xs font-medium"
               >
                 <Sparkles className="w-3.5 h-3.5 text-[#f2a93b]" />
                 <span>Gem</span>
@@ -338,23 +523,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 soundManager.playUiClick();
                 onOpenHowToPlay();
               }}
-              className="min-h-[56px] px-4 text-xs font-semibold whitespace-nowrap shrink-0"
+              className="min-h-[52px] px-4 text-xs font-semibold whitespace-nowrap shrink-0"
             >
               <span>View Guide</span>
             </IronButton>
           </div>
         </div>
 
-        {/* Done Button */}
-        <IronButton
-          seed="settings-done-btn"
-          variant="blood"
-          dripCount={2}
-          onClick={onClose}
-          className="w-full min-h-[56px] font-semibold text-sm tracking-wide"
-        >
-          Done
-        </IronButton>
+        {/* Fixed Footer */}
+        <div className="p-4 sm:px-6 border-t border-[#3a3f47]/80 bg-[#0d0e11]/70 shrink-0">
+          <IronButton
+            seed="settings-done-btn"
+            variant="blood"
+            dripCount={2}
+            onClick={onClose}
+            className="w-full min-h-[56px] font-semibold text-sm tracking-wide"
+          >
+            Done
+          </IronButton>
+        </div>
       </ForgedIronFrame>
     </div>
   );

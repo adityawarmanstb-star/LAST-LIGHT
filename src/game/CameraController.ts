@@ -30,11 +30,23 @@ export class CameraController {
 
   public followTarget(
     target: Phaser.GameObjects.GameObject | { x: number; y: number },
-    roundPixels: boolean = true,
-    lerpX: number = 0.1,
-    lerpY: number = 0.1
+    roundPixels: boolean = false,
+    lerpX: number = 0.15,
+    lerpY: number = 0.15
   ): void {
+    this.camera.setRoundPixels(false);
     this.camera.startFollow(target, roundPixels, lerpX, lerpY);
+  }
+
+  /**
+   * Keeps camera follow speed identical in real time across 60, 90, and 120 FPS
+   * using exponential delta-time decay (base lerp 0.15 per 16.6667ms).
+   */
+  public updateFollowLerp(deltaMs: number, baseLerpAt60: number = 0.15): void {
+    const dtStep = Math.max(0.05, deltaMs / 16.6667);
+    const stepLerp = 1 - Math.pow(1 - baseLerpAt60, dtStep);
+    this.camera.setRoundPixels(false);
+    this.camera.setLerp(stepLerp, stepLerp);
   }
 
   public reset(): void {

@@ -27,7 +27,7 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
       aria-label={`${boss.name} health ${clampedHp} of ${safeMaxHp}`}
       className="fixed left-1/2 -translate-x-1/2 z-30 w-[calc(100%-2rem)] max-w-md pointer-events-none"
       style={{
-        top: 'calc(max(16px, env(safe-area-inset-top)) + 68px)',
+        top: 'calc(max(12px, env(safe-area-inset-top)) + 68px)',
       }}
     >
       <div className="relative">
@@ -54,8 +54,8 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
           contentClassName="px-3.5 py-2.5 sm:px-4 sm:py-3"
         >
           {/* Header Row: Boss Name, Danger Indicator (<25%), Numeric & % Health */}
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-2">
+            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
               <Crown
                 className={`w-4 h-4 shrink-0 ${
                   isDangerLow ? 'text-[#e5303a] animate-pulse' : 'text-[#f2a93b]'
@@ -70,7 +70,7 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
                 }`}
                 title={`Recommended Player Level: ${recLevel}`}
               >
-                Rec. Lv. {recLevel}
+                Rec. Lv.{recLevel}
               </span>
               {(isDangerLow || boss.enraged) && (
                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#3a0a0e]/90 border border-[#e5303a]/75 text-[9px] font-bold uppercase tracking-widest text-[#ff6b73] shrink-0 boss-danger-pulse">
@@ -80,13 +80,13 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
               )}
             </div>
 
-            <div className="flex items-baseline gap-1.5 shrink-0 font-mono-numbers text-xs">
-              <span className="font-semibold text-[#d8c9a8]">
+            <div className="flex items-baseline gap-1 shrink-0 font-mono-numbers text-[11px] sm:text-xs ml-auto">
+              <span className="font-semibold text-[#d8c9a8] tabular-nums">
                 {clampedHp.toLocaleString()}
               </span>
-              <span className="text-[#8e8168]">/ {safeMaxHp.toLocaleString()}</span>
+              <span className="text-[#8e8168] tabular-nums">/ {safeMaxHp.toLocaleString()}</span>
               <span
-                className={`ml-1 text-[11px] font-bold ${
+                className={`ml-0.5 text-[10px] sm:text-[11px] font-bold tabular-nums ${
                   isDangerLow ? 'text-[#e5303a]' : 'text-[#9c8e72]'
                 }`}
               >

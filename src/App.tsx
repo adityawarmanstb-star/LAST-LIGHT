@@ -17,7 +17,8 @@ import { AchievementsModal } from './components/AchievementsModal';
 import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
 import { ForgedIronFrame, IronButton } from './components/ForgedIronFrame';
-import { gameManager } from './game/GameManager';
+import { LoadingScreen } from './components/LoadingScreen';
+import { gameManager, GraphicsConfig } from './game/GameManager';
 import { createPhaserGame } from './game/phaserConfig';
 import { soundManager } from './game/audio';
 import { saveDataStore } from './game/saveData';
@@ -60,6 +61,9 @@ export default function App() {
   const [sfxVolume, setSfxVolume] = useState<number>(soundManager.getSfxVolume());
   const [brightness, setBrightness] = useState<number>(gameManager.getBrightness());
   const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(() => haptics.isEnabled());
+  const [graphicsConfig, setGraphicsConfig] = useState<GraphicsConfig>(() =>
+    gameManager.getGraphicsConfig()
+  );
 
   // In-run state
   const [hp, setHp] = useState<number>(100);
@@ -98,9 +102,22 @@ export default function App() {
   const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[] | null>(null);
   const [levelUpChallenge, setLevelUpChallenge] = useState<DynamicChallengeOffer | null>(null);
   const [runSummary, setRunSummary] = useState<RunStats | null>(null);
+  const [loadingOverlay, setLoadingOverlay] = useState<{
+    visible: boolean;
+    progress: number;
+    phase: string;
+    mode: 'boot' | 'arena';
+  }>({
+    visible: true,
+    progress: 18,
+    phase: 'Kindling the First Flame…',
+    mode: 'boot',
+  });
 
   const containerRef = useRef<HTMLDivElement>(null);
   const lastDpsSampleSecRef = useRef<number>(0);
+  const loadingFinishTimerRef = useRef<number | null>(null);
+  const loadingFailsafeTimerRef = useRef<number | null>(null);
   const handleTogglePauseRef = useRef<() => void>(() => {});
   const handleQuitToTitleRef = useRef<() => void>(() => {});
   const needsTapAudioResumeRef = useRef<boolean>(false);
@@ -176,6 +193,7 @@ export default function App() {
     const unsubGameOver = gameManager.onGameOver((stats) => {
       setEventWarning(null);
       setRunSummary(stats);
+      gameManager.setGameState('GAME_OVER');
       setGameState('GAME_OVER');
     });
 
@@ -192,6 +210,30 @@ export default function App() {
       handleTogglePauseRef.current();
     });
 
+    const unsubLoadProgress = gameManager.onLoadProgress((payload) => {
+      if (!payload.active) return;
+      setLoadingOverlay((prev) => ({
+        visible: true,
+        progress: Math.max(prev.mode === 'arena' ? prev.progress : 0, Math.round(payload.progress * 100)),
+        phase: payload.phase,
+        mode: 'arena',
+      }));
+
+      if (payload.ready) {
+        if (loadingFailsafeTimerRef.current !== null) {
+          window.clearTimeout(loadingFailsafeTimerRef.current);
+          loadingFailsafeTimerRef.current = null;
+        }
+        if (loadingFinishTimerRef.current !== null) {
+          window.clearTimeout(loadingFinishTimerRef.current);
+        }
+        loadingFinishTimerRef.current = window.setTimeout(() => {
+          loadingFinishTimerRef.current = null;
+          setLoadingOverlay((prev) => ({ ...prev, visible: false }));
+        }, 280);
+      }
+    });
+
     return () => {
       unsubStats();
       unsubLevelUp();
@@ -199,6 +241,49 @@ export default function App() {
       unsubBoss();
       unsubEventWarning();
       unsubTogglePause();
+      unsubLoadProgress();
+    };
+  }, []);
+
+  // Smooth initial app boot entrance until fonts & shell hydrate
+  useEffect(() => {
+    let cancelled = false;
+    const t1 = window.setTimeout(() => {
+      if (!cancelled) {
+        setLoadingOverlay((prev) =>
+          prev.mode === 'boot' && prev.visible
+            ? { ...prev, progress: 64, phase: 'Forging Obsidian Sanctuary…' }
+            : prev
+        );
+      }
+    }, 180);
+
+    const finalizeBoot = () => {
+      if (cancelled) return;
+      setLoadingOverlay((prev) =>
+        prev.mode === 'boot' && prev.visible
+          ? { ...prev, progress: 100, phase: 'Lantern Lit…' }
+          : prev
+      );
+      window.setTimeout(() => {
+        if (!cancelled) {
+          setLoadingOverlay((prev) =>
+            prev.mode === 'boot' ? { ...prev, visible: false } : prev
+          );
+        }
+      }, 320);
+    };
+
+    const maxWait = window.setTimeout(finalizeBoot, 950);
+    const fontsReady = document.fonts?.ready ?? Promise.resolve();
+    fontsReady.then(() => {
+      window.setTimeout(finalizeBoot, 460);
+    });
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t1);
+      window.clearTimeout(maxWait);
     };
   }, []);
 
@@ -356,6 +441,35 @@ export default function App() {
   }, []);
 
   const handleStartGame = () => {
+    setShowShop(false);
+    setShowMissions(false);
+    setShowBestiary(false);
+    setShowAchievements(false);
+    setShowSettings(false);
+    setShowHowToPlay(false);
+
+    if (loadingFinishTimerRef.current !== null) {
+      window.clearTimeout(loadingFinishTimerRef.current);
+      loadingFinishTimerRef.current = null;
+    }
+    if (loadingFailsafeTimerRef.current !== null) {
+      window.clearTimeout(loadingFailsafeTimerRef.current);
+      loadingFailsafeTimerRef.current = null;
+    }
+
+    setLoadingOverlay({
+      visible: true,
+      progress: 8,
+      phase: 'Summoning the Dark Warden…',
+      mode: 'arena',
+    });
+
+    loadingFailsafeTimerRef.current = window.setTimeout(() => {
+      loadingFailsafeTimerRef.current = null;
+      setLoadingOverlay((prev) => ({ ...prev, progress: 100, visible: false }));
+    }, 6000);
+
+    gameManager.setGameState('PLAYING');
     setGameState('PLAYING');
     setLevelUpOptions(null);
     setLevelUpChallenge(null);
@@ -417,6 +531,11 @@ export default function App() {
     setHapticsEnabled(next);
   };
 
+  const handleGraphicsConfigChange = (partial: Partial<GraphicsConfig>) => {
+    const next = gameManager.updateGraphicsConfig(partial);
+    setGraphicsConfig(next);
+  };
+
   const handleOpenSettings = () => {
     soundManager.playUiClick();
     if (gameState === 'PLAYING') {
@@ -442,6 +561,7 @@ export default function App() {
   const handleTogglePause = () => {
     soundManager.playUiClick();
     if (gameState === 'PLAYING') {
+      gameManager.setGameState('PAUSED');
       setGameState('PAUSED');
       if (gameManager.activeScene) {
         (gameManager.activeScene as MainScene).pauseGame();
@@ -449,6 +569,7 @@ export default function App() {
         soundManager.pauseAudio();
       }
     } else if (gameState === 'PAUSED') {
+      gameManager.setGameState('PLAYING');
       setGameState('PLAYING');
       // If level-up card selection is active, physics stay paused until card choice, but audio resumes
       if (!levelUpOptions && gameManager.activeScene) {
@@ -468,7 +589,17 @@ export default function App() {
 
   const handleQuitToTitle = () => {
     soundManager.playUiClick();
+    if (loadingFinishTimerRef.current !== null) {
+      window.clearTimeout(loadingFinishTimerRef.current);
+      loadingFinishTimerRef.current = null;
+    }
+    if (loadingFailsafeTimerRef.current !== null) {
+      window.clearTimeout(loadingFailsafeTimerRef.current);
+      loadingFailsafeTimerRef.current = null;
+    }
+    setLoadingOverlay((prev) => ({ ...prev, visible: false }));
     setLevelUpOptions(null);
+    gameManager.setGameState('TITLE');
     setGameState('TITLE');
     // Destroy Phaser game first because WebAudioSoundManager.destroy() suspends a shared AudioContext
     if (gameManager.phaserGame) {
@@ -566,8 +697,8 @@ export default function App() {
         />
       )}
 
-      {/* Pause Screen Overlay: Forged-iron frame with rivets, bone text & 56px iron buttons */}
-      {gameState === 'PAUSED' && (
+      {/* Pause Screen Overlay: Hidden whenever Settings or HowToPlay sub-modal is open */}
+      {gameState === 'PAUSED' && !showSettings && !showHowToPlay && (
         <div
           className="fixed inset-0 backdrop-blur-md flex flex-col items-center justify-center safe-area-pad z-50"
           style={{
@@ -633,9 +764,9 @@ export default function App() {
         </div>
       )}
 
-      {/* Modal: Settings (Master / Music / SFX / Brightness / Haptics Sliders & Toggles) */}
+      {/* Modal: Settings (hidden cleanly while HowToPlay sub-modal is open so close buttons never stack) */}
       <SettingsModal
-        isOpen={showSettings}
+        isOpen={showSettings && !showHowToPlay}
         onClose={() => setShowSettings(false)}
         masterVolume={masterVolume}
         musicVolume={musicVolume}
@@ -643,12 +774,14 @@ export default function App() {
         brightness={brightness}
         isMuted={isMuted}
         hapticsEnabled={hapticsEnabled}
+        graphicsConfig={graphicsConfig}
         onMasterVolumeChange={handleMasterVolumeChange}
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
         onBrightnessChange={handleBrightnessChange}
         onToggleMute={handleToggleMute}
         onToggleHaptics={handleToggleHaptics}
+        onGraphicsConfigChange={handleGraphicsConfigChange}
         onOpenHowToPlay={handleOpenHowToPlayFromSettings}
       />
 
@@ -668,12 +801,13 @@ export default function App() {
         />
       )}
 
-      {/* Modal: Game Over / Run Summary */}
-      {gameState === 'GAME_OVER' && runSummary && (
+      {/* Modal: Game Over / Run Summary (hidden while nested Shop or Missions modal is open) */}
+      {gameState === 'GAME_OVER' && runSummary && !showShop && !showMissions && (
         <GameOverModal
           stats={runSummary}
           isModalOpen={showShop || showMissions}
           onRestart={handleStartGame}
+          onQuitToTitle={handleQuitToTitle}
           onOpenShop={(tab = 'upgrades') => {
             setShopInitialTab(tab);
             setShowShop(true);
@@ -715,6 +849,14 @@ export default function App() {
       {/* Global Non-Blocking Daily Mission & Achievement Toasts */}
       <MissionCompleteToast />
       <AchievementToast />
+
+      {/* Smooth Transition Loading Screen (App Boot + Arena Preload) */}
+      <LoadingScreen
+        visible={loadingOverlay.visible}
+        progress={loadingOverlay.progress}
+        phase={loadingOverlay.phase}
+        mode={loadingOverlay.mode}
+      />
     </main>
   );
 }

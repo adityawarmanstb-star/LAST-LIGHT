@@ -98,7 +98,8 @@ export function getAvailableUpgrades(
         id: 'blades_unlock',
         weaponId: 'blades',
         title: 'Spectral Blade',
-        description: 'Conjure an ethereal spinning blade that circles your lantern and slashes foes.',
+        description:
+          'Conjure an ethereal spinning blade that circles your lantern and slashes foes even while moving.',
         category: 'weapon_unlock',
         icon: 'blade',
         levelText: 'New Weapon',

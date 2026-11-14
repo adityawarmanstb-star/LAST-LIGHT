@@ -10,9 +10,22 @@ import {
   UpgradeOption,
   WeaponState,
 } from './types';
-import { saveDataStore } from './saveData';
+import {
+  ResolutionQualityMode,
+  TargetFpsOption,
+  saveDataStore,
+} from './saveData';
+import { soundManager } from './audio';
 
 export type QualityTier = 'high' | 'low';
+export type GameScreenState = 'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER';
+
+export interface GraphicsConfig {
+  targetFps: TargetFpsOption;
+  resolutionMode: ResolutionQualityMode;
+  upscalerEnabled: boolean;
+  frameGenEnabled: boolean;
+}
 
 export interface HudStatsPayload {
   hp: number;
@@ -52,6 +65,13 @@ export interface CritImpactPayload {
   seq: number;
 }
 
+export interface LoadProgressPayload {
+  active: boolean;
+  progress: number;
+  phase: string;
+  ready: boolean;
+}
+
 type StatsCallback = (data: HudStatsPayload) => void;
 type LevelUpCallback = (
   options: UpgradeOption[],
@@ -64,7 +84,10 @@ type PauseToggleCallback = () => void;
 type PauseStateCallback = (isPaused: boolean) => void;
 type BrightnessCallback = (brightness: number) => void;
 type QualityCallback = (tier: QualityTier) => void;
+type GraphicsCallback = (config: GraphicsConfig) => void;
 type CritImpactCallback = (impact: CritImpactPayload) => void;
+type LoadProgressCallback = (payload: LoadProgressPayload) => void;
+type GameStateCallback = (state: GameScreenState) => void;
 
 class GameManager {
   private statsListeners: StatsCallback[] = [];
@@ -76,9 +99,16 @@ class GameManager {
   private pauseStateListeners: PauseStateCallback[] = [];
   private brightnessListeners: BrightnessCallback[] = [];
   private qualityListeners: QualityCallback[] = [];
+  private graphicsListeners: GraphicsCallback[] = [];
   private critImpactListeners: CritImpactCallback[] = [];
+  private loadProgressListeners: LoadProgressCallback[] = [];
+  private gameStateListeners: GameStateCallback[] = [];
   private lastCritImpactMs: number = 0;
   private critImpactSeq: number = 0;
+
+  private gameState: GameScreenState = 'TITLE';
+  private lastObservedHp: number = 100;
+  private deathKnellPlayedForRun: boolean = false;
 
   public activeScene: Phaser.Scene | null = null;
   public activeUiScene: Phaser.Scene | null = null;
@@ -88,6 +118,53 @@ class GameManager {
   public joystickVector = { x: 0, y: 0 };
   private brightness: number = saveDataStore.read().settings.brightness;
   private qualityTier: QualityTier = 'high';
+  private graphicsConfig: GraphicsConfig = (() => {
+    const s = saveDataStore.read().settings;
+    return {
+      targetFps: s.targetFps,
+      resolutionMode: s.resolutionMode,
+      upscalerEnabled: s.upscalerEnabled,
+      frameGenEnabled: s.frameGenEnabled,
+    };
+  })();
+
+  public getGameState(): GameScreenState {
+    return this.gameState;
+  }
+
+  public onGameStateChange(cb: GameStateCallback) {
+    this.gameStateListeners.push(cb);
+    return () => {
+      this.gameStateListeners = this.gameStateListeners.filter((l) => l !== cb);
+    };
+  }
+
+  public setGameState(nextState: GameScreenState) {
+    const prevState = this.gameState;
+    if (prevState === nextState) return;
+
+    if (
+      (nextState === 'PLAYING' && (prevState === 'TITLE' || prevState === 'GAME_OVER')) ||
+      nextState === 'TITLE'
+    ) {
+      this.deathKnellPlayedForRun = false;
+      this.lastObservedHp = 100;
+    }
+
+    this.gameState = nextState;
+
+    if (nextState === 'GAME_OVER' && this.lastObservedHp <= 0) {
+      this.triggerDeathKnellOnce();
+    }
+
+    this.gameStateListeners.forEach((l) => l(nextState));
+  }
+
+  private triggerDeathKnellOnce() {
+    if (this.deathKnellPlayedForRun) return;
+    this.deathKnellPlayedForRun = true;
+    soundManager.playDeathKnell();
+  }
 
   public getBrightness(): number {
     return this.brightness;
@@ -126,6 +203,33 @@ class GameManager {
     };
   }
 
+  public getGraphicsConfig(): GraphicsConfig {
+    return { ...this.graphicsConfig };
+  }
+
+  public updateGraphicsConfig(partial: Partial<GraphicsConfig>): GraphicsConfig {
+    this.graphicsConfig = {
+      ...this.graphicsConfig,
+      ...partial,
+    };
+    saveDataStore.update((draft) => {
+      draft.settings.targetFps = this.graphicsConfig.targetFps;
+      draft.settings.resolutionMode = this.graphicsConfig.resolutionMode;
+      draft.settings.upscalerEnabled = this.graphicsConfig.upscalerEnabled;
+      draft.settings.frameGenEnabled = this.graphicsConfig.frameGenEnabled;
+    });
+    const snapshot = { ...this.graphicsConfig };
+    this.graphicsListeners.forEach((l) => l(snapshot));
+    return snapshot;
+  }
+
+  public onGraphicsChange(cb: GraphicsCallback) {
+    this.graphicsListeners.push(cb);
+    return () => {
+      this.graphicsListeners = this.graphicsListeners.filter((l) => l !== cb);
+    };
+  }
+
   public onStatsUpdate(cb: StatsCallback) {
     this.statsListeners.push(cb);
     return () => {
@@ -134,6 +238,10 @@ class GameManager {
   }
 
   public emitStats(data: HudStatsPayload) {
+    this.lastObservedHp = data.hp;
+    if (data.hp > 0 && this.gameState === 'GAME_OVER') {
+      this.deathKnellPlayedForRun = false;
+    }
     this.statsListeners.forEach((l) => l(data));
   }
 
@@ -159,6 +267,11 @@ class GameManager {
   }
 
   public emitGameOver(stats: RunStats) {
+    if (!stats.victory) {
+      this.lastObservedHp = 0;
+      this.triggerDeathKnellOnce();
+    }
+    this.setGameState('GAME_OVER');
     this.gameOverListeners.forEach((l) => l(stats));
   }
 
@@ -245,6 +358,17 @@ class GameManager {
 
     this.critImpactListeners.forEach((l) => l(payload));
     return true;
+  }
+
+  public onLoadProgress(cb: LoadProgressCallback) {
+    this.loadProgressListeners.push(cb);
+    return () => {
+      this.loadProgressListeners = this.loadProgressListeners.filter((l) => l !== cb);
+    };
+  }
+
+  public emitLoadProgress(payload: LoadProgressPayload) {
+    this.loadProgressListeners.forEach((l) => l(payload));
   }
 
   public setJoystick(x: number, y: number) {

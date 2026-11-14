@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { gameManager } from '../GameManager';
 import { soundManager } from '../audio';
 import { haptics } from '../../mobile/haptics';
+import { LOGICAL_WIDTH, performanceRuntime, syncLogicalCamera } from '../PerformanceEngine';
 import {
   BLOOD_IRON_HEX,
   ForgedFrameSpec,
@@ -11,8 +12,8 @@ import {
 
 /**
  * Dedicated UI Scene running in parallel on top of MainScene and DarknessScene.
- * Its camera is fixed (0, 0, zoom 1.0) and completely unaffected by MainScene
- * camera follow, shake, zoom, or world scroll.
+ * Its camera uses fixed logical coordinates (0..540 x 0..960) zoomed to match
+ * the active high-DPI/4K backing buffer without any world scroll or shake.
  */
 export class UIScene extends Phaser.Scene {
   private pauseBtn!: Phaser.GameObjects.Container;
@@ -59,9 +60,9 @@ export class UIScene extends Phaser.Scene {
     this.input.topOnly = true;
     this.scene.bringToTop('UIScene');
 
-    // Camera ignores all world scroll/zoom from MainScene
-    this.cameras.main.setScroll(0, 0);
-    this.cameras.main.setZoom(1);
+    // Sync fixed screen-space camera to logical 540x960 grid across dynamic 4K scales
+    const activeScale = Math.max(1, this.scale.width / LOGICAL_WIDTH) || performanceRuntime.currentRenderScale;
+    syncLogicalCamera(this.cameras.main, activeScale, true);
 
     this.frameSpec = createForgedFrameSpec('ui_pause_plate', {
       dripCount: 2,
@@ -74,8 +75,8 @@ export class UIScene extends Phaser.Scene {
     this.elapsedSec = 0;
     this.lastDripRedrawMs = 0;
 
-    // 56x56 pause button positioned top-right respecting safe-area insets
-    const pos = this.getPausePosition(this.scale.width);
+    // 56x56 pause button positioned top-right respecting safe-area insets in logical 540x960 coords
+    const pos = this.getPausePosition(LOGICAL_WIDTH);
     this.pauseBtn = this.add.container(pos.x, pos.y);
     this.pauseBtn.setSize(68, 68);
 
@@ -108,7 +109,6 @@ export class UIScene extends Phaser.Scene {
 
     // Forged-iron press feedback: scale 0.96 & blood-red glowing border
     this.pauseBtn.on('pointerdown', () => {
-      console.log('pause pressed');
       soundManager.onUserGesture();
       haptics.tap('medium');
       this.isPressed = true;
@@ -140,10 +140,12 @@ export class UIScene extends Phaser.Scene {
       this.drawIcon(paused);
     });
 
-    // Handle responsive window resize
+    // Keep camera zoom & pause button locked to logical 540x960 across Dynamic Resolution / 4K switches
     this.resizeHandler = (gameSize: Phaser.Structs.Size) => {
+      const nextScale = Math.max(1, gameSize.width / LOGICAL_WIDTH);
+      syncLogicalCamera(this.cameras.main, nextScale, true);
       if (this.pauseBtn) {
-        const nextPos = this.getPausePosition(gameSize.width);
+        const nextPos = this.getPausePosition(LOGICAL_WIDTH);
         this.pauseBtn.setPosition(nextPos.x, nextPos.y);
       }
     };

@@ -5,6 +5,13 @@ import { DarknessScene } from './scenes/DarknessScene';
 import { UIScene } from './scenes/UIScene';
 import { gameManager } from './GameManager';
 import { soundManager } from './audio';
+import {
+  LOGICAL_HEIGHT,
+  LOGICAL_WIDTH,
+  getWebGlMaxTextureSize,
+  performanceRuntime,
+  resolveRenderScale,
+} from './PerformanceEngine';
 
 export const MAX_DEVICE_PIXEL_RATIO = 2;
 
@@ -22,26 +29,38 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
   }
 
   const sharedCtx = soundManager.getOrCreateContext();
+  const gfx = gameManager.getGraphicsConfig();
+  const initialScale = resolveRenderScale(gfx.resolutionMode, 4096);
+  performanceRuntime.currentConfig = { ...gfx };
+  performanceRuntime.currentRenderScale = initialScale;
+
+  const bufferW = Math.round(LOGICAL_WIDTH * initialScale);
+  const bufferH = Math.round(LOGICAL_HEIGHT * initialScale);
 
   const config: Phaser.Types.Core.GameConfig = {
     type: Phaser.AUTO,
     parent: parentContainerId,
-    width: 540,
-    height: 960,
+    width: bufferW,
+    height: bufferH,
     backgroundColor: '#08090d',
     fps: {
-      target: 60,
+      target: gfx.targetFps,
       min: 30,
-      smoothStep: true,
+      smoothStep: false,
+      deltaHistory: 0,
     },
     render: {
       powerPreference: 'high-performance',
-      antialias: false,
+      antialias: true,
       antialiasGL: false,
-      roundPixels: true,
+      roundPixels: false,
+      pixelArt: false,
       transparent: false,
       stencil: false,
       batchSize: 4096,
+      maxTextures: -1,
+      autoMobileTextures: false,
+      mipmapFilter: 'LINEAR_MIPMAP_LINEAR',
       mipmapRegeneration: false,
       desynchronized: true,
     },
@@ -54,14 +73,16 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       default: 'arcade',
       arcade: {
         gravity: { x: 0, y: 0 },
+        fps: 120,
+        fixedStep: false,
         debug: false,
       },
     },
     scale: {
       mode: Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
-      width: 540,
-      height: 960,
+      width: bufferW,
+      height: bufferH,
     },
     // Persistent AudioScene -> MainScene (bottom) -> DarknessScene (middle) -> UIScene (top)
     scene: [AudioScene, MainScene, DarknessScene, UIScene],
@@ -69,6 +90,19 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
 
   const game = new Phaser.Game(config);
   gameManager.phaserGame = game;
+
+  game.events.once(Phaser.Core.Events.READY, () => {
+    const maxTex = getWebGlMaxTextureSize(game);
+    const verifiedScale = resolveRenderScale(gfx.resolutionMode, maxTex);
+    if (Math.abs(verifiedScale - performanceRuntime.currentRenderScale) > 0.01) {
+      performanceRuntime.currentRenderScale = verifiedScale;
+      game.scale.setGameSize(
+        Math.round(LOGICAL_WIDTH * verifiedScale),
+        Math.round(LOGICAL_HEIGHT * verifiedScale)
+      );
+    }
+    performanceRuntime.setTargetFpsOnGame(game, gfx.targetFps);
+  });
 
   // Start AudioScene and MainScene; MainScene.create() launches DarknessScene then UIScene and enforces bringToTop('UIScene')
   game.scene.start('AudioScene');

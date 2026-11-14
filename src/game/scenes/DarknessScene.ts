@@ -2,6 +2,17 @@ import Phaser from 'phaser';
 import { gameManager } from '../GameManager';
 import { LIGHT, MainScene } from './MainScene';
 import { computePointShadowOcclusion, WorldPillarData } from '../ShadowCasterSystem';
+import {
+  LOGICAL_HEIGHT,
+  LOGICAL_WIDTH,
+  getLogicalScrollX,
+  getLogicalScrollY,
+  performanceRuntime,
+  syncLogicalCamera,
+  upgradeTextureFiltering,
+} from '../PerformanceEngine';
+
+const RT_OVERSCAN = 20;
 
 interface LightSourceSlot {
   x: number;
@@ -38,6 +49,13 @@ export class DarknessScene extends Phaser.Scene {
   private currentRtScale: number = LIGHT.renderTextureScale;
   private unsubBrightness: (() => void) | null = null;
   private unsubQuality: (() => void) | null = null;
+  private unsubGraphics: (() => void) | null = null;
+
+  // Temporal RenderTexture scroll compensation for 90-120fps frame pacing
+  private lastRtScrollX: number = 0;
+  private lastRtScrollY: number = 0;
+  private forceRtRedraw: boolean = true;
+  private prevPausedState: boolean = false;
 
   // Smooth player light state
   private currentStandBonus: number = 1.2;
@@ -68,14 +86,25 @@ export class DarknessScene extends Phaser.Scene {
     }
   }
 
+  private computeDesiredRtScale(tier: 'high' | 'low'): number {
+    if (tier === 'low') {
+      return LIGHT.renderTextureScale * 0.56;
+    }
+    const mode = performanceRuntime.currentConfig.resolutionMode;
+    if (mode === 'ultra_4k') {
+      return 0.72;
+    }
+    return LIGHT.renderTextureScale;
+  }
+
   create() {
     // Non-interactive scene strictly below UIScene / HUD so it never steals touches or clicks
     this.input.enabled = false;
     this.input.topOnly = false;
 
-    // Fixed screen-space camera independent of MainScene camera follow/shake/zoom
-    this.cameras.main.setScroll(0, 0);
-    this.cameras.main.setZoom(1);
+    // Sync screen-space darkness overlay to logical 540x960 grid over high-DPI / 4K buffer
+    const activeScale = Math.max(1, this.scale.width / LOGICAL_WIDTH) || performanceRuntime.currentRenderScale;
+    syncLogicalCamera(this.cameras.main, activeScale, true);
 
     this.lightSources = Array.from({ length: LIGHT.maxLightSources }, () => ({
       x: 0,
@@ -87,9 +116,10 @@ export class DarknessScene extends Phaser.Scene {
     this.ensureRadialLightTexture();
     this.ensureBossAmberTexture();
     this.ensureProceduralFogTexture();
+    upgradeTextureFiltering(this);
 
-    const w = Math.max(2, this.scale.width);
-    const h = Math.max(2, this.scale.height);
+    const w = LOGICAL_WIDTH;
+    const h = LOGICAL_HEIGHT;
 
     // 2 slow-drifting procedural cool-blue fog layers inside the dark layer (< 12% opacity)
     this.fogLayer1 = this.add
@@ -109,19 +139,17 @@ export class DarknessScene extends Phaser.Scene {
       .setAlpha(LIGHT.fog.layer2Alpha);
     this.stripInteractivity(this.fogLayer2);
 
-    // Adaptive RenderTexture resolution scaled up cleanly for mobile performance
-    this.currentRtScale =
-      gameManager.getQualityTier() === 'low'
-        ? LIGHT.renderTextureScale * 0.5
-        : LIGHT.renderTextureScale;
-    const halfW = Math.max(1, Math.ceil(w * this.currentRtScale));
-    const halfH = Math.max(1, Math.ceil(h * this.currentRtScale));
+    // Adaptive RenderTexture resolution with 20px overscan border for glitch-free temporal scroll compensation
+    this.currentRtScale = this.computeDesiredRtScale(gameManager.getQualityTier());
+    const rtW = Math.max(1, Math.ceil((w + RT_OVERSCAN * 2) * this.currentRtScale));
+    const rtH = Math.max(1, Math.ceil((h + RT_OVERSCAN * 2) * this.currentRtScale));
     this.darkRT = this.add
-      .renderTexture(0, 0, halfW, halfH)
+      .renderTexture(-RT_OVERSCAN, -RT_OVERSCAN, rtW, rtH)
       .setOrigin(0, 0)
       .setScale(1 / this.currentRtScale)
       .setDepth(5);
     this.stripInteractivity(this.darkRT);
+    this.forceRtRedraw = true;
 
     // Off-display Graphics buffer used to cast real-time shadow cones into darkRT
     this.shadowMaskGraphics = this.make.graphics({ x: 0, y: 0 }, false);
@@ -160,12 +188,22 @@ export class DarknessScene extends Phaser.Scene {
 
     this.unsubBrightness = gameManager.onBrightnessChange((val) => {
       this.brightness = val;
+      this.forceRtRedraw = true;
     });
 
     this.unsubQuality = gameManager.onQualityChange((tier) => {
-      this.currentRtScale =
-        tier === 'low' ? LIGHT.renderTextureScale * 0.5 : LIGHT.renderTextureScale;
-      this.resizeDarkRT(this.scale.width, this.scale.height);
+      this.currentRtScale = this.computeDesiredRtScale(tier);
+      this.resizeDarkRT();
+      this.forceRtRedraw = true;
+    });
+
+    this.unsubGraphics = gameManager.onGraphicsChange(() => {
+      const desired = this.computeDesiredRtScale(gameManager.getQualityTier());
+      if (Math.abs(desired - this.currentRtScale) > 0.02) {
+        this.currentRtScale = desired;
+        this.resizeDarkRT();
+      }
+      this.forceRtRedraw = true;
     });
 
     this.scale.on('resize', this.handleResize, this);
@@ -178,6 +216,10 @@ export class DarknessScene extends Phaser.Scene {
       if (this.unsubQuality) {
         this.unsubQuality();
         this.unsubQuality = null;
+      }
+      if (this.unsubGraphics) {
+        this.unsubGraphics();
+        this.unsubGraphics = null;
       }
       this.scale.off('resize', this.handleResize, this);
       this.shadowMaskGraphics?.destroy();
@@ -193,22 +235,20 @@ export class DarknessScene extends Phaser.Scene {
     }
   }
 
-  private resizeDarkRT(width: number, height: number) {
+  private resizeDarkRT() {
     if (!this.darkRT) return;
-    const w = Math.max(2, width);
-    const h = Math.max(2, height);
-    const scaledW = Math.max(1, Math.ceil(w * this.currentRtScale));
-    const scaledH = Math.max(1, Math.ceil(h * this.currentRtScale));
+    const scaledW = Math.max(1, Math.ceil((LOGICAL_WIDTH + RT_OVERSCAN * 2) * this.currentRtScale));
+    const scaledH = Math.max(1, Math.ceil((LOGICAL_HEIGHT + RT_OVERSCAN * 2) * this.currentRtScale));
     this.darkRT.resize(scaledW, scaledH);
     this.darkRT.setScale(1 / this.currentRtScale);
+    this.darkRT.setPosition(-RT_OVERSCAN, -RT_OVERSCAN);
+    this.forceRtRedraw = true;
   }
 
   private handleResize(gameSize: Phaser.Structs.Size) {
-    const w = Math.max(2, gameSize.width);
-    const h = Math.max(2, gameSize.height);
-    if (this.fogLayer1) this.fogLayer1.setSize(w, h);
-    if (this.fogLayer2) this.fogLayer2.setSize(w, h);
-    this.resizeDarkRT(w, h);
+    const nextScale = Math.max(1, gameSize.width / LOGICAL_WIDTH);
+    syncLogicalCamera(this.cameras.main, nextScale, true);
+    this.forceRtRedraw = true;
   }
 
   private ensureRadialLightTexture() {
@@ -295,15 +335,20 @@ export class DarknessScene extends Phaser.Scene {
       const snap = main.getLightingData();
       if (!snap || !snap.player || !snap.player.active) return;
 
-      const delta = snap.isGamePaused ? 0 : Math.min(rawDelta, 50);
+      const delta = snap.isGamePaused ? 0 : performanceRuntime.smoothFrameDelta(rawDelta);
       this.effectTimeMs += delta;
 
       const cam = main.cameras?.main;
       if (!cam) return;
-      const scrollX = cam.scrollX;
-      const scrollY = cam.scrollY;
-      const w = this.scale.width;
-      const h = this.scale.height;
+      const scrollX = getLogicalScrollX(cam);
+      const scrollY = getLogicalScrollY(cam);
+      const w = LOGICAL_WIDTH;
+      const h = LOGICAL_HEIGHT;
+
+      if (snap.isGamePaused !== this.prevPausedState) {
+        this.prevPausedState = snap.isGamePaused;
+        this.forceRtRedraw = true;
+      }
 
       // 1. Update procedural fog layers (smoothly shift into dense crimson Blood Fog during Horde Frenzy)
       if (!snap.isGamePaused) {
@@ -560,7 +605,7 @@ export class DarknessScene extends Phaser.Scene {
       }
     }
 
-    // 4. Render Half-Res Darkness RenderTexture once per frame
+    // 4. Render Darkness RenderTexture with Temporal Frame-Gen Reprojection at 90/120fps
     // Never darker than 85% outside lights; brightness slider (50-150%) smoothly lightens
     const darkAlpha = Phaser.Math.Clamp(
       LIGHT.fillAlpha * (1.24 - this.brightness * 0.32),
@@ -569,50 +614,70 @@ export class DarknessScene extends Phaser.Scene {
     );
 
     if (this.darkRT && this.darkRT.scene && this.textures.exists('light_radial_soft')) {
-      this.darkRT.clear();
-      const fillColor =
-        this.bloodFogBlend > 0.01
-          ? lerpHexColor(LIGHT.darkColor, 0x280409, this.bloodFogBlend)
-          : LIGHT.darkColor;
-      this.darkRT.fill(fillColor, darkAlpha);
+      const scrollDeltaX = this.lastRtScrollX - scrollX;
+      const scrollDeltaY = this.lastRtScrollY - scrollY;
+      const exceededOverscan =
+        Math.abs(scrollDeltaX) > RT_OVERSCAN * 0.72 || Math.abs(scrollDeltaY) > RT_OVERSCAN * 0.72;
+      const shouldRedrawRt =
+        this.forceRtRedraw ||
+        exceededOverscan ||
+        this.levelUpPulseRemainingMs > 0 ||
+        performanceRuntime.shouldRunTemporalHeavyPass(delta, false);
 
-      const rtScale = this.currentRtScale;
-      const rtW = this.darkRT.width;
-      const rtH = this.darkRT.height;
+      if (shouldRedrawRt) {
+        this.forceRtRedraw = false;
+        this.lastRtScrollX = scrollX;
+        this.lastRtScrollY = scrollY;
+        this.darkRT.setPosition(-RT_OVERSCAN, -RT_OVERSCAN);
+        this.darkRT.clear();
 
-      for (let i = 0; i < lightCount; i++) {
-        const ls = this.lightSources[i];
-        const halfX = (ls.x - scrollX) * rtScale;
-        const halfY = (ls.y - scrollY) * rtScale;
-        const halfR = ls.radius * rtScale;
-        if (halfX + halfR < 0 || halfX - halfR > rtW || halfY + halfR < 0 || halfY - halfR > rtH) {
-          continue;
+        const fillColor =
+          this.bloodFogBlend > 0.01
+            ? lerpHexColor(LIGHT.darkColor, 0x280409, this.bloodFogBlend)
+            : LIGHT.darkColor;
+        this.darkRT.fill(fillColor, darkAlpha);
+
+        const rtScale = this.currentRtScale;
+        const rtW = this.darkRT.width;
+        const rtH = this.darkRT.height;
+
+        for (let i = 0; i < lightCount; i++) {
+          const ls = this.lightSources[i];
+          const halfX = (ls.x - scrollX + RT_OVERSCAN) * rtScale;
+          const halfY = (ls.y - scrollY + RT_OVERSCAN) * rtScale;
+          const halfR = ls.radius * rtScale;
+          if (halfX + halfR < 0 || halfX - halfR > rtW || halfY + halfR < 0 || halfY - halfR > rtH) {
+            continue;
+          }
+          this.darkRT.stamp('light_radial_soft', undefined, halfX, halfY, {
+            scale: (ls.radius * rtScale) / 128,
+            alpha: ls.alpha,
+            blendMode: Phaser.BlendModes.ERASE,
+          });
+
+          // Right after carving the Player Lantern pool (index 0), project real-time shadow cones
+          // cast by terrain pillars & boss into darkRT; subsequent torches/lights naturally cut through them.
+          if (i === 0 && this.shadowMaskGraphics) {
+            this.drawPlayerShadowMaskCones(
+              ls.x,
+              ls.y,
+              ls.radius,
+              scrollX,
+              scrollY,
+              rtScale,
+              fillColor,
+              darkAlpha * 0.82,
+              snap.pillars?.items ?? null,
+              snap.pillars?.count ?? 0,
+              snap.activeBoss && snap.activeBoss.active ? snap.activeBoss : null
+            );
+          }
         }
-        this.darkRT.stamp('light_radial_soft', undefined, halfX, halfY, {
-          scale: (ls.radius * rtScale) / 128,
-          alpha: ls.alpha,
-          blendMode: Phaser.BlendModes.ERASE,
-        });
-
-        // Right after carving the Player Lantern pool (index 0), project real-time shadow cones
-        // cast by terrain pillars & boss into darkRT; subsequent torches/lights naturally cut through them.
-        if (i === 0 && this.shadowMaskGraphics) {
-          this.drawPlayerShadowMaskCones(
-            ls.x,
-            ls.y,
-            ls.radius,
-            scrollX,
-            scrollY,
-            rtScale,
-            fillColor,
-            darkAlpha * 0.82,
-            snap.pillars?.items ?? null,
-            snap.pillars?.count ?? 0,
-            snap.activeBoss && snap.activeBoss.active ? snap.activeBoss : null
-          );
-        }
+        this.darkRT.render();
+      } else {
+        // Inter-frame temporal scroll compensation: locks cached lightmap to world at zero RT cost
+        this.darkRT.setPosition(scrollDeltaX - RT_OVERSCAN, scrollDeltaY - RT_OVERSCAN);
       }
-      this.darkRT.render();
     }
 
     // 5. Update Enemies Alpha (0.12 outside light -> 1.0 in 0.2s), Glowing Eye Dots & Edge Arrows
@@ -638,33 +703,38 @@ export class DarknessScene extends Phaser.Scene {
         if (!edata) continue;
 
         const isBossEnemy = edata.type === 'boss';
+        const sx = enemy.x - scrollX;
+        const sy = enemy.y - scrollY;
+        const nearView = sx >= -110 && sx <= w + 110 && sy >= -110 && sy <= h + 110;
 
-        // Check if enemy is illuminated by any active light source, attenuated by pillar/boss cast shadows
+        // Early frustum cull: skip light-source & shadow-cone occlusion loops for far off-screen enemies
         let maxLit = 0;
-        for (let j = 0; j < lightCount; j++) {
-          const ls = this.lightSources[j];
-          const dx = enemy.x - ls.x;
-          const dy = enemy.y - ls.y;
-          const effR = ls.radius * 0.92;
-          const distSq = dx * dx + dy * dy;
-          if (distSq < effR * effR) {
-            const dist = Math.sqrt(distSq);
-            let litVal = Math.min(1, ((effR - dist) / (effR * 0.35)) * ls.alpha);
-            if (pillarCount > 0 || (hasActiveBoss && !isBossEnemy)) {
-              const occ = computePointShadowOcclusion(
-                ls.x,
-                ls.y,
-                enemy.x,
-                enemy.y,
-                pillarItems,
-                pillarCount,
-                isBossEnemy ? undefined : bossX,
-                isBossEnemy ? undefined : bossY,
-                isBossEnemy ? 0 : 48
-              );
-              litVal *= 1 - occ * 0.78;
+        if (nearView) {
+          for (let j = 0; j < lightCount; j++) {
+            const ls = this.lightSources[j];
+            const dx = enemy.x - ls.x;
+            const dy = enemy.y - ls.y;
+            const effR = ls.radius * 0.92;
+            const distSq = dx * dx + dy * dy;
+            if (distSq < effR * effR) {
+              const dist = Math.sqrt(distSq);
+              let litVal = Math.min(1, ((effR - dist) / (effR * 0.35)) * ls.alpha);
+              if (pillarCount > 0 || (hasActiveBoss && !isBossEnemy)) {
+                const occ = computePointShadowOcclusion(
+                  ls.x,
+                  ls.y,
+                  enemy.x,
+                  enemy.y,
+                  pillarItems,
+                  pillarCount,
+                  isBossEnemy ? undefined : bossX,
+                  isBossEnemy ? undefined : bossY,
+                  isBossEnemy ? 0 : 48
+                );
+                litVal *= 1 - occ * 0.78;
+              }
+              if (litVal > maxLit) maxLit = litVal;
             }
-            if (litVal > maxLit) maxLit = litVal;
           }
         }
 
@@ -681,76 +751,101 @@ export class DarknessScene extends Phaser.Scene {
           enemy.setAlpha(targetAlpha);
         }
 
-        const sx = enemy.x - scrollX;
-        const sy = enemy.y - scrollY;
-        const onScreen = sx >= 16 && sx <= w - 16 && sy >= 16 && sy <= h - 16;
+        const onScreen = nearView && sx >= 16 && sx <= w - 16 && sy >= 16 && sy <= h - 16;
 
         if (onScreen && nextVis < 0.9) {
-          // Pair of small glowing eye/accent dots visible at distance in the dark (extended by Night Eyes)
-          const eyeRange =
+          // Glowing "!" alert indicator visible on enemies lurking in the dark (extended by Night Eyes)
+          const alertRange =
             LIGHT.enemies.baseEyeGlowRange *
             (snap.hasNightEyes ? LIGHT.enemies.nightEyesRangeMultiplier : 1.0);
           const dxP = enemy.x - snap.player.x;
           const dyP = enemy.y - snap.player.y;
           const distToPlayerSq = dxP * dxP + dyP * dyP;
-          if (distToPlayerSq < eyeRange * eyeRange) {
+          if (distToPlayerSq < alertRange * alertRange) {
             const distToPlayer = Math.sqrt(distToPlayerSq);
-            const eyeDistFade =
-              distToPlayer <= eyeRange * 0.72
+            const alertDistFade =
+              distToPlayer <= alertRange * 0.72
                 ? 1
-                : Math.max(0, 1 - (distToPlayer - eyeRange * 0.72) / (eyeRange * 0.28));
-            if (eyeDistFade > 0.02) {
-              const baseEyeAlpha = (1 - nextVis * 0.85) * eyeDistFade;
-              const eyeAlpha = Math.min(
+                : Math.max(0, 1 - (distToPlayer - alertRange * 0.72) / (alertRange * 0.28));
+            if (alertDistFade > 0.02) {
+              const baseAlertAlpha = (1 - nextVis * 0.85) * alertDistFade;
+              const alertAlpha = Math.min(
                 1,
-                baseEyeAlpha * (snap.hasNightEyes ? LIGHT.enemies.nightEyesAlphaBoost : 1.0)
+                baseAlertAlpha * (snap.hasNightEyes ? LIGHT.enemies.nightEyesAlphaBoost : 1.0)
               );
-          const eyeSizeMult = snap.hasNightEyes ? LIGHT.enemies.nightEyesSizeBoost : 1.0;
-          const eyeColor = LIGHT.enemies.eyeColors[edata.type] ?? 0xc44cff;
-          const facingDir = enemy.flipX ? -1 : 1;
+              const sizeBoost = snap.hasNightEyes ? LIGHT.enemies.nightEyesSizeBoost : 1.0;
+              const alertColor = LIGHT.enemies.eyeColors[edata.type] ?? 0xc44cff;
 
-          let spreadX = 5;
-          let offsetY = 6;
-          let eyeRadius = 2.1;
+              let offsetY = 22;
+              let markScale = 1.0;
 
-          if (edata.type === 'brute') {
-            spreadX = 9;
-            offsetY = 14;
-            eyeRadius = 2.6;
-          } else if (edata.type === 'spitter') {
-            spreadX = 5;
-            offsetY = 14;
-            eyeRadius = 2.2;
-          } else if (edata.type === 'boss') {
-            spreadX = 12;
-            offsetY = 24;
-            eyeRadius = 3.2;
-          } else if (edata.type === 'wisp') {
-            spreadX = 5;
-            offsetY = 2;
-            eyeRadius = 2.0;
-          }
+              if (edata.type === 'brute') {
+                offsetY = 34;
+                markScale = 1.25;
+              } else if (edata.type === 'spitter') {
+                offsetY = 30;
+                markScale = 1.08;
+              } else if (edata.type === 'boss') {
+                offsetY = 56;
+                markScale = 1.55;
+              } else if (edata.type === 'wisp') {
+                offsetY = 18;
+                markScale = 0.95;
+              }
 
-          if (edata.isElite) {
-            spreadX *= 1.25;
-            offsetY *= 1.25;
-            eyeRadius *= 1.2;
-          }
+              if (edata.isElite) {
+                offsetY *= 1.18;
+                markScale *= 1.2;
+              }
 
-          eyeRadius *= eyeSizeMult;
+              markScale *= sizeBoost;
 
-          const eyeCenterX = sx + facingDir * (spreadX * 0.5);
-          const eyeY = sy - offsetY;
-          const leftEyeX = eyeCenterX - spreadX * 0.7;
-          const rightEyeX = eyeCenterX + spreadX * 0.7;
+              const bobY = Math.sin(this.effectTimeMs * 0.0085 + i * 0.7) * 1.6;
+              const ix = sx;
+              const iy = Math.max(24, sy - offsetY + bobY);
 
-          this.eyeGraphics.fillStyle(eyeColor, eyeAlpha * 0.35);
-          this.eyeGraphics.fillCircle(leftEyeX, eyeY, eyeRadius * 2.1);
-          this.eyeGraphics.fillCircle(rightEyeX, eyeY, eyeRadius * 2.1);
+              const barW = 3.4 * markScale;
+              const barH = 8.8 * markScale;
+              const barTop = iy - 13.0 * markScale;
+              const dotY = iy - 1.4 * markScale;
+              const dotR = 1.9 * markScale;
 
-          this.eyeGraphics.fillStyle(eyeColor, eyeAlpha);
-          this.eyeGraphics.fillCircle(leftEyeX, eyeY, eyeRadius);
-          this.eyeGraphics.fillCircle(rightEyeX, eyeY, eyeRadius);
+              // Outer soft colored glow aura
+              this.eyeGraphics.fillStyle(alertColor, alertAlpha * 0.24);
+              this.eyeGraphics.fillCircle(ix, iy - 6.8 * markScale, 9.5 * markScale);
+
+              // Dark iron drop-shadow for crisp contrast against fog & background
+              this.eyeGraphics.fillStyle(0x07080d, alertAlpha * 0.75);
+              this.eyeGraphics.fillRoundedRect(
+                ix - barW * 0.5 + 0.8,
+                barTop + 1.0,
+                barW,
+                barH,
+                1.5 * markScale
+              );
+              this.eyeGraphics.fillCircle(ix + 0.8, dotY + 1.0, dotR);
+
+              // Main glowing "!" exclamation glyph (stem + dot)
+              this.eyeGraphics.fillStyle(alertColor, alertAlpha);
+              this.eyeGraphics.fillRoundedRect(
+                ix - barW * 0.5,
+                barTop,
+                barW,
+                barH,
+                1.5 * markScale
+              );
+              this.eyeGraphics.fillCircle(ix, dotY, dotR);
+
+              // Subtle bright core highlight for sharpness in the dark
+              this.eyeGraphics.fillStyle(0xfff7e6, alertAlpha * 0.45);
+              this.eyeGraphics.fillRoundedRect(
+                ix - barW * 0.22,
+                barTop + 1.1 * markScale,
+                barW * 0.44,
+                barH * 0.68,
+                0.8 * markScale
+              );
+              this.eyeGraphics.fillCircle(ix, dotY, dotR * 0.45);
             }
           }
         }
@@ -902,10 +997,10 @@ export class DarknessScene extends Phaser.Scene {
 
     const perp1 = angle - Math.PI * 0.5;
     const perp2 = angle + Math.PI * 0.5;
-    const n1x = (ox + Math.cos(perp1) * radius - scrollX) * rtScale;
-    const n1y = (oy + Math.sin(perp1) * radius - scrollY) * rtScale;
-    const n2x = (ox + Math.cos(perp2) * radius - scrollX) * rtScale;
-    const n2y = (oy + Math.sin(perp2) * radius - scrollY) * rtScale;
+    const n1x = (ox + Math.cos(perp1) * radius - scrollX + RT_OVERSCAN) * rtScale;
+    const n1y = (oy + Math.sin(perp1) * radius - scrollY + RT_OVERSCAN) * rtScale;
+    const n2x = (ox + Math.cos(perp2) * radius - scrollX + RT_OVERSCAN) * rtScale;
+    const n2y = (oy + Math.sin(perp2) * radius - scrollY + RT_OVERSCAN) * rtScale;
 
     const farLen = shadowReach * rtScale;
     const a1 = angle - halfSpread;

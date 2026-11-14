@@ -139,8 +139,8 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
         className="max-w-xl w-full flex flex-col max-h-[88vh]"
         contentClassName="flex flex-col max-h-[88vh] overflow-hidden"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 sm:p-6 border-b border-[#3a3f47]/80 gap-3">
+        {/* Clean Header */}
+        <div className="flex items-center justify-between px-4 py-4 sm:px-6 sm:py-5 border-b border-[#3a3f47]/80 gap-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#6b3a2a] flex items-center justify-center shrink-0">
               <ScrollText className="w-5 h-5 text-[#f2a93b]" />
@@ -149,7 +149,7 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
               <h2 className="text-lg sm:text-xl font-display font-bold tracking-wider text-[#d8c9a8] truncate">
                 DAILY MISSIONS
               </h2>
-              <p className="text-xs text-[#9c8e72]">
+              <p className="text-xs text-[#9c8e72] truncate">
                 {completedCount}/3 completed · Resets in{' '}
                 <span className="font-mono-numbers text-[#d8c9a8]">
                   {resetIn.hours}h {String(resetIn.minutes).padStart(2, '0')}m
@@ -158,38 +158,20 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-            <div
-              className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8b4fe] px-1.5"
-              title="Relic Seals (used in Sanctuary Forge to unlock extra Relic Slots)"
-            >
-              <KeyRound className="w-4 h-4 text-[#c084fc]" />
-              <span>{relicSeals}</span>
-            </div>
-
-            <div
-              className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8c9a8] px-1.5"
-              title="Soul Coins"
-            >
-              <Coins className="w-4 h-4 text-[#f2a93b]" />
-              <span>{coins}</span>
-            </div>
-
-            <IronButton
-              seed="missions-close-btn"
-              dripCount={0}
-              onClick={onClose}
-              className="w-14 h-14 min-h-[56px] min-w-[56px]"
-              aria-label="Close Daily Missions"
-            >
-              <X className="w-4 h-4 text-[#d8c9a8]" />
-            </IronButton>
-          </div>
+          <IronButton
+            seed="missions-close-btn"
+            dripCount={0}
+            onClick={onClose}
+            className="w-14 h-14 min-h-[56px] min-w-[56px] shrink-0"
+            aria-label="Close Daily Missions"
+          >
+            <X className="w-4 h-4 text-[#d8c9a8]" />
+          </IronButton>
         </div>
 
-        {/* Relic Slot Progress Banner */}
-        <div className="px-5 sm:px-6 py-3 border-b border-[#3a3f47]/65 bg-[#101318] flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex flex-col gap-1 flex-1 min-w-[200px]">
+        {/* Relic Slot Progress & Currencies Banner */}
+        <div className="px-4 sm:px-6 py-3 border-b border-[#3a3f47]/65 bg-[#101318] flex items-center justify-between gap-3 flex-wrap shrink-0">
+          <div className="flex flex-col gap-1 flex-1 min-w-[190px]">
             <div className="flex items-center justify-between gap-2 text-xs">
               <span className="flex items-center gap-1.5 font-display font-bold tracking-wider uppercase text-[#d8b4fe]">
                 <KeyRound className="w-3.5 h-3.5 text-[#c084fc]" />
@@ -231,23 +213,33 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
             )}
           </div>
 
-          {onOpenRelicShop && (
-            <button
-              type="button"
-              onClick={() => {
-                soundManager.playUiClick();
-                haptics.tap('light');
-                onOpenRelicShop();
-              }}
-              className={`min-h-[40px] px-3 rounded-[8px] border text-xs font-display font-bold tracking-wider uppercase transition-colors cursor-pointer shrink-0 ${
-                canUnlockSlotNow
-                  ? 'bg-[#1a1324] border-[#c084fc] text-[#e8dcc2] hover:border-[#5de4ff]'
-                  : 'bg-[#15181d] border-[#3a3f47] text-[#9c8e72] hover:text-[#d8c9a8]'
-              }`}
+          <div className="flex items-center gap-3 shrink-0">
+            <div
+              className="flex items-center gap-1.5 text-xs font-mono-numbers font-bold text-[#d8c9a8]"
+              title="Soul Coins"
             >
-              {canUnlockSlotNow ? 'Unlock Slot' : 'Relic Forge'}
-            </button>
-          )}
+              <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
+              <span>{coins}</span>
+            </div>
+
+            {onOpenRelicShop && (
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.playUiClick();
+                  haptics.tap('light');
+                  onOpenRelicShop();
+                }}
+                className={`min-h-[40px] px-3 rounded-[8px] border text-xs font-display font-bold tracking-wider uppercase transition-colors cursor-pointer shrink-0 ${
+                  canUnlockSlotNow
+                    ? 'bg-[#1a1324] border-[#c084fc] text-[#e8dcc2] hover:border-[#5de4ff]'
+                    : 'bg-[#15181d] border-[#3a3f47] text-[#9c8e72] hover:text-[#d8c9a8]'
+                }`}
+              >
+                {canUnlockSlotNow ? 'Unlock Slot' : 'Relic Forge'}
+              </button>
+            )}
+          </div>
         </div>
 
         {/* 3 Daily Mission Cards */}

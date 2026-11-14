@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { gameManager } from './GameManager';
+import { LOGICAL_HEIGHT, LOGICAL_WIDTH, getScrollZeroOffset } from './PerformanceEngine';
 
 export type WeatherKind = 'embers' | 'rain' | 'storm' | 'ash';
 
@@ -12,17 +13,17 @@ interface TimeOfDayPhase {
 }
 
 interface WeatherParticle {
+  sprite: Phaser.GameObjects.Image;
   x: number;
   y: number;
   vx: number;
   vy: number;
-  dx: number;
-  dy: number;
-  size: number;
-  length: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
   alpha: number;
   phase: number;
-  tintVariant: number;
+  color: number;
 }
 
 const TIME_OF_DAY_PHASES: readonly TimeOfDayPhase[] = [
@@ -57,14 +58,14 @@ const TIME_OF_DAY_PHASES: readonly TimeOfDayPhase[] = [
 ];
 
 const WEATHER_CYCLE: readonly WeatherKind[] = ['embers', 'rain', 'ash', 'storm'];
-const TIME_CYCLE_DURATION_SEC = 360; // Full 4-phase night cycle every 6 minutes
+const TIME_CYCLE_DURATION_SEC = 360;
 const WEATHER_DURATION_MS = 55000;
 const WEATHER_FADE_MS = 3200;
 const MAX_WEATHER_PARTICLES = 44;
 const LOW_QUALITY_WEATHER_PARTICLES = 20;
 
 function lerpHexColor(c1: number, c2: number, t: number): number {
-  const clamped = Math.max(0, Math.min(1, t));
+  const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
   const r1 = (c1 >> 16) & 0xff;
   const g1 = (c1 >> 8) & 0xff;
   const b1 = c1 & 0xff;
@@ -79,8 +80,11 @@ function lerpHexColor(c1: number, c2: number, t: number): number {
 
 export class AtmosphereOverlay {
   private scene: Phaser.Scene;
-  private floorTintGraphics: Phaser.GameObjects.Graphics;
-  private weatherGraphics: Phaser.GameObjects.Graphics;
+  private floorTintImage: Phaser.GameObjects.Image;
+  private horizonTopUpper: Phaser.GameObjects.Image;
+  private horizonTopLower: Phaser.GameObjects.Image;
+  private horizonBottom: Phaser.GameObjects.Image;
+  private lightningOverlay: Phaser.GameObjects.Image;
   private particles: WeatherParticle[] = [];
 
   private currentWeatherIndex: number = 0;
@@ -93,51 +97,125 @@ export class AtmosphereOverlay {
   private bossBloodMoonBlend: number = 0;
   private lightningAlpha: number = 0;
   private nextLightningMs: number = 9000;
-  private lastFloorTintColor: number = -1;
-  private lastFloorTintAlpha: number = -1;
-  private lastFloorW: number = -1;
-  private lastFloorH: number = -1;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
+    this.ensureTextures();
 
-    // Subtle ground atmospheric color-grade right above the floor tiles
-    this.floorTintGraphics = scene.add
-      .graphics()
+    this.floorTintImage = scene.add
+      .image(0, 0, 'atmo_white_pixel')
+      .setOrigin(0, 0)
+      .setDisplaySize(LOGICAL_WIDTH, LOGICAL_HEIGHT)
       .setDepth(1)
-      .setScrollFactor(0);
-    this.floorTintGraphics.disableInteractive();
+      .setScrollFactor(0)
+      .setTint(TIME_OF_DAY_PHASES[0].tintColor)
+      .setAlpha(TIME_OF_DAY_PHASES[0].tintAlpha);
+    this.floorTintImage.disableInteractive();
 
-    // Screen-space weather streaks, embers, ash & horizon atmospheric wash
-    this.weatherGraphics = scene.add
-      .graphics()
+    const bandH = Math.round(LOGICAL_HEIGHT * 0.18);
+    this.horizonTopUpper = scene.add
+      .image(0, 0, 'atmo_white_pixel')
+      .setOrigin(0, 0)
+      .setDisplaySize(LOGICAL_WIDTH, bandH * 0.55)
       .setDepth(33)
       .setScrollFactor(0);
-    this.weatherGraphics.disableInteractive();
+    this.horizonTopUpper.disableInteractive();
+
+    this.horizonTopLower = scene.add
+      .image(0, bandH * 0.55, 'atmo_white_pixel')
+      .setOrigin(0, 0)
+      .setDisplaySize(LOGICAL_WIDTH, bandH * 0.45)
+      .setDepth(33)
+      .setScrollFactor(0);
+    this.horizonTopLower.disableInteractive();
+
+    this.horizonBottom = scene.add
+      .image(0, LOGICAL_HEIGHT - bandH * 0.5, 'atmo_white_pixel')
+      .setOrigin(0, 0)
+      .setDisplaySize(LOGICAL_WIDTH, bandH * 0.5)
+      .setDepth(33)
+      .setScrollFactor(0);
+    this.horizonBottom.disableInteractive();
+
+    this.lightningOverlay = scene.add
+      .image(0, 0, 'atmo_white_pixel')
+      .setOrigin(0, 0)
+      .setDisplaySize(LOGICAL_WIDTH, LOGICAL_HEIGHT)
+      .setDepth(33)
+      .setScrollFactor(0)
+      .setTint(0xb9e3ff)
+      .setAlpha(0)
+      .setVisible(false);
+    this.lightningOverlay.disableInteractive();
 
     this.initParticles();
   }
 
-  private initParticles(): void {
-    const w = Math.max(2, this.scene.scale.width);
-    const h = Math.max(2, this.scene.scale.height);
-    this.particles = [];
+  private ensureTextures(): void {
+    const texMgr = this.scene.textures;
 
+    if (!texMgr.exists('atmo_white_pixel')) {
+      const tex = texMgr.createCanvas('atmo_white_pixel', 4, 4);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 4, 4);
+        tex.refresh();
+      }
+    }
+
+    if (!texMgr.exists('atmo_weather_orb')) {
+      const tex = texMgr.createCanvas('atmo_weather_orb', 16, 16);
+      if (tex) {
+        const ctx = tex.getContext();
+        const grad = ctx.createRadialGradient(8, 8, 0, 8, 8, 7.5);
+        grad.addColorStop(0, 'rgba(255,255,255,1)');
+        grad.addColorStop(0.55, 'rgba(255,255,255,0.75)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 16, 16);
+        tex.refresh();
+      }
+    }
+
+    if (!texMgr.exists('atmo_weather_streak')) {
+      const tex = texMgr.createCanvas('atmo_weather_streak', 6, 32);
+      if (tex) {
+        const ctx = tex.getContext();
+        const grad = ctx.createLinearGradient(3, 0, 3, 32);
+        grad.addColorStop(0, 'rgba(255,255,255,0)');
+        grad.addColorStop(0.35, 'rgba(255,255,255,0.85)');
+        grad.addColorStop(1, 'rgba(255,255,255,0.95)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(1.5, 0, 3, 32);
+        tex.refresh();
+      }
+    }
+  }
+
+  private initParticles(): void {
+    this.particles = [];
     for (let i = 0; i < MAX_WEATHER_PARTICLES; i++) {
+      const sprite = this.scene.add
+        .image(0, 0, 'atmo_weather_orb')
+        .setDepth(33)
+        .setScrollFactor(0);
+      sprite.disableInteractive();
+
       const p: WeatherParticle = {
-        x: Math.random() * w,
-        y: Math.random() * h,
+        sprite,
+        x: Math.random() * LOGICAL_WIDTH,
+        y: Math.random() * LOGICAL_HEIGHT,
         vx: 0,
         vy: 0,
-        dx: 0,
-        dy: 0,
-        size: 1.5,
-        length: 12,
+        rotation: 0,
+        scaleX: 0.4,
+        scaleY: 0.4,
         alpha: 0.4,
         phase: Math.random() * Math.PI * 2,
-        tintVariant: Math.random(),
+        color: 0xffffff,
       };
-      this.configureParticleForWeather(p, this.getActiveWeather(), w, h, true);
+      this.configureParticleForWeather(p, this.getActiveWeather(), true);
       this.particles.push(p);
     }
   }
@@ -149,12 +227,12 @@ export class AtmosphereOverlay {
   private configureParticleForWeather(
     p: WeatherParticle,
     kind: WeatherKind,
-    w: number,
-    h: number,
     randomY: boolean
   ): void {
+    const w = LOGICAL_WIDTH;
+    const h = LOGICAL_HEIGHT;
     p.phase = Math.random() * Math.PI * 2;
-    p.tintVariant = Math.random();
+    const tintVariant = Math.random();
 
     switch (kind) {
       case 'embers': {
@@ -162,11 +240,14 @@ export class AtmosphereOverlay {
         p.y = randomY ? Math.random() * h : h + Math.random() * 24;
         p.vx = Phaser.Math.FloatBetween(-18, 18);
         p.vy = Phaser.Math.FloatBetween(-58, -24);
-        p.dx = 0;
-        p.dy = 0;
-        p.size = Phaser.Math.FloatBetween(1.4, 2.8);
-        p.length = 0;
+        const sz = Phaser.Math.FloatBetween(1.4, 2.8);
+        p.scaleX = (sz * 2.2) / 16;
+        p.scaleY = p.scaleX;
+        p.rotation = 0;
         p.alpha = Phaser.Math.FloatBetween(0.28, 0.62);
+        p.color = tintVariant < 0.55 ? 0xf2a93b : tintVariant < 0.88 ? 0xe5303a : 0xffd28a;
+        if (p.sprite.texture.key !== 'atmo_weather_orb') p.sprite.setTexture('atmo_weather_orb');
+        p.sprite.setTint(p.color).setScale(p.scaleX, p.scaleY).setRotation(0);
         break;
       }
       case 'rain': {
@@ -174,12 +255,14 @@ export class AtmosphereOverlay {
         p.y = randomY ? Math.random() * h : -20 - Math.random() * 60;
         p.vx = Phaser.Math.FloatBetween(-75, -55);
         p.vy = Phaser.Math.FloatBetween(460, 620);
-        p.size = 1.1;
-        p.length = Phaser.Math.FloatBetween(14, 24);
-        const speedMag = Math.max(1, Math.hypot(p.vx, p.vy));
-        p.dx = (p.vx / speedMag) * p.length;
-        p.dy = (p.vy / speedMag) * p.length;
+        const len = Phaser.Math.FloatBetween(14, 24);
+        p.scaleX = 0.55;
+        p.scaleY = len / 32;
+        p.rotation = Math.atan2(p.vy, p.vx) - Math.PI * 0.5;
         p.alpha = Phaser.Math.FloatBetween(0.16, 0.34);
+        p.color = 0x8db8dc;
+        if (p.sprite.texture.key !== 'atmo_weather_streak') p.sprite.setTexture('atmo_weather_streak');
+        p.sprite.setTint(p.color).setScale(p.scaleX, p.scaleY).setRotation(p.rotation);
         break;
       }
       case 'storm': {
@@ -187,12 +270,14 @@ export class AtmosphereOverlay {
         p.y = randomY ? Math.random() * h : -24 - Math.random() * 60;
         p.vx = Phaser.Math.FloatBetween(-145, -110);
         p.vy = Phaser.Math.FloatBetween(640, 820);
-        p.size = 1.3;
-        p.length = Phaser.Math.FloatBetween(20, 32);
-        const speedMag = Math.max(1, Math.hypot(p.vx, p.vy));
-        p.dx = (p.vx / speedMag) * p.length;
-        p.dy = (p.vy / speedMag) * p.length;
+        const len = Phaser.Math.FloatBetween(20, 32);
+        p.scaleX = 0.65;
+        p.scaleY = len / 32;
+        p.rotation = Math.atan2(p.vy, p.vx) - Math.PI * 0.5;
         p.alpha = Phaser.Math.FloatBetween(0.22, 0.44);
+        p.color = 0xb8dcf8;
+        if (p.sprite.texture.key !== 'atmo_weather_streak') p.sprite.setTexture('atmo_weather_streak');
+        p.sprite.setTint(p.color).setScale(p.scaleX, p.scaleY).setRotation(p.rotation);
         break;
       }
       case 'ash': {
@@ -200,11 +285,14 @@ export class AtmosphereOverlay {
         p.y = randomY ? Math.random() * h : -12 - Math.random() * 24;
         p.vx = Phaser.Math.FloatBetween(-14, 16);
         p.vy = Phaser.Math.FloatBetween(26, 54);
-        p.dx = 0;
-        p.dy = 0;
-        p.size = Phaser.Math.FloatBetween(1.3, 2.7);
-        p.length = 0;
+        const sz = Phaser.Math.FloatBetween(1.3, 2.7);
+        p.scaleX = (sz * 2.1) / 16;
+        p.scaleY = p.scaleX;
+        p.rotation = 0;
         p.alpha = Phaser.Math.FloatBetween(0.22, 0.5);
+        p.color = tintVariant < 0.65 ? 0xcad6e6 : 0x9aa8bf;
+        if (p.sprite.texture.key !== 'atmo_weather_orb') p.sprite.setTexture('atmo_weather_orb');
+        p.sprite.setTint(p.color).setScale(p.scaleX, p.scaleY).setRotation(0);
         break;
       }
     }
@@ -219,10 +307,12 @@ export class AtmosphereOverlay {
     const dtSec = deltaMs * 0.001;
     this.elapsedMs += deltaMs;
 
-    const w = Math.max(2, this.scene.scale.width);
-    const h = Math.max(2, this.scene.scale.height);
+    const w = LOGICAL_WIDTH;
+    const h = LOGICAL_HEIGHT;
+    const offset = getScrollZeroOffset(this.scene.cameras.main);
+    const bandH = Math.round(h * 0.18);
 
-    // 1. Time-of-Day Cycle: smoothly blend across 4 atmospheric phases + Blood Moon during Boss / Darkness Falls
+    // 1. Time-of-Day Cycle
     const cycleRatio = (runTimeSec % TIME_CYCLE_DURATION_SEC) / TIME_CYCLE_DURATION_SEC;
     const phaseScaled = cycleRatio * TIME_OF_DAY_PHASES.length;
     const phaseIdxA = Math.floor(phaseScaled) % TIME_OF_DAY_PHASES.length;
@@ -237,7 +327,6 @@ export class AtmosphereOverlay {
     let horizonColor = lerpHexColor(phaseA.horizonColor, phaseB.horizonColor, phaseT);
     let horizonAlpha = Phaser.Math.Linear(phaseA.horizonAlpha, phaseB.horizonAlpha, phaseT);
 
-    // Smoothly shift toward Blood Moon mood when Boss or Darkness Falls event is active
     const targetBloodMoon = isBossActive || isDarknessFalls ? 1 : 0;
     this.bossBloodMoonBlend = Phaser.Math.Linear(
       this.bossBloodMoonBlend,
@@ -260,22 +349,21 @@ export class AtmosphereOverlay {
       );
     }
 
-    if (
-      tintColor !== this.lastFloorTintColor ||
-      Math.abs(tintAlpha - this.lastFloorTintAlpha) > 0.004 ||
-      w !== this.lastFloorW ||
-      h !== this.lastFloorH
-    ) {
-      this.lastFloorTintColor = tintColor;
-      this.lastFloorTintAlpha = tintAlpha;
-      this.lastFloorW = w;
-      this.lastFloorH = h;
-      this.floorTintGraphics.clear();
-      this.floorTintGraphics.fillStyle(tintColor, tintAlpha);
-      this.floorTintGraphics.fillRect(0, 0, w, h);
-    }
+    this.floorTintImage.setPosition(offset.x, offset.y).setTint(tintColor).setAlpha(tintAlpha);
+    this.horizonTopUpper
+      .setPosition(offset.x, offset.y)
+      .setTint(horizonColor)
+      .setAlpha(horizonAlpha * 0.55);
+    this.horizonTopLower
+      .setPosition(offset.x, offset.y + bandH * 0.55)
+      .setTint(horizonColor)
+      .setAlpha(horizonAlpha * 0.25);
+    this.horizonBottom
+      .setPosition(offset.x, offset.y + h - bandH * 0.5)
+      .setTint(horizonColor)
+      .setAlpha(horizonAlpha * 0.45);
 
-    // 2. Dynamic Weather Cycle (fade out -> switch -> fade in)
+    // 2. Dynamic Weather Cycle
     this.weatherElapsedMs += deltaMs;
     if (!this.isCrossfading && this.weatherElapsedMs >= WEATHER_DURATION_MS) {
       this.isCrossfading = true;
@@ -290,14 +378,13 @@ export class AtmosphereOverlay {
         this.isCrossfading = false;
         const nextKind = this.getActiveWeather();
         for (let i = 0; i < this.particles.length; i++) {
-          this.configureParticleForWeather(this.particles[i], nextKind, w, h, true);
+          this.configureParticleForWeather(this.particles[i], nextKind, true);
         }
       }
     } else if (this.weatherAlpha < 1) {
       this.weatherAlpha = Math.min(1, this.weatherAlpha + deltaMs / WEATHER_FADE_MS);
     }
 
-    // Occasional distant lightning flash during storm weather
     const activeWeather = this.getActiveWeather();
     if (activeWeather === 'storm' && !this.isCrossfading) {
       this.nextLightningMs -= deltaMs;
@@ -310,22 +397,13 @@ export class AtmosphereOverlay {
       this.lightningAlpha = Math.max(0, this.lightningAlpha - dtSec * 0.65);
     }
 
-    // 3. Draw Weather & Horizon Vignette Wash in a single batched Graphics pass
-    this.weatherGraphics.clear();
-
-    // Subtle top/bottom atmospheric gradient bands to set time-of-day mood
-    const bandH = Math.round(h * 0.18);
-    this.weatherGraphics.fillStyle(horizonColor, horizonAlpha * 0.55);
-    this.weatherGraphics.fillRect(0, 0, w, bandH * 0.55);
-    this.weatherGraphics.fillStyle(horizonColor, horizonAlpha * 0.25);
-    this.weatherGraphics.fillRect(0, bandH * 0.55, w, bandH * 0.45);
-
-    this.weatherGraphics.fillStyle(horizonColor, horizonAlpha * 0.45);
-    this.weatherGraphics.fillRect(0, h - bandH * 0.5, w, bandH * 0.5);
-
     if (this.lightningAlpha > 0.005) {
-      this.weatherGraphics.fillStyle(0xb9e3ff, this.lightningAlpha);
-      this.weatherGraphics.fillRect(0, 0, w, h);
+      this.lightningOverlay
+        .setPosition(offset.x, offset.y)
+        .setAlpha(this.lightningAlpha)
+        .setVisible(true);
+    } else if (this.lightningOverlay.visible) {
+      this.lightningOverlay.setVisible(false);
     }
 
     const activeCount =
@@ -334,54 +412,51 @@ export class AtmosphereOverlay {
         : this.particles.length;
 
     const timeSec = this.elapsedMs * 0.001;
+    const isEmberOrAsh = activeWeather === 'embers' || activeWeather === 'ash';
+    const isEmber = activeWeather === 'embers';
 
-    for (let i = 0; i < activeCount; i++) {
+    for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      const sway =
-        activeWeather === 'embers' || activeWeather === 'ash'
-          ? Math.sin(timeSec * 1.9 + p.phase) * 18
-          : 0;
+      if (i >= activeCount) {
+        if (p.sprite.visible) p.sprite.setVisible(false);
+        continue;
+      }
 
+      const sway = isEmberOrAsh ? Math.sin(timeSec * 1.9 + p.phase) * 18 : 0;
       p.x += (p.vx + sway) * dtSec;
       p.y += p.vy * dtSec;
 
-      const outOfBounds =
-        activeWeather === 'embers'
-          ? p.y < -16 || p.x < -30 || p.x > w + 30
-          : p.y > h + 30 || p.x < -60 || p.x > w + 120;
+      const outOfBounds = isEmber
+        ? p.y < -16 || p.x < -30 || p.x > w + 30
+        : p.y > h + 30 || p.x < -60 || p.x > w + 120;
 
       if (outOfBounds) {
-        this.configureParticleForWeather(p, activeWeather, w, h, false);
+        this.configureParticleForWeather(p, activeWeather, false);
       }
 
-      const drawAlpha = p.alpha * this.weatherAlpha;
-      if (drawAlpha <= 0.01) continue;
-
-      if (activeWeather === 'rain' || activeWeather === 'storm') {
-        const color = activeWeather === 'storm' ? 0xb8dcf8 : 0x8db8dc;
-        this.weatherGraphics.lineStyle(p.size, color, drawAlpha);
-        this.weatherGraphics.beginPath();
-        this.weatherGraphics.moveTo(p.x, p.y);
-        this.weatherGraphics.lineTo(p.x - p.dx, p.y - p.dy);
-        this.weatherGraphics.strokePath();
-      } else if (activeWeather === 'embers') {
-        const emberColor =
-          p.tintVariant < 0.55 ? 0xf2a93b : p.tintVariant < 0.88 ? 0xe5303a : 0xffd28a;
-        const flicker = 0.7 + 0.3 * Math.sin(timeSec * 6.5 + p.phase);
-        this.weatherGraphics.fillStyle(emberColor, drawAlpha * flicker);
-        this.weatherGraphics.fillCircle(p.x, p.y, p.size);
-      } else {
-        // Frost Ash / Snowfall
-        const ashColor = p.tintVariant < 0.65 ? 0xcad6e6 : 0x9aa8bf;
-        this.weatherGraphics.fillStyle(ashColor, drawAlpha);
-        this.weatherGraphics.fillCircle(p.x, p.y, p.size);
+      let drawAlpha = p.alpha * this.weatherAlpha;
+      if (drawAlpha <= 0.01) {
+        if (p.sprite.visible) p.sprite.setVisible(false);
+        continue;
       }
+
+      if (isEmber) {
+        drawAlpha *= 0.7 + 0.3 * Math.sin(timeSec * 6.5 + p.phase);
+      }
+
+      p.sprite.setPosition(offset.x + p.x, offset.y + p.y).setAlpha(drawAlpha).setVisible(true);
     }
   }
 
   public destroy(): void {
-    this.floorTintGraphics.destroy();
-    this.weatherGraphics.destroy();
+    this.floorTintImage.destroy();
+    this.horizonTopUpper.destroy();
+    this.horizonTopLower.destroy();
+    this.horizonBottom.destroy();
+    this.lightningOverlay.destroy();
+    for (let i = 0; i < this.particles.length; i++) {
+      this.particles[i].sprite.destroy();
+    }
     this.particles = [];
   }
 }

@@ -119,6 +119,7 @@ class AudioManager {
   private readonly MAX_SIMULTANEOUS_SFX = 16;
   private lastSfxTimes: Partial<Record<SfxKey, number>> = {};
   private readonly THROTTLE_MS = 60;
+  private lastDeathKnellMs: number = 0;
 
   // Music Track State (1s crossfade between tracks, loop-ready .ogg)
   private currentTrackKey: MusicTrackKey | null = null;
@@ -603,7 +604,211 @@ class AudioManager {
     this.playSfx('level_up', 1.0);
   }
   public playUiClick() {}
-  public playGameOver() {}
+
+  /**
+   * Plays a unique, haunting synthesized 'Death Knell' funeral bell + dark void tail
+   * through the Web Audio SFX bus when the player's HP reaches zero and Game Over transitions in.
+   */
+  public playDeathKnell() {
+    if (this.isMuted || this.isPaused) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastDeathKnellMs < 1500) return;
+
+    this.initCtx(false);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx && this.ctx.state === 'running' && !this.isMuted && !this.isPaused) {
+            this.lastDeathKnellMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            this.triggerDeathKnellNodes();
+          }
+        })
+        .catch(() => {
+          // ignore
+        });
+      return;
+    }
+
+    this.lastDeathKnellMs = nowMs;
+    this.triggerDeathKnellNodes();
+  }
+
+  private triggerDeathKnellNodes() {
+    if (!this.ctx || !this.sfxGain) return;
+
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const totalDuration = 3.6;
+
+    try {
+      const cleanupTargets: AudioNode[] = [];
+      const stoppables: Array<OscillatorNode | AudioBufferSourceNode> = [];
+
+      // Master bus for this knell with gentle headroom so layered partials never clip
+      const knellBus = ctx.createGain();
+      knellBus.gain.setValueAtTime(0.78, now);
+      knellBus.connect(this.sfxGain);
+      cleanupTargets.push(knellBus);
+
+      // Subtle cavernous echo return (low-passed slap & tail)
+      const echoDelay = ctx.createDelay(1.0);
+      echoDelay.delayTime.setValueAtTime(0.27, now);
+      const echoFilter = ctx.createBiquadFilter();
+      echoFilter.type = 'lowpass';
+      echoFilter.frequency.setValueAtTime(520, now);
+      const echoFeedback = ctx.createGain();
+      echoFeedback.gain.setValueAtTime(0.32, now);
+      const echoWet = ctx.createGain();
+      echoWet.gain.setValueAtTime(0.42, now);
+
+      knellBus.connect(echoDelay);
+      echoDelay.connect(echoFilter);
+      echoFilter.connect(echoWet);
+      echoWet.connect(this.sfxGain);
+      echoFilter.connect(echoFeedback);
+      echoFeedback.connect(echoDelay);
+      cleanupTargets.push(echoDelay, echoFilter, echoFeedback, echoWet);
+
+      // 1. Heavy Cast-Iron Bell Strike Transient (filtered noise clapper)
+      const noiseLength = Math.floor(ctx.sampleRate * 0.14);
+      const noiseBuffer = ctx.createBuffer(1, noiseLength, ctx.sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < noiseLength; i++) {
+        const env = Math.exp(-i / (ctx.sampleRate * 0.025));
+        data[i] = (Math.random() * 2 - 1) * env;
+      }
+      const strikeNoise = ctx.createBufferSource();
+      strikeNoise.buffer = noiseBuffer;
+
+      const strikeFilter = ctx.createBiquadFilter();
+      strikeFilter.type = 'bandpass';
+      strikeFilter.frequency.setValueAtTime(620, now);
+      strikeFilter.Q.setValueAtTime(2.2, now);
+
+      const strikeGain = ctx.createGain();
+      strikeGain.gain.setValueAtTime(0.55, now);
+      strikeGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+      strikeNoise.connect(strikeFilter);
+      strikeFilter.connect(strikeGain);
+      strikeGain.connect(knellBus);
+      strikeNoise.start(now);
+      strikeNoise.stop(now + 0.15);
+      cleanupTargets.push(strikeNoise, strikeFilter, strikeGain);
+
+      // 2. Sub-bass impact thud (96 Hz -> 34 Hz drop)
+      const subOsc = ctx.createOscillator();
+      subOsc.type = 'triangle';
+      subOsc.frequency.setValueAtTime(96, now);
+      subOsc.frequency.exponentialRampToValueAtTime(34, now + 0.28);
+      const subGain = ctx.createGain();
+      subGain.gain.setValueAtTime(0.001, now);
+      subGain.gain.linearRampToValueAtTime(0.5, now + 0.012);
+      subGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.95);
+
+      subOsc.connect(subGain);
+      subGain.connect(knellBus);
+      subOsc.start(now);
+      subOsc.stop(now + 1.0);
+      stoppables.push(subOsc);
+      cleanupTargets.push(subOsc, subGain);
+
+      // 3. Haunted Bronze Bell Inharmonic Partials (low D minor + eerie tritone Ab3)
+      const bellPartials: Array<{
+        freq: number;
+        type: OscillatorType;
+        peakGain: number;
+        decay: number;
+        delayOffset?: number;
+      }> = [
+        { freq: 73.42, type: 'sine', peakGain: 0.42, decay: 3.35 }, // D2 Hum fundamental
+        { freq: 146.83, type: 'sine', peakGain: 0.28, decay: 2.75 }, // D3 Prime
+        { freq: 147.95, type: 'sine', peakGain: 0.16, decay: 2.45 }, // Detuned beating pair
+        { freq: 174.61, type: 'sine', peakGain: 0.2, decay: 2.25 }, // F3 Minor third
+        { freq: 207.65, type: 'triangle', peakGain: 0.13, decay: 1.95 }, // Ab3 Haunted tritone
+        { freq: 293.66, type: 'sine', peakGain: 0.1, decay: 1.45 }, // D4 Octave shimmer
+        { freq: 415.3, type: 'sine', peakGain: 0.06, decay: 0.95 }, // Ab4 Metallic ring
+        { freq: 73.42, type: 'sine', peakGain: 0.14, decay: 2.5, delayOffset: 0.62 }, // Faint second phantom resonance
+      ];
+
+      for (const p of bellPartials) {
+        const startAt = now + (p.delayOffset ?? 0);
+        const osc = ctx.createOscillator();
+        osc.type = p.type;
+        osc.frequency.setValueAtTime(p.freq, startAt);
+        // Subtle cold pitch sag as the bell rings into the dark
+        osc.frequency.exponentialRampToValueAtTime(p.freq * 0.988, startAt + p.decay);
+
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.0001, startAt);
+        g.gain.linearRampToValueAtTime(p.peakGain, startAt + 0.015);
+        g.gain.exponentialRampToValueAtTime(0.0005, startAt + p.decay);
+
+        osc.connect(g);
+        g.connect(knellBus);
+        osc.start(startAt);
+        osc.stop(startAt + p.decay + 0.05);
+        stoppables.push(osc);
+        cleanupTargets.push(osc, g);
+      }
+
+      // 4. Descending Cold Void Choir / Drone Tail
+      const droneFilter = ctx.createBiquadFilter();
+      droneFilter.type = 'lowpass';
+      droneFilter.Q.setValueAtTime(3.2, now);
+      droneFilter.frequency.setValueAtTime(540, now + 0.08);
+      droneFilter.frequency.exponentialRampToValueAtTime(115, now + 3.15);
+
+      const droneGain = ctx.createGain();
+      droneGain.gain.setValueAtTime(0.0001, now);
+      droneGain.gain.linearRampToValueAtTime(0.14, now + 0.28);
+      droneGain.gain.exponentialRampToValueAtTime(0.0005, now + 3.25);
+
+      droneFilter.connect(droneGain);
+      droneGain.connect(knellBus);
+      cleanupTargets.push(droneFilter, droneGain);
+
+      for (const baseFreq of [110.0, 103.83]) {
+        const droneOsc = ctx.createOscillator();
+        droneOsc.type = 'sawtooth';
+        droneOsc.frequency.setValueAtTime(baseFreq, now + 0.05);
+        droneOsc.frequency.exponentialRampToValueAtTime(baseFreq * 0.92, now + 3.2);
+        droneOsc.connect(droneFilter);
+        droneOsc.start(now + 0.05);
+        droneOsc.stop(now + 3.3);
+        stoppables.push(droneOsc);
+        cleanupTargets.push(droneOsc);
+      }
+
+      // Schedule node cleanup once the decay and echo tail conclude
+      window.setTimeout(() => {
+        for (const s of stoppables) {
+          try {
+            s.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+        for (const node of cleanupTargets) {
+          try {
+            node.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+      }, Math.ceil((totalDuration + 0.6) * 1000));
+    } catch {
+      // fail silently
+    }
+  }
+
+  public playGameOver() {
+    this.playDeathKnell();
+  }
 
   // -------------------------------------------------------------
   // Music Playback (1s crossfade between tracks, native loop)

@@ -18,6 +18,9 @@ const VALID_RELIC_IDS: RelicId[] = [
 export const SAVE_STORAGE_KEY = 'last_light_save_v1';
 export const CURRENT_SAVE_VERSION = 1;
 
+export type TargetFpsOption = 60 | 90 | 120;
+export type ResolutionQualityMode = 'auto' | 'performance' | 'fhd' | 'ultra_4k';
+
 export interface SaveSettingsData {
   muted: boolean;
   masterVolume: number;
@@ -25,6 +28,10 @@ export interface SaveSettingsData {
   sfxVolume: number;
   brightness: number;
   hapticsEnabled: boolean;
+  targetFps: TargetFpsOption;
+  resolutionMode: ResolutionQualityMode;
+  upscalerEnabled: boolean;
+  frameGenEnabled: boolean;
 }
 
 export interface SaveDataV1 {
@@ -50,6 +57,10 @@ const DEFAULT_SETTINGS: SaveSettingsData = {
   sfxVolume: 0.8,
   brightness: 1.0,
   hapticsEnabled: true,
+  targetFps: 90,
+  resolutionMode: 'auto',
+  upscalerEnabled: true,
+  frameGenEnabled: true,
 };
 
 function createDefaultSaveData(): SaveDataV1 {
@@ -105,6 +116,19 @@ function safeBoolean(value: unknown, fallback: boolean): boolean {
   if (value === 'true') return true;
   if (value === 'false') return false;
   return fallback;
+}
+
+function sanitizeTargetFps(value: unknown): TargetFpsOption {
+  const num = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
+  if (num === 60 || num === 90 || num === 120) return num;
+  return 90;
+}
+
+function sanitizeResolutionMode(value: unknown): ResolutionQualityMode {
+  if (value === 'auto' || value === 'performance' || value === 'fhd' || value === 'ultra_4k') {
+    return value;
+  }
+  return 'auto';
 }
 
 function sanitizeUpgrades(raw: unknown): Record<string, number> {
@@ -335,6 +359,10 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
       sfxVolume: clampFinite(rawSettings.sfxVolume, 0, 1, defaults.settings.sfxVolume),
       brightness: clampFinite(rawSettings.brightness, 0.5, 1.5, defaults.settings.brightness),
       hapticsEnabled: safeBoolean(rawSettings.hapticsEnabled, defaults.settings.hapticsEnabled),
+      targetFps: sanitizeTargetFps(rawSettings.targetFps),
+      resolutionMode: sanitizeResolutionMode(rawSettings.resolutionMode),
+      upscalerEnabled: safeBoolean(rawSettings.upscalerEnabled, defaults.settings.upscalerEnabled),
+      frameGenEnabled: safeBoolean(rawSettings.frameGenEnabled, defaults.settings.frameGenEnabled),
     },
     dailyMissions: sanitizeDailyMissions(obj.dailyMissions),
     dailyStreak: sanitizeDailyStreak(obj.dailyStreak),

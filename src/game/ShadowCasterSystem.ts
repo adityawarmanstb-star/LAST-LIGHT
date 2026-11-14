@@ -82,6 +82,24 @@ export function computePointShadowOcclusion(
   const distSq = vx * vx + vy * vy;
   if (distSq < 16) return 0;
 
+  // Fast AABB filter before expensive sqrt & projection across all pillars
+  const minX = (lightX < targetX ? lightX : targetX) - 46;
+  const maxX = (lightX > targetX ? lightX : targetX) + 46;
+  const minY = (lightY < targetY ? lightY : targetY) - 46;
+  const maxY = (lightY > targetY ? lightY : targetY) + 46;
+
+  let anyCandidate = bossRadius > 0 && bossX !== undefined && bossY !== undefined;
+  if (!anyCandidate) {
+    for (let i = 0; i < pillarCount; i++) {
+      const p = pillars[i];
+      if (p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY) {
+        anyCandidate = true;
+        break;
+      }
+    }
+    if (!anyCandidate) return 0;
+  }
+
   const dist = Math.sqrt(distSq);
   const invDist = 1 / dist;
   const dirX = vx * invDist;
@@ -91,6 +109,7 @@ export function computePointShadowOcclusion(
 
   for (let i = 0; i < pillarCount; i++) {
     const p = pillars[i];
+    if (p.x < minX || p.x > maxX || p.y < minY || p.y > maxY) continue;
     const ox = p.x - lightX;
     const oy = p.y - lightY;
     const proj = ox * dirX + oy * dirY;
@@ -140,13 +159,18 @@ export function computePointShadowOcclusion(
   return maxOcclusion;
 }
 
+const MAX_GROUND_SHADOW_SPRITES = 280;
+const MAX_OVERLAY_SHADOW_SPRITES = 72;
+
 export class ShadowCasterSystem {
   private scene: Phaser.Scene;
   private spawnX: number;
   private spawnY: number;
 
-  private groundShadowGraphics: Phaser.GameObjects.Graphics;
-  private entityShadowOverlayGraphics: Phaser.GameObjects.Graphics;
+  private groundShadowPool: Phaser.GameObjects.Image[] = [];
+  private activeGroundShadows: number = 0;
+  private overlayShadowPool: Phaser.GameObjects.Image[] = [];
+  private activeOverlayShadows: number = 0;
 
   private torchPool: TorchPoolSlot[] = [];
   private pillarPool: PillarPoolSlot[] = [];
@@ -168,13 +192,24 @@ export class ShadowCasterSystem {
 
     this.ensureTextures();
 
-    // Ground cast shadows strictly above floor (depth 0) and below world props/entities
-    this.groundShadowGraphics = scene.add.graphics().setDepth(6);
-    this.groundShadowGraphics.disableInteractive();
+    // Pre-allocated WebGL-batched shadow sprite pools (zero per-frame Graphics triangulation)
+    for (let i = 0; i < MAX_GROUND_SHADOW_SPRITES; i++) {
+      const img = scene.add
+        .image(0, 0, 'world_shadow_oval')
+        .setDepth(6)
+        .setVisible(false);
+      img.disableInteractive();
+      this.groundShadowPool.push(img);
+    }
 
-    // Subtle shadow bands cast onto enemy bodies inside pillar/boss shadow cones
-    this.entityShadowOverlayGraphics = scene.add.graphics().setDepth(21);
-    this.entityShadowOverlayGraphics.disableInteractive();
+    for (let i = 0; i < MAX_OVERLAY_SHADOW_SPRITES; i++) {
+      const img = scene.add
+        .image(0, 0, 'world_shadow_oval')
+        .setDepth(21)
+        .setVisible(false);
+      img.disableInteractive();
+      this.overlayShadowPool.push(img);
+    }
 
     for (let i = 0; i < MAX_TORCH_SLOTS; i++) {
       const groundGlow = scene.add
@@ -409,6 +444,66 @@ export class ShadowCasterSystem {
         tex.refresh();
       }
     }
+
+    if (!texMgr.exists('world_shadow_oval')) {
+      const tex = texMgr.createCanvas('world_shadow_oval', 64, 32);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.save();
+        ctx.translate(32, 16);
+        ctx.scale(1, 0.5);
+        const grad = ctx.createRadialGradient(0, 0, 2, 0, 0, 30);
+        grad.addColorStop(0, 'rgba(3, 5, 11, 0.92)');
+        grad.addColorStop(0.62, 'rgba(3, 5, 11, 0.56)');
+        grad.addColorStop(1, 'rgba(3, 5, 11, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(0, 0, 30, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        tex.refresh();
+      }
+    }
+
+    if (!texMgr.exists('world_shadow_wedge')) {
+      const tex = texMgr.createCanvas('world_shadow_wedge', 96, 128);
+      if (tex) {
+        const ctx = tex.getContext();
+        const grad = ctx.createLinearGradient(48, 0, 48, 128);
+        grad.addColorStop(0, 'rgba(3, 5, 11, 0.94)');
+        grad.addColorStop(0.55, 'rgba(3, 5, 11, 0.58)');
+        grad.addColorStop(1, 'rgba(3, 5, 11, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(30, 0);
+        ctx.lineTo(66, 0);
+        ctx.lineTo(94, 126);
+        ctx.lineTo(2, 126);
+        ctx.closePath();
+        ctx.fill();
+        tex.refresh();
+      }
+    }
+
+    if (!texMgr.exists('world_shadow_cast')) {
+      const tex = texMgr.createCanvas('world_shadow_cast', 48, 96);
+      if (tex) {
+        const ctx = tex.getContext();
+        const grad = ctx.createLinearGradient(24, 0, 24, 96);
+        grad.addColorStop(0, 'rgba(3, 5, 11, 0.94)');
+        grad.addColorStop(0.7, 'rgba(3, 5, 11, 0.62)');
+        grad.addColorStop(1, 'rgba(3, 5, 11, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(10, 0);
+        ctx.lineTo(38, 0);
+        ctx.lineTo(32, 82);
+        ctx.arc(24, 82, 8, 0, Math.PI, false);
+        ctx.closePath();
+        ctx.fill();
+        tex.refresh();
+      }
+    }
   }
 
   public getTorchesSnapshot(): { items: readonly WorldTorchData[]; count: number } {
@@ -636,9 +731,44 @@ export class ShadowCasterSystem {
     }
   }
 
+  private pushGroundShadow(
+    texKey: 'world_shadow_oval' | 'world_shadow_wedge' | 'world_shadow_cast',
+    x: number,
+    y: number,
+    displayW: number,
+    displayH: number,
+    rotation: number,
+    alpha: number,
+    originX: number,
+    originY: number
+  ) {
+    if (this.activeGroundShadows >= this.groundShadowPool.length || alpha <= 0.02) return;
+    const spr = this.groundShadowPool[this.activeGroundShadows++];
+    if (spr.texture.key !== texKey) {
+      spr.setTexture(texKey);
+    }
+    spr
+      .setOrigin(originX, originY)
+      .setPosition(x, y)
+      .setDisplaySize(displayW, displayH)
+      .setRotation(rotation)
+      .setAlpha(alpha)
+      .setVisible(true);
+  }
+
+  private pushOverlayShadow(x: number, y: number, displayW: number, displayH: number, alpha: number) {
+    if (this.activeOverlayShadows >= this.overlayShadowPool.length || alpha <= 0.02) return;
+    const spr = this.overlayShadowPool[this.activeOverlayShadows++];
+    spr
+      .setPosition(x, y)
+      .setDisplaySize(displayW, displayH)
+      .setAlpha(alpha)
+      .setVisible(true);
+  }
+
   /**
    * Renders real-time dynamic shadows cast by light sources (player lantern, world torches, boss)
-   * across terrain pillars, enemies, and the player character.
+   * across terrain pillars, enemies, and the player character using batched sprite quads.
    */
   public renderDynamicShadows(params: {
     player: Phaser.Physics.Arcade.Sprite;
@@ -663,8 +793,10 @@ export class ShadowCasterSystem {
       isLowQuality,
     } = params;
 
-    this.groundShadowGraphics.clear();
-    this.entityShadowOverlayGraphics.clear();
+    const prevGroundCount = this.activeGroundShadows;
+    const prevOverlayCount = this.activeOverlayShadows;
+    this.activeGroundShadows = 0;
+    this.activeOverlayShadows = 0;
 
     // 1. Collect prioritized shadow-casting light sources near viewport
     let lCount = 0;
@@ -677,7 +809,11 @@ export class ShadowCasterSystem {
 
     const maxTorchCasters = isLowQuality ? 2 : 4;
     let addedTorches = 0;
-    for (let i = 0; i < this.activeTorchCount && addedTorches < maxTorchCasters && lCount < MAX_SHADOW_LIGHTS; i++) {
+    for (
+      let i = 0;
+      i < this.activeTorchCount && addedTorches < maxTorchCasters && lCount < MAX_SHADOW_LIGHTS;
+      i++
+    ) {
       const t = this.activeTorchData[i];
       if (
         t.x + t.radius < camX - 60 ||
@@ -722,7 +858,6 @@ export class ShadowCasterSystem {
         );
       }
 
-      // Torch braziers also cast crisp short shadows when lit by Player Lantern or another Torch
       if (light.isPlayer) {
         for (let ti = 0; ti < this.activeTorchCount; ti++) {
           const torch = this.activeTorchData[ti];
@@ -731,34 +866,32 @@ export class ShadowCasterSystem {
       }
     }
 
-    // 3. Player character casts dynamic shadow away from nearby Torches (and subtle lantern base pool)
-    this.groundShadowGraphics.fillStyle(0x04060c, 0.34);
-    this.groundShadowGraphics.fillEllipse(player.x, player.y + 34, 42, 16);
+    // 3. Player character contact shadow + cast shadow away from nearby Torches
+    this.pushGroundShadow('world_shadow_oval', player.x, player.y + 34, 44, 18, 0, 0.36, 0.5, 0.5);
 
     for (let li = 1; li < lCount; li++) {
       const light = this.shadowLights[li];
       this.drawEntityCastShadow(light, player.x, player.y + 32, 22, 62, 0.44);
     }
 
-    // 4. Cast directional shadows for every active visible Enemy & Boss,
-    //    AND project real-time shadow shading onto enemies inside pillar shadow cones
+    // 4. Cast directional shadows for visible active enemies & Boss
     const bossActive = Boolean(boss && boss.active);
     const bossX = bossActive ? boss!.x : 0;
     const bossY = bossActive ? boss!.y : 0;
     const bossShadowR = bossActive ? 52 : 0;
 
     const maxShadowsPerEnemy = isLowQuality ? 1 : 2;
-    const margin = 90;
+    const margin = 80;
+    const minX = camX - margin;
+    const maxX = camX + viewW + margin;
+    const minY = camY - margin;
+    const maxY = camY + viewH + margin;
 
     for (let ei = 0; ei < enemies.length; ei++) {
+      if (this.activeGroundShadows >= this.groundShadowPool.length - 4) break;
       const enemy = enemies[ei];
       if (!enemy.active) continue;
-      if (
-        enemy.x < camX - margin ||
-        enemy.x > camX + viewW + margin ||
-        enemy.y < camY - margin ||
-        enemy.y > camY + viewH + margin
-      ) {
+      if (enemy.x < minX || enemy.x > maxX || enemy.y < minY || enemy.y > maxY) {
         continue;
       }
 
@@ -794,25 +927,27 @@ export class ShadowCasterSystem {
                 : 16;
       const baseShadowLen = isBoss ? 145 : edata.type === 'brute' ? 84 : 56;
       const scaleFactor = enemy.scaleX / (isBoss ? 0.95 : edata.type === 'brute' ? 0.52 : 0.4);
+      const clampedScale = Math.min(1.4, scaleFactor);
       const footX = enemy.x;
       const footY = enemy.y + footOffset;
 
       // Ground contact shadow beneath feet
-      this.groundShadowGraphics.fillStyle(0x04060c, isBoss ? 0.46 : 0.32);
-      this.groundShadowGraphics.fillEllipse(
+      this.pushGroundShadow(
+        'world_shadow_oval',
         footX,
         footY,
-        shadowWidth * 1.45 * Math.min(1.5, scaleFactor),
-        shadowWidth * 0.56
+        shadowWidth * 1.48 * Math.min(1.5, scaleFactor),
+        shadowWidth * 0.58,
+        0,
+        isBoss ? 0.48 : 0.34,
+        0.5,
+        0.5
       );
 
-      // Find up to 2 strongest lights illuminating this enemy & compute directional shadow + occlusion
       let bestIdx1 = -1;
       let bestScore1 = 0;
       let bestIdx2 = -1;
       let bestScore2 = 0;
-
-      // Track total direct illumination vs occluded illumination so pillars cast shadows onto enemies
       let bestUnoccludedLit = 0;
       let bestActualLit = 0;
 
@@ -860,40 +995,46 @@ export class ShadowCasterSystem {
           this.shadowLights[bestIdx1],
           footX,
           footY,
-          shadowWidth * Math.min(1.4, scaleFactor),
-          baseShadowLen * Math.min(1.4, scaleFactor),
+          shadowWidth * clampedScale,
+          baseShadowLen * clampedScale,
           0.46 * bestScore1 + 0.12
         );
       }
-      if (maxShadowsPerEnemy > 1 && bestIdx2 !== -1 && bestScore2 > 0.1) {
+      if (maxShadowsPerEnemy > 1 && bestIdx2 !== -1 && bestScore2 > 0.12) {
         this.drawEntityCastShadow(
           this.shadowLights[bestIdx2],
           footX,
           footY,
-          shadowWidth * Math.min(1.4, scaleFactor) * 0.9,
-          baseShadowLen * Math.min(1.4, scaleFactor) * 0.9,
+          shadowWidth * clampedScale * 0.9,
+          baseShadowLen * clampedScale * 0.9,
           0.34 * bestScore2 + 0.08
         );
       }
 
-      // Compute how deeply this enemy is cast inside an occluder shadow while within light range
       let shadeFactor = 0;
       if (bestUnoccludedLit > 0.08) {
         shadeFactor = Math.max(0, Math.min(1, 1 - bestActualLit / bestUnoccludedLit));
       }
       edata.shadowShade = shadeFactor;
 
-      // Render a crisp cast-shadow band over the enemy sprite when caught in a pillar/boss shadow
       if (!isLowQuality && shadeFactor > 0.25 && enemy.alpha > 0.22) {
         const bandAlpha = Math.min(0.45, shadeFactor * 0.52 * enemy.alpha);
-        this.entityShadowOverlayGraphics.fillStyle(0x05070e, bandAlpha);
-        this.entityShadowOverlayGraphics.fillEllipse(
+        this.pushOverlayShadow(
           enemy.x,
           enemy.y + footOffset * 0.2,
           shadowWidth * 1.45,
-          footOffset * 1.35
+          footOffset * 1.35,
+          bandAlpha
         );
       }
+    }
+
+    // Hide only leftover slots from previous frame
+    for (let i = this.activeGroundShadows; i < prevGroundCount; i++) {
+      this.groundShadowPool[i].setVisible(false);
+    }
+    for (let i = this.activeOverlayShadows; i < prevOverlayCount; i++) {
+      this.overlayShadowPool[i].setVisible(false);
     }
   }
 
@@ -915,55 +1056,23 @@ export class ShadowCasterSystem {
 
     const dist = Math.sqrt(distSq);
     const baseAngle = Math.atan2(dy, dx);
-    const sinTheta = Math.min(0.92, occluderRadius / dist);
-    const halfSpread = Math.asin(sinTheta);
-
     const falloff = Math.max(0.08, 1 - dist / reachLimit);
     const shadowLen = Math.min(maxShadowLength, Math.max(48, (light.radius - dist) * 0.92 + 44));
-    const umbraAlpha = Math.min(0.54, (0.24 + 0.3 * falloff) * light.strength);
+    const umbraAlpha = Math.min(0.56, (0.24 + 0.3 * falloff) * light.strength);
+    const rot = baseAngle - Math.PI * 0.5;
+    const baseWidth = occluderRadius * (singlePass ? 3.2 : 3.8);
 
-    const a1 = baseAngle - halfSpread;
-    const a2 = baseAngle + halfSpread;
-    const perp1 = baseAngle - Math.PI * 0.5;
-    const perp2 = baseAngle + Math.PI * 0.5;
-
-    const n1x = ox + Math.cos(perp1) * occluderRadius;
-    const n1y = oy + Math.sin(perp1) * occluderRadius;
-    const n2x = ox + Math.cos(perp2) * occluderRadius;
-    const n2y = oy + Math.sin(perp2) * occluderRadius;
-
-    const f1x = n1x + Math.cos(a1) * shadowLen;
-    const f1y = n1y + Math.sin(a1) * shadowLen;
-    const f2x = n2x + Math.cos(a2) * shadowLen;
-    const f2y = n2y + Math.sin(a2) * shadowLen;
-
-    if (!singlePass) {
-      // Soft outer penumbra
-      const penSpread = halfSpread + 0.14;
-      const p1x = n1x + Math.cos(baseAngle - penSpread) * (shadowLen * 1.08);
-      const p1y = n1y + Math.sin(baseAngle - penSpread) * (shadowLen * 1.08);
-      const p2x = n2x + Math.cos(baseAngle + penSpread) * (shadowLen * 1.08);
-      const p2y = n2y + Math.sin(baseAngle + penSpread) * (shadowLen * 1.08);
-
-      this.groundShadowGraphics.fillStyle(0x03050b, umbraAlpha * 0.44);
-      this.groundShadowGraphics.beginPath();
-      this.groundShadowGraphics.moveTo(n1x, n1y);
-      this.groundShadowGraphics.lineTo(p1x, p1y);
-      this.groundShadowGraphics.lineTo(p2x, p2y);
-      this.groundShadowGraphics.lineTo(n2x, n2y);
-      this.groundShadowGraphics.closePath();
-      this.groundShadowGraphics.fillPath();
-    }
-
-    // Crisp inner umbra wedge
-    this.groundShadowGraphics.fillStyle(0x03050b, umbraAlpha);
-    this.groundShadowGraphics.beginPath();
-    this.groundShadowGraphics.moveTo(n1x, n1y);
-    this.groundShadowGraphics.lineTo(f1x, f1y);
-    this.groundShadowGraphics.lineTo(f2x, f2y);
-    this.groundShadowGraphics.lineTo(n2x, n2y);
-    this.groundShadowGraphics.closePath();
-    this.groundShadowGraphics.fillPath();
+    this.pushGroundShadow(
+      'world_shadow_wedge',
+      ox,
+      oy,
+      baseWidth,
+      shadowLen,
+      rot,
+      umbraAlpha,
+      0.5,
+      0.04
+    );
   }
 
   private drawEntityCastShadow(
@@ -980,39 +1089,34 @@ export class ShadowCasterSystem {
     if (distSq < 9 || distSq >= light.radius * light.radius) return;
 
     const dist = Math.sqrt(distSq);
-    const dirX = dx / dist;
-    const dirY = dy / dist;
-
-    // Shadow stretches longer as entity moves outward from the light source
     const distRatio = Math.min(1, dist / light.radius);
     const length = maxLength * (0.42 + 0.78 * distRatio);
-    const clampedAlpha = Math.min(0.5, alpha * (1 - distRatio * 0.62));
+    const clampedAlpha = Math.min(0.52, alpha * (1 - distRatio * 0.62));
     if (clampedAlpha <= 0.03) return;
 
-    const perpX = -dirY;
-    const perpY = dirX;
-    const halfBase = baseWidth * 0.5;
-    const halfTip = baseWidth * 0.22;
-
-    const tipX = footX + dirX * length;
-    const tipY = footY + dirY * length;
-
-    this.groundShadowGraphics.fillStyle(0x03050b, clampedAlpha);
-    this.groundShadowGraphics.beginPath();
-    this.groundShadowGraphics.moveTo(footX + perpX * halfBase, footY + perpY * halfBase);
-    this.groundShadowGraphics.lineTo(tipX + perpX * halfTip, tipY + perpY * halfTip);
-    this.groundShadowGraphics.lineTo(tipX - perpX * halfTip, tipY - perpY * halfTip);
-    this.groundShadowGraphics.lineTo(footX - perpX * halfBase, footY - perpY * halfBase);
-    this.groundShadowGraphics.closePath();
-    this.groundShadowGraphics.fillPath();
-
-    // Rounded shadow cap at far end
-    this.groundShadowGraphics.fillCircle(tipX, tipY, halfTip);
+    const rot = Math.atan2(dy, dx) - Math.PI * 0.5;
+    this.pushGroundShadow(
+      'world_shadow_cast',
+      footX,
+      footY,
+      baseWidth * 1.45,
+      length,
+      rot,
+      clampedAlpha,
+      0.5,
+      0.03
+    );
   }
 
   public destroy() {
-    this.groundShadowGraphics?.destroy();
-    this.entityShadowOverlayGraphics?.destroy();
+    for (let i = 0; i < this.groundShadowPool.length; i++) {
+      this.groundShadowPool[i].destroy();
+    }
+    for (let i = 0; i < this.overlayShadowPool.length; i++) {
+      this.overlayShadowPool[i].destroy();
+    }
+    this.groundShadowPool = [];
+    this.overlayShadowPool = [];
     for (let i = 0; i < this.torchPool.length; i++) {
       this.torchPool[i].brazier.destroy();
       this.torchPool[i].flame.destroy();

@@ -45,44 +45,45 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
         dripCount={3}
         maxDripLength={20}
         className="w-full max-w-xl max-h-[90vh] flex flex-col"
-        contentClassName="relative p-5 sm:p-7 overflow-y-auto"
+        contentClassName="flex flex-col max-h-[90vh] overflow-hidden"
       >
-        {/* Close Button (56px touch target) */}
-        <IronButton
-          seed="how-to-play-close-btn"
-          dripCount={0}
-          onClick={() => {
-            soundManager.playUiClick();
-            onClose();
-          }}
-          className="absolute top-4 right-4 w-14 h-14 min-h-[56px] min-w-[56px] z-20"
-          aria-label="Close How to Play"
-        >
-          <X className="w-4 h-4 text-[#d8c9a8]" />
-        </IronButton>
+        {/* Fixed Header */}
+        <div className="flex items-center justify-between gap-3 p-5 sm:p-6 border-b border-[#3a3f47]/80 shrink-0">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#3a3f47] flex items-center justify-center text-[#5de4ff] shrink-0">
+              <BookOpen className="w-5 h-5" />
+            </div>
+            <div className="min-w-0">
+              <h2
+                id="how-to-play-title"
+                className="text-lg sm:text-xl font-display font-bold tracking-wider text-[#d8c9a8] truncate"
+              >
+                HOW TO PLAY
+              </h2>
+              <p className="text-xs text-[#9c8e72] truncate">
+                {isFirstLaunch
+                  ? 'Welcome, Warden · Master the lantern before entering the dark'
+                  : 'Movement controls, stance auto-fire & lantern survival'}
+              </p>
+            </div>
+          </div>
 
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-5 pr-16">
-          <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#3a3f47] flex items-center justify-center text-[#5de4ff] shrink-0">
-            <BookOpen className="w-5 h-5" />
-          </div>
-          <div>
-            <h2
-              id="how-to-play-title"
-              className="text-xl font-display font-bold tracking-wider text-[#d8c9a8]"
-            >
-              HOW TO PLAY
-            </h2>
-            <p className="text-xs text-[#9c8e72]">
-              {isFirstLaunch
-                ? 'Welcome, Warden · Master the lantern before entering the dark'
-                : 'Movement controls, stance auto-fire & lantern survival'}
-            </p>
-          </div>
+          <IronButton
+            seed="how-to-play-close-btn"
+            dripCount={0}
+            onClick={() => {
+              soundManager.playUiClick();
+              onClose();
+            }}
+            className="w-14 h-14 min-h-[56px] min-w-[56px] shrink-0"
+            aria-label="Close How to Play"
+          >
+            <X className="w-4 h-4 text-[#d8c9a8]" />
+          </IronButton>
         </div>
 
-        {/* Visual Diagrams Section */}
-        <div className="flex flex-col gap-5 mb-6">
+        {/* Scrollable Visual Diagrams Section */}
+        <div className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-5">
           {/* Diagram 1: Movement Controls */}
           <div className="flex flex-col gap-3 pb-5 border-b border-[#3a3f47]/65">
             <div className="flex items-center justify-between gap-2">
@@ -354,19 +355,21 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
           </div>
         </div>
 
-        {/* Primary Action Button */}
-        <IronButton
-          seed="how-to-play-got-it-btn"
-          variant="blood"
-          dripCount={2}
-          onClick={() => {
-            soundManager.playUiClick();
-            onClose();
-          }}
-          className="w-full min-h-[56px] font-display font-bold text-sm tracking-[0.12em]"
-        >
-          <span>Got It</span>
-        </IronButton>
+        {/* Fixed Footer */}
+        <div className="p-4 sm:px-6 border-t border-[#3a3f47]/80 bg-[#0d0e11]/70 shrink-0">
+          <IronButton
+            seed="how-to-play-got-it-btn"
+            variant="blood"
+            dripCount={2}
+            onClick={() => {
+              soundManager.playUiClick();
+              onClose();
+            }}
+            className="w-full min-h-[56px] font-display font-bold text-sm tracking-[0.12em]"
+          >
+            <span>Got It</span>
+          </IronButton>
+        </div>
       </ForgedIronFrame>
     </div>
   );

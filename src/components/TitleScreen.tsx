@@ -438,7 +438,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           </div>
         </div>
 
-        {/* Hero Preview (Dark Warden with idle breathing, lantern glow, shadow & Equipped Relic icons) */}
+        {/* Hero Preview (Dark Warden with idle breathing, lantern glow, shadow — zero overlapping badges) */}
         <div className="flex flex-col items-center mb-5">
           <div className="relative w-24 h-24 sm:w-28 sm:h-28 flex items-center justify-center mb-3">
             {/* Soft radial lantern aura pulsing gently behind the Dark Warden */}
@@ -487,60 +487,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 className="w-full h-full object-contain drop-shadow-[0_6px_18px_rgba(0,0,0,0.85)] hero-idle-float"
               />
             </div>
-
-            {equippedRelics.length > 0 && (
-              <div className="absolute -top-1 -right-3 z-20 flex items-center gap-1">
-                {equippedRelics.map((relic) => {
-                  const rarityMeta = RELIC_RARITY_META[relic.rarity];
-                  const badgeBorder = activeSynergy
-                    ? activeSynergy.accentColor
-                    : rarityMeta.borderColor;
-                  const badgeGlow = activeSynergy
-                    ? `${activeSynergy.accentColor}99`
-                    : rarityMeta.glowColor;
-                  return (
-                    <div key={relic.id} className="relative">
-                      <span
-                        aria-hidden="true"
-                        className="pointer-events-none absolute -inset-1 rounded-[11px] relic-equipped-halo"
-                        style={{
-                          boxShadow: `0 0 14px ${badgeGlow}`,
-                        }}
-                      />
-                      {equipPopSeq > 0 && (
-                        <span
-                          key={`title-badge-ring-${relic.id}-${equipPopSeq}`}
-                          aria-hidden="true"
-                          className="pointer-events-none absolute inset-0 rounded-[9px] border-2 relic-equip-ring"
-                          style={{ borderColor: badgeBorder }}
-                        />
-                      )}
-                      <button
-                        key={`title-badge-btn-${relic.id}-${equipPopSeq}`}
-                        type="button"
-                        onClick={() => {
-                          soundManager.playUiClick();
-                          haptics.tap('light');
-                          onOpenShop('relics');
-                        }}
-                        aria-label={`Equipped ${rarityMeta.label} Relic: ${relic.name} (${relic.effectSummary})`}
-                        title={`Equipped ${rarityMeta.label} · ${RELIC_SETS[relic.setId].setName} Set: ${relic.name} · ${relic.effectSummary}`}
-                        className={`relative w-8 h-8 rounded-[9px] border-2 flex items-center justify-center transition-transform duration-150 hover:scale-110 cursor-pointer ${
-                          equipPopSeq > 0 ? 'relic-equip-pop' : ''
-                        }`}
-                        style={{
-                          backgroundColor: rarityMeta.bgTint,
-                          borderColor: badgeBorder,
-                          boxShadow: `0 4px 12px rgba(0,0,0,0.8), 0 0 12px ${badgeGlow}`,
-                        }}
-                      >
-                        {renderRelicIcon(relic.icon, 'w-3.5 h-3.5', rarityMeta.textColor)}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
           </div>
 
           <ForgedIronFrame
@@ -555,7 +501,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
         {/* Primary Menu Iron Buttons: Relic Slot / Play / Missions / Shop / Bestiary / Settings */}
         <div className="flex flex-col gap-3 w-full max-w-sm">
-          {/* Prominent Pre-Run Relic & Synergy Selector */}
+          {/* Clean Pre-Run Relic Loadout & Synergy Selector */}
           {(() => {
             const minRelicCost = Math.min(...RELICS.map((r) => r.cost));
             const hasAvailableAction =
@@ -578,100 +524,86 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 dripCount={2}
                 borderColor={borderAccent}
                 glowColor={borderAccent}
-                glowStrength={canUnlockNewSlot || activeSynergy ? 12 : borderAccent ? 8 : 0}
+                glowStrength={canUnlockNewSlot || activeSynergy ? 10 : borderAccent ? 6 : 0}
                 onClick={() => {
                   soundManager.playUiClick();
                   haptics.tap('light');
                   onOpenShop('relics');
                 }}
-                className="w-full min-h-[58px] px-4 py-2 text-left"
+                className="w-full min-h-[68px] px-3.5 py-2.5 text-left"
               >
-                <div className="w-full flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div
-                      key={`title-slot-icon-${equipPopSeq}`}
-                      className={`relative w-9 h-9 rounded-[8px] bg-[#121417] border flex items-center justify-center shrink-0 ${
-                        primaryRelic && equipPopSeq > 0 ? 'relic-equip-pop' : ''
-                      }`}
-                      style={{
-                        backgroundColor: primaryRelic
-                          ? RELIC_RARITY_META[primaryRelic.rarity].bgTint
-                          : '#121417',
-                        borderColor: borderAccent ?? '#3a3f47',
-                        boxShadow: activeSynergy
-                          ? `0 0 12px ${activeSynergy.accentColor}88`
-                          : primaryRelic
-                            ? `0 0 10px ${RELIC_RARITY_META[primaryRelic.rarity].glowColor}`
-                            : undefined,
-                      }}
-                    >
-                      {renderRelicIcon(
-                        primaryRelic?.icon,
-                        'w-4 h-4',
-                        activeSynergy
-                          ? activeSynergy.accentColor
-                          : primaryRelic
-                            ? RELIC_RARITY_META[primaryRelic.rarity].textColor
-                            : '#5de4ff'
-                      )}
-                    </div>
-                    <div className="flex flex-col min-w-0 leading-tight">
-                      <span className="text-[10px] font-display font-bold tracking-[0.14em] uppercase text-[#9c8e72] font-mono-numbers">
-                        {equippedRelics.length > 0
-                          ? `Equipped Relics (${equippedRelics.length}/${maxRelicSlots})`
-                          : `Pre-Run Relics (0/${maxRelicSlots})`}
+                <div className="w-full flex items-center justify-between gap-2.5 min-w-0">
+                  <div className="flex flex-col min-w-0 flex-1 gap-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-[10px] font-display font-bold tracking-[0.14em] uppercase text-[#9c8e72] font-mono-numbers truncate">
+                        Relic Loadout ({equippedRelics.length}/{maxRelicSlots})
                       </span>
-                      {canUnlockNewSlot && nextSlotInfo ? (
-                        <span className="text-xs sm:text-sm font-semibold text-[#d8b4fe] truncate mt-0.5">
-                          Slot {nextSlotInfo.nextSlotNumber} Ready to Unlock ({relicSeals}/{nextSlotInfo.costSeals} Seals)
-                        </span>
-                      ) : equippedRelics.length > 0 ? (
-                        <>
-                          <span className="text-xs sm:text-sm font-semibold text-[#e8dcc2] truncate mt-0.5">
-                            {equippedRelics.map((r) => r.name).join(' + ')}
-                          </span>
-                          {activeSynergies.length > 0 ? (
-                            <span
-                              className="text-[11px] font-semibold truncate"
-                              style={{ color: activeSynergy?.accentColor ?? '#5de4ff' }}
-                            >
-                              {activeSynergies.length === 1
-                                ? `Synergy: ${activeSynergies[0].synergyTitle} · ${activeSynergies[0].bonusSummary}`
-                                : `Synergies: ${activeSynergies.map((s) => s.synergyTitle).join(' · ')}`}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-[#9c8e72] truncate">
-                              {equippedRelics.length === 1
-                                ? `Equip another ${RELIC_SETS[equippedRelics[0].setId].setName} relic for Synergy`
-                                : equippedRelics[0].effectSummary}
-                            </span>
-                          )}
-                        </>
-                      ) : (
-                        <span className="text-xs sm:text-sm font-semibold text-[#5de4ff] truncate mt-0.5">
-                          {unlockedRelicIds.length > 0
-                            ? 'Tap to Equip Unlocked Relics'
-                            : bankCoins >= minRelicCost
-                              ? 'Unlock & Pair Relics for Synergy'
-                              : 'Choose Passive Relics'}
-                        </span>
-                      )}
+                      <span className="flex items-center gap-0.5 text-[11px] font-semibold text-[#d8c9a8] shrink-0">
+                        <span>{canUnlockNewSlot ? 'Unlock' : equippedRelics.length > 0 ? 'Manage' : 'Equip'}</span>
+                        <ChevronRight className="w-3.5 h-3.5 text-[#9c8e72]" />
+                      </span>
                     </div>
-                  </div>
 
-                  <div className="flex items-center gap-1 text-[11px] font-semibold text-[#d8c9a8] shrink-0">
-                    {hasAvailableAction && (
-                      <span
-                        className={`w-2 h-2 rounded-full mr-1 ${
-                          canUnlockNewSlot
-                            ? 'bg-[#c084fc] shadow-[0_0_8px_rgba(192,132,252,0.95)]'
-                            : 'bg-[#5de4ff] shadow-[0_0_8px_rgba(93,228,255,0.9)]'
-                        }`}
-                        aria-hidden="true"
-                      />
-                    )}
-                    <span>{canUnlockNewSlot ? 'Unlock' : equippedRelics.length > 0 ? 'Change' : 'Select'}</span>
-                    <ChevronRight className="w-4 h-4 text-[#9c8e72]" />
+                    {/* Dedicated Slot Squares (zero overlapping logos) */}
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      {Array.from({ length: maxRelicSlots }).map((_, slotIdx) => {
+                        const slotRelic = equippedRelics[slotIdx] ?? null;
+                        if (slotRelic) {
+                          const rMeta = RELIC_RARITY_META[slotRelic.rarity];
+                          return (
+                            <div
+                              key={slotRelic.id}
+                              className={`w-8 h-8 rounded-[7px] border flex items-center justify-center shrink-0 ${
+                                equipPopSeq > 0 ? 'relic-equip-pop' : ''
+                              }`}
+                              style={{
+                                backgroundColor: rMeta.bgTint,
+                                borderColor: rMeta.borderColor,
+                              }}
+                              title={`${slotRelic.name} · ${slotRelic.effectSummary}`}
+                            >
+                              {renderRelicIcon(slotRelic.icon, 'w-3.5 h-3.5', rMeta.textColor)}
+                            </div>
+                          );
+                        }
+                        return (
+                          <div
+                            key={`empty-slot-${slotIdx}`}
+                            className="w-8 h-8 rounded-[7px] border border-dashed border-[#3a3f47] bg-[#121417]/80 flex items-center justify-center text-[10px] font-mono-numbers text-[#6d6556] shrink-0"
+                            title={`Empty Relic Slot ${slotIdx + 1}`}
+                          >
+                            {slotIdx + 1}
+                          </div>
+                        );
+                      })}
+
+                      <div className="min-w-0 flex-1 pl-1">
+                        {canUnlockNewSlot && nextSlotInfo ? (
+                          <span className="block text-xs font-semibold text-[#d8b4fe] truncate">
+                            Slot {nextSlotInfo.nextSlotNumber} ready ({relicSeals}/{nextSlotInfo.costSeals} Seals)
+                          </span>
+                        ) : activeSynergies.length > 0 ? (
+                          <span
+                            className="block text-xs font-semibold truncate"
+                            style={{ color: activeSynergy?.accentColor ?? '#5de4ff' }}
+                          >
+                            {activeSynergies.map((s) => s.synergyTitle).join(' · ')}
+                          </span>
+                        ) : equippedRelics.length > 0 ? (
+                          <span className="block text-xs font-medium text-[#e8dcc2] truncate">
+                            {equippedRelics.map((r) => r.name).join(' · ')}
+                          </span>
+                        ) : (
+                          <span className="block text-xs font-medium text-[#5de4ff] truncate">
+                            {unlockedRelicIds.length > 0
+                              ? 'Select passive Relics'
+                              : bankCoins >= minRelicCost
+                                ? 'Unlock your first Relic'
+                                : 'Equip passive Relics'}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
               </IronButton>
@@ -725,11 +657,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 haptics.tap('light');
                 onOpenBestiary();
               }}
-              className="w-full min-h-[56px] px-4 text-sm font-semibold"
+              className="w-full min-h-[56px] px-2.5 sm:px-4 text-xs sm:text-sm font-semibold"
             >
-              <BookMarked className="w-4 h-4 text-[#e5303a]" />
+              <BookMarked className="w-4 h-4 text-[#e5303a] shrink-0" />
               <span>Bestiary</span>
-              <span className="font-mono-numbers text-[11px] text-[#9c8e72]">
+              <span className="font-mono-numbers text-[10px] sm:text-[11px] text-[#9c8e72] shrink-0">
                 {discoveredCount}/{BESTIARY_ENTRIES.length}
               </span>
             </IronButton>
@@ -743,16 +675,16 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 haptics.tap('light');
                 onOpenAchievements();
               }}
-              className="w-full min-h-[56px] px-3 text-sm font-semibold"
+              className="w-full min-h-[56px] px-2.5 sm:px-3 text-xs sm:text-sm font-semibold"
             >
               <Trophy className="w-4 h-4 text-[#f2a93b] shrink-0" />
               <span className="truncate">Achievements</span>
               {unclaimedAchievements > 0 ? (
-                <span className="ml-0.5 min-w-[20px] h-5 px-1.5 rounded-full bg-[#b3121a] border border-[#f2a93b] text-[11px] font-mono-numbers font-bold text-[#f2a93b] inline-flex items-center justify-center shadow-[0_0_8px_rgba(242,169,59,0.55)] shrink-0">
+                <span className="ml-0.5 min-w-[18px] h-5 px-1.5 rounded-full bg-[#b3121a] border border-[#f2a93b] text-[10px] font-mono-numbers font-bold text-[#f2a93b] inline-flex items-center justify-center shadow-[0_0_8px_rgba(242,169,59,0.55)] shrink-0">
                   {unclaimedAchievements}
                 </span>
               ) : (
-                <span className="font-mono-numbers text-[11px] text-[#9c8e72] shrink-0">
+                <span className="font-mono-numbers text-[10px] sm:text-[11px] text-[#9c8e72] shrink-0">
                   {unlockedAchievements}/{ACHIEVEMENTS.length}
                 </span>
               )}

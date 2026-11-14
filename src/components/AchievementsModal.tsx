@@ -173,8 +173,8 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({ onClose })
         className="max-w-3xl w-full flex flex-col max-h-[90vh]"
         contentClassName="flex flex-col max-h-[90vh] overflow-hidden"
       >
-        {/* Header */}
-        <div className="flex items-center justify-between p-5 sm:p-6 border-b border-[#3a3f47]/80 gap-3 shrink-0">
+        {/* Clean Header */}
+        <div className="flex items-center justify-between px-4 py-4 sm:px-6 sm:py-5 border-b border-[#3a3f47]/80 gap-3 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
             <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#6b3a2a] flex items-center justify-center shrink-0">
               <Trophy className="w-5 h-5 text-[#f2a93b]" />
@@ -183,7 +183,7 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({ onClose })
               <h2 className="text-lg sm:text-xl font-display font-bold tracking-wider text-[#d8c9a8] truncate">
                 ACHIEVEMENTS
               </h2>
-              <p className="text-xs text-[#9c8e72] font-mono-numbers">
+              <p className="text-xs text-[#9c8e72] font-mono-numbers truncate">
                 Unlocked {unlockedCount} / {ACHIEVEMENTS.length}
                 <span className="mx-2 text-[#6b3a2a]" aria-hidden="true">
                   ·
@@ -193,29 +193,19 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({ onClose })
             </div>
           </div>
 
-          <div className="flex items-center gap-3 shrink-0">
-            <div
-              className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8c9a8] px-1.5"
-              title="Soul Coins"
-            >
-              <Coins className="w-4 h-4 text-[#f2a93b]" />
-              <span>{coins}</span>
-            </div>
-
-            <IronButton
-              seed="achievements-close-btn"
-              dripCount={0}
-              onClick={handleClose}
-              className="w-14 h-14 min-h-[56px] min-w-[56px] shrink-0"
-              aria-label="Close Achievements"
-            >
-              <X className="w-4 h-4 text-[#d8c9a8]" />
-            </IronButton>
-          </div>
+          <IronButton
+            seed="achievements-close-btn"
+            dripCount={0}
+            onClick={handleClose}
+            className="w-14 h-14 min-h-[56px] min-w-[56px] shrink-0"
+            aria-label="Close Achievements"
+          >
+            <X className="w-4 h-4 text-[#d8c9a8]" />
+          </IronButton>
         </div>
 
         {/* Lifetime Milestone Telemetry Strip */}
-        <div className="px-5 sm:px-6 py-3.5 border-b border-[#3a3f47]/65 bg-[#101318] grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
+        <div className="px-4 sm:px-6 py-3.5 border-b border-[#3a3f47]/65 bg-[#101318] grid grid-cols-2 sm:grid-cols-4 gap-3 shrink-0">
           <div className="flex flex-col">
             <span className="text-[11px] uppercase tracking-wider text-[#8e8168]">
               Total Kills
@@ -253,8 +243,8 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({ onClose })
           </div>
         </div>
 
-        {/* Filter Bar */}
-        <div className="px-5 sm:px-6 pt-3.5 pb-2.5 flex items-center justify-between gap-3 shrink-0 border-b border-[#3a3f47]/40">
+        {/* Filter Bar + Soul Coins */}
+        <div className="px-4 sm:px-6 pt-3 pb-2.5 flex items-center justify-between gap-3 flex-wrap shrink-0 border-b border-[#3a3f47]/40">
           <div className="flex items-center gap-2 flex-wrap">
             <button
               type="button"
@@ -289,6 +279,14 @@ export const AchievementsModal: React.FC<AchievementsModalProps> = ({ onClose })
             >
               In Progress ({lockedCount})
             </button>
+          </div>
+
+          <div
+            className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8c9a8]"
+            title="Soul Coins"
+          >
+            <Coins className="w-4 h-4 text-[#f2a93b]" />
+            <span>{coins}</span>
           </div>
         </div>
 

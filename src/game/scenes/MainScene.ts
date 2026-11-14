@@ -10,6 +10,20 @@ import { CameraController } from '../CameraController';
 import { AtmosphereOverlay } from '../AtmosphereOverlay';
 import { ShadowCasterSystem } from '../ShadowCasterSystem';
 import {
+  LOGICAL_HEIGHT,
+  LOGICAL_WIDTH,
+  UpscaleSharpFilterController,
+  attachUpscaleSharpFilter,
+  getLogicalScrollX,
+  getLogicalScrollY,
+  getScrollZeroOffset,
+  getWebGlMaxTextureSize,
+  performanceRuntime,
+  resolveRenderScale,
+  syncLogicalCamera,
+  upgradeTextureFiltering,
+} from '../PerformanceEngine';
+import {
   ActiveDynamicChallenge,
   BossInfo,
   DynamicChallengeOffer,
@@ -120,7 +134,7 @@ export const SPAWN_TIMELINE = {
 // STAND-STILL COMBAT CONSTANTS
 // =========================================================================
 export const STAND_STILL_DELAY_MS = 80;
-export const ORBIT_BLADES_NEED_STANDING = true;
+export const ORBIT_BLADES_NEED_STANDING = false;
 export const BOSS_RECOMMENDED_LEVEL = 60;
 
 // =========================================================================
@@ -640,16 +654,18 @@ export class MainScene extends Phaser.Scene {
   private completedChallengeIds: Set<string> = new Set();
   private challengesCompletedCount: number = 0;
 
-  // State flags
+  // State flags & 90Hz/4K Performance Engine hooks
   private isGamePaused: boolean = false;
   private hitstopTimer: number = 0;
   private isHitstopPausedPhysics: boolean = false;
   private unsubCritImpact: (() => void) | null = null;
+  private unsubGraphics: (() => void) | null = null;
+  private mainResizeHandler: ((gameSize: Phaser.Structs.Size) => void) | null = null;
+  private upscaleFilter: UpscaleSharpFilterController | null = null;
+  private maxWebGlTexSize: number = 4096;
   private levelUpPulseSeq: number = 0;
   private lastMissionSecondRecorded: number = 0;
-  private lowFpsDurationMs: number = 0;
-  private readonly LOW_FPS_THRESHOLD = 45;
-  private readonly LOW_FPS_TRIGGER_MS = 3000;
+  private simTimeMs: number = 0;
   private readonly LOW_QUALITY_MAX_PARTICLES = 90;
 
   constructor() {
@@ -659,6 +675,8 @@ export class MainScene extends Phaser.Scene {
   init() {
     this.isDead = false;
     this.isGamePaused = false;
+    this.simTimeMs = 0;
+    this.nextSpawnTime = 1000;
     this.hitstopTimer = 0;
     this.isHitstopPausedPhysics = false;
     this.unsubCritImpact?.();
@@ -732,12 +750,47 @@ export class MainScene extends Phaser.Scene {
     this.atmosphereOverlay = null;
     this.shadowSystem = null;
     this.lastMissionSecondRecorded = 0;
-    this.lowFpsDurationMs = 0;
     gameManager.setQualityTier('high');
     dailyMissions.ensureToday();
   }
 
   preload() {
+    gameManager.emitLoadProgress({
+      active: true,
+      progress: 0.04,
+      phase: 'Summoning the Dark Warden…',
+      ready: false,
+    });
+
+    const handleProgress = (value: number) => {
+      const normalized = Math.min(0.86, Math.max(0.05, value * 0.86));
+      let phase = 'Summoning the Dark Warden…';
+      if (value >= 0.72) {
+        phase = 'Forging Arcane Effects…';
+      } else if (value >= 0.42) {
+        phase = 'Awakening Ashfen Hordes…';
+      } else if (value >= 0.16) {
+        phase = 'Carving Stone & Torches…';
+      }
+      gameManager.emitLoadProgress({
+        active: true,
+        progress: normalized,
+        phase,
+        ready: false,
+      });
+    };
+
+    this.load.on(Phaser.Loader.Events.PROGRESS, handleProgress);
+    this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+      this.load.off(Phaser.Loader.Events.PROGRESS, handleProgress);
+      gameManager.emitLoadProgress({
+        active: true,
+        progress: 0.9,
+        phase: 'Igniting World Torches…',
+        ready: false,
+      });
+    });
+
     // Load player spritesheets (frame size 234x218)
     this.load.spritesheet('player_walk', './assets/aistudio/player_walk_sheet_bb06b026.webp', {
       frameWidth: 234,
@@ -822,12 +875,33 @@ export class MainScene extends Phaser.Scene {
   create() {
     gameManager.activeScene = this;
 
-    const width = this.scale.width;
-    const height = this.scale.height;
+    const width = LOGICAL_WIDTH;
+    const height = LOGICAL_HEIGHT;
+    const gfx = gameManager.getGraphicsConfig();
+    performanceRuntime.currentConfig = { ...gfx };
+    this.maxWebGlTexSize = getWebGlMaxTextureSize(this.game);
+    const activeScale = Math.max(1, this.scale.width / LOGICAL_WIDTH) || performanceRuntime.currentRenderScale;
+    performanceRuntime.currentRenderScale = activeScale;
+    performanceRuntime.setTargetFpsOnGame(this.game, gfx.targetFps);
 
-    // 1. Infinite scrolling ground TileSprite (non-interactive to never block inputs)
-    this.floor = this.add.tileSprite(0, 0, width, height, 'floor')
-      .setOrigin(0, 0)
+    syncLogicalCamera(this.cameras.main, activeScale, false);
+    upgradeTextureFiltering(this);
+    this.upscaleFilter = attachUpscaleSharpFilter(
+      this,
+      this.cameras.main,
+      activeScale,
+      gfx.upscalerEnabled
+    );
+
+    // 1. Infinite scrolling ground TileSprite aligned to zoomed camera center (non-interactive)
+    this.floor = this.add.tileSprite(
+      this.cameras.main.width * 0.5,
+      this.cameras.main.height * 0.5,
+      width,
+      height,
+      'floor'
+    )
+      .setOrigin(0.5, 0.5)
       .setScrollFactor(0)
       .setDepth(0);
     this.floor.disableInteractive();
@@ -1085,9 +1159,9 @@ export class MainScene extends Phaser.Scene {
     this.stanceRing.setPosition(this.player.x, this.player.y + 36);
     this.stanceRing.setAlpha(this.stanceRingAlpha);
 
-    // Camera controller with smooth player follow & damage/boss-proximity shake
+    // Camera controller with smooth sub-pixel player follow (delta-time 0.15 lerp, no snapping)
     this.cameraController = new CameraController(this.cameras.main);
-    this.cameraController.followTarget(this.player, true, 0.1, 0.1);
+    this.cameraController.followTarget(this.player, false, 0.15, 0.15);
 
     // Trigger muzzle effect and camera shake on attack frame 2
     this.player.on(
@@ -1140,14 +1214,18 @@ export class MainScene extends Phaser.Scene {
     }
 
     // 7. Light Vignette / Lantern Glow Layer & Dynamic Weather/Time-of-Day Atmosphere Overlay
+    const zeroOffset = getScrollZeroOffset(this.cameras.main);
     this.lanternGlowSprite = this.add
-      .image(width / 2, height / 2, 'light_cyan_glow')
+      .image(width / 2 + zeroOffset.x, height / 2 + zeroOffset.y, 'light_cyan_glow')
       .setDepth(15)
       .setScrollFactor(0)
       .setBlendMode(Phaser.BlendModes.ADD);
     this.lanternGlowSprite.disableInteractive();
 
-    this.lightVignette = this.add.graphics().setDepth(15).setScrollFactor(0);
+    this.lightVignette = this.add
+      .graphics({ x: zeroOffset.x, y: zeroOffset.y })
+      .setDepth(15)
+      .setScrollFactor(0);
     this.lightVignette.disableInteractive();
     this.atmosphereOverlay = new AtmosphereOverlay(this);
 
@@ -1222,6 +1300,14 @@ export class MainScene extends Phaser.Scene {
     this.scene.bringToTop('DarknessScene');
     this.scene.bringToTop('UIScene');
 
+    // Notify React loading screen that the arena, lighting, and shadow casters are ready
+    gameManager.emitLoadProgress({
+      active: true,
+      progress: 1,
+      phase: 'Entering the Ashfen…',
+      ready: true,
+    });
+
     // Subscribe to GameManager critical hit impact bus (screen-shake + hitstop + color shockwave)
     this.unsubCritImpact?.();
     this.unsubCritImpact = gameManager.onCritImpact((impact) => {
@@ -1252,10 +1338,59 @@ export class MainScene extends Phaser.Scene {
       );
     });
 
+    // Keep cameras, floor TileSprite, and GPU upscaler synced across Dynamic Resolution / 4K setting changes
+    this.mainResizeHandler = (gameSize: Phaser.Structs.Size) => {
+      const nextScale = Math.max(1, gameSize.width / LOGICAL_WIDTH);
+      performanceRuntime.currentRenderScale = nextScale;
+      syncLogicalCamera(this.cameras.main, nextScale, false);
+      if (this.floor) {
+        this.floor.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5);
+      }
+      if (this.lightVignette) {
+        const z = getScrollZeroOffset(this.cameras.main);
+        this.lightVignette.setPosition(z.x, z.y);
+      }
+      this.upscaleFilter = attachUpscaleSharpFilter(
+        this,
+        this.cameras.main,
+        nextScale,
+        performanceRuntime.currentConfig.upscalerEnabled
+      );
+    };
+    this.scale.on('resize', this.mainResizeHandler);
+
+    // Live apply Settings -> Graphics & 90Hz/4K toggles immediately mid-run
+    this.unsubGraphics?.();
+    this.unsubGraphics = gameManager.onGraphicsChange((nextGfx) => {
+      performanceRuntime.currentConfig = { ...nextGfx };
+      performanceRuntime.setTargetFpsOnGame(this.game, nextGfx.targetFps);
+      const nextScale = resolveRenderScale(nextGfx.resolutionMode, this.maxWebGlTexSize);
+      if (Math.abs(nextScale - performanceRuntime.currentRenderScale) > 0.01 && this.game?.scale) {
+        performanceRuntime.currentRenderScale = nextScale;
+        this.game.scale.setGameSize(
+          Math.round(LOGICAL_WIDTH * nextScale),
+          Math.round(LOGICAL_HEIGHT * nextScale)
+        );
+      }
+      this.upscaleFilter = attachUpscaleSharpFilter(
+        this,
+        this.cameras.main,
+        nextScale,
+        nextGfx.upscalerEnabled
+      );
+    });
+
     // Clean up activeScene reference and atmosphere graphics on shutdown/restart
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.unsubCritImpact?.();
       this.unsubCritImpact = null;
+      this.unsubGraphics?.();
+      this.unsubGraphics = null;
+      if (this.mainResizeHandler) {
+        this.scale.off('resize', this.mainResizeHandler);
+        this.mainResizeHandler = null;
+      }
+      this.upscaleFilter = null;
       this.isHitstopPausedPhysics = false;
       dailyMissions.flush();
       achievements.flush();
@@ -1295,7 +1430,7 @@ export class MainScene extends Phaser.Scene {
         cooldown: 300,
         lastFired: 0,
         unlocked: false,
-        description: 'Ethereal blades that orbit the lantern.',
+        description: 'Ethereal blades that orbit the lantern and slash enemies even while moving.',
         icon: 'blade',
       },
       ring: {
@@ -1422,8 +1557,9 @@ export class MainScene extends Phaser.Scene {
         } else {
           p.sprite.x += (p.vx * delta) / 1000;
           p.sprite.y += (p.vy * delta) / 1000;
-          p.vx *= 0.95;
-          p.vy *= 0.95;
+          const pDamp = Math.pow(0.95, delta / 16.6667);
+          p.vx *= pDamp;
+          p.vy *= pDamp;
           const progress = p.life / p.maxLife;
           p.sprite.setAlpha(1 - progress);
         }
@@ -1847,19 +1983,24 @@ export class MainScene extends Phaser.Scene {
   update(time: number, rawDelta: number) {
     if (this.isDead || this.isGamePaused) return;
 
-    // Auto-quality monitor: reduce particle density & darkness RT resolution if FPS < 45 for 3s
-    const currentFps = this.game?.loop?.actualFps || 0;
-    if (currentFps > 0 && currentFps < this.LOW_FPS_THRESHOLD) {
-      this.lowFpsDurationMs += rawDelta;
-      if (this.lowFpsDurationMs >= this.LOW_FPS_TRIGGER_MS && gameManager.getQualityTier() !== 'low') {
-        gameManager.setQualityTier('low');
-      }
-    } else {
-      this.lowFpsDurationMs = 0;
+    // 90Hz/120Hz Dynamic Resolution Scaling & Quality Tier adaptation
+    const perfAction = performanceRuntime.sampleFrame(time, rawDelta, this.maxWebGlTexSize);
+    if (perfAction.nextQualityTier && perfAction.nextQualityTier !== gameManager.getQualityTier()) {
+      gameManager.setQualityTier(perfAction.nextQualityTier);
+    }
+    if (perfAction.nextRenderScale && this.game?.scale) {
+      const nextScale = perfAction.nextRenderScale;
+      this.game.scale.setGameSize(
+        Math.round(LOGICAL_WIDTH * nextScale),
+        Math.round(LOGICAL_HEIGHT * nextScale)
+      );
     }
 
-    // Clamp delta time to avoid frame skips
-    const delta = Math.min(rawDelta, 50);
+    // Exact real-time delta in ms (clamped at 50ms) so 60/90/120 FPS run identically
+    const delta = performanceRuntime.smoothFrameDelta(rawDelta);
+
+    // Delta-time camera follow lerp (equivalent to 0.15 per 60Hz frame, sub-pixel)
+    this.cameraController.updateFollowLerp(delta, 0.15);
 
     // Hitstop handling (freezes physics & AI briefly while keeping camera shake active)
     if (this.hitstopTimer > 0) {
@@ -1875,6 +2016,7 @@ export class MainScene extends Phaser.Scene {
       this.physics.resume();
     }
 
+    this.simTimeMs += delta;
     this.runTime += delta / 1000;
     const wholeSec = Math.floor(this.runTime);
     if (wholeSec > this.lastMissionSecondRecorded) {
@@ -2036,18 +2178,21 @@ export class MainScene extends Phaser.Scene {
       soundManager.playIntense();
     }
 
-    // 1. Update Floor TileSprite to follow camera
-    this.floor.tilePositionX = this.cameras.main.scrollX;
-    this.floor.tilePositionY = this.cameras.main.scrollY;
+    // 1. Update Floor TileSprite to follow logical camera scroll
+    const cam = this.cameras.main;
+    const lScrollX = getLogicalScrollX(cam);
+    const lScrollY = getLogicalScrollY(cam);
+    this.floor.tilePositionX = lScrollX;
+    this.floor.tilePositionY = lScrollY;
 
     // 2. Handle Player Movement (WASD + Arrows + Virtual Joystick)
     this.updatePlayerMovement(delta);
 
     // 3. Update Lantern Light Overlay (includes pressure, low-HP heartbeat, and event edge flash)
-    this.updateLanternOverlay();
+    this.updateLanternOverlay(delta, lScrollX, lScrollY);
 
-    // 4. Weapons Update & Auto-Fire
-    this.updateWeapons(time);
+    // 4. Weapons Update & Auto-Fire (millisecond simulation clock)
+    this.updateWeapons(this.simTimeMs);
 
     // 5. Update Orbiting Blades
     this.updateOrbitingBlades(delta);
@@ -2063,13 +2208,12 @@ export class MainScene extends Phaser.Scene {
 
     // 8b. Update World Torches/Pillars & Cast Real-Time Dynamic Shadows on Terrain & Enemies
     if (this.shadowSystem) {
-      const cam = this.cameras.main;
       const isLowQuality = gameManager.getQualityTier() === 'low';
       this.shadowSystem.updateWorldProps(
-        cam.scrollX,
-        cam.scrollY,
-        this.scale.width,
-        this.scale.height,
+        lScrollX,
+        lScrollY,
+        LOGICAL_WIDTH,
+        LOGICAL_HEIGHT,
         time * 0.001,
         delta,
         isLowQuality,
@@ -2085,10 +2229,10 @@ export class MainScene extends Phaser.Scene {
         playerLightRadius,
         enemies: this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[],
         boss: this.activeBoss,
-        camX: cam.scrollX,
-        camY: cam.scrollY,
-        viewW: this.scale.width,
-        viewH: this.scale.height,
+        camX: lScrollX,
+        camY: lScrollY,
+        viewW: LOGICAL_WIDTH,
+        viewH: LOGICAL_HEIGHT,
         isLowQuality,
       });
     }
@@ -2113,8 +2257,8 @@ export class MainScene extends Phaser.Scene {
     // 13. Update Camera Controller (shake decay & boss proximity tremor)
     this.cameraController.update(delta, this.player.x, this.player.y, this.activeBoss);
 
-    // 13. Enemy Spawning & Timeline Events
-    this.handleEnemySpawning(time);
+    // 13. Enemy Spawning & Timeline Events (millisecond simulation clock)
+    this.handleEnemySpawning(this.simTimeMs);
 
     // 14. Periodic Stats Sync with UI (~115ms)
     if (time - this.lastStatsEmitMs >= 115) {
@@ -2281,7 +2425,8 @@ export class MainScene extends Phaser.Scene {
       this.stanceRing.setPosition(this.player.x, this.player.y + 36);
       const pulse = 0.9 + 0.1 * Math.sin(this.time.now * 0.006);
       const targetAlpha = this.isStandingReady ? 0.78 * pulse : 0.14;
-      this.stanceRingAlpha = Phaser.Math.Linear(this.stanceRingAlpha, targetAlpha, 0.25);
+      const ringStep = 1 - Math.pow(0.75, delta / 16.6667);
+      this.stanceRingAlpha = Phaser.Math.Linear(this.stanceRingAlpha, targetAlpha, ringStep);
       this.stanceRing.setAlpha(this.stanceRingAlpha);
       const targetScale = this.isStandingReady ? 1.0 : 0.92;
       this.stanceRing.setScale(targetScale);
@@ -2301,27 +2446,29 @@ export class MainScene extends Phaser.Scene {
   // -------------------------------------------------------------
   // Lantern Glow Overlay, Low-HP Heartbeat, Pressure Aura & Edge Flash
   // -------------------------------------------------------------
-  private updateLanternOverlay() {
-    const w = this.scale.width;
-    const h = this.scale.height;
+  private updateLanternOverlay(delta: number, lScrollX: number, lScrollY: number) {
+    const w = LOGICAL_WIDTH;
+    const h = LOGICAL_HEIGHT;
+    const zeroOffset = getScrollZeroOffset(this.cameras.main);
 
-    // Screen-space position of player
-    const px = this.player.x - this.cameras.main.scrollX;
-    const py = this.player.y - this.cameras.main.scrollY;
+    // Screen-space position of player adjusted for zoomed scrollFactor(0) projection
+    const px = this.player.x - lScrollX + zeroOffset.x;
+    const py = this.player.y - lScrollY + zeroOffset.y;
 
     const pulse = this.lanternPulse.alpha; // 0.6 <-> 1.0
     const lightMult = this.getLightRadiusMultiplier();
 
-    // Soft cyan lantern glow rendered via a single GPU quad (replaces 4 CPU-tessellated Graphics circles)
+    // Soft cyan lantern glow rendered via a single GPU quad
     if (this.lanternGlowSprite) {
       this.lanternGlowSprite.setPosition(px, py);
       this.lanternGlowSprite.setScale(2.1875 * lightMult);
       this.lanternGlowSprite.setAlpha(pulse);
     }
 
-    // "Pressure" aura when standing still >4s
+    // "Pressure" aura when standing still >4s (delta-normalized)
     const targetPressureAlpha = this.isUnderPressure ? 1 : 0;
-    this.pressureAuraAlpha = Phaser.Math.Linear(this.pressureAuraAlpha, targetPressureAlpha, 0.08);
+    const pressureStep = 1 - Math.pow(0.92, delta / 16.6667);
+    this.pressureAuraAlpha = Phaser.Math.Linear(this.pressureAuraAlpha, targetPressureAlpha, pressureStep);
 
     // Low-HP (<40%) slowly reddening vignette with heartbeat-like double pulse
     const hpRatio = this.playerStats.currentHp / Math.max(1, this.playerStats.maxHp);
@@ -2329,7 +2476,8 @@ export class MainScene extends Phaser.Scene {
       hpRatio < SPAWN_TIMELINE.feel.lowHpThreshold
         ? (SPAWN_TIMELINE.feel.lowHpThreshold - hpRatio) / SPAWN_TIMELINE.feel.lowHpThreshold
         : 0;
-    this.lowHpVignetteAlpha = Phaser.Math.Linear(this.lowHpVignetteAlpha, targetLowHp, 0.03);
+    const lowHpStep = 1 - Math.pow(0.97, delta / 16.6667);
+    this.lowHpVignetteAlpha = Phaser.Math.Linear(this.lowHpVignetteAlpha, targetLowHp, lowHpStep);
 
     const hasEdge =
       this.pressureAuraAlpha > 0.02 ||
@@ -2345,6 +2493,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.hadEdgeVignette = true;
+    this.lightVignette.setPosition(zeroOffset.x, zeroOffset.y);
     this.lightVignette.clear();
 
     if (this.pressureAuraAlpha > 0.02) {
@@ -2426,7 +2575,7 @@ export class MainScene extends Phaser.Scene {
 
   // Weapon: Light Bolt
   private fireLightBolt(): boolean {
-    const maxRange = this.scale.height * BALANCE.primaryWeapon.rangeScreenHeightRatio;
+    const maxRange = LOGICAL_HEIGHT * BALANCE.primaryWeapon.rangeScreenHeightRatio;
     const target = this.getNearestEnemy(maxRange);
     if (!target) return false;
 
@@ -2898,12 +3047,13 @@ export class MainScene extends Phaser.Scene {
         }
       }
 
-      // Handle knockback decay
+      // Handle knockback decay (frame-rate-independent across 60/90/120fps)
       if (Math.abs(edata.knockbackX) > 2 || Math.abs(edata.knockbackY) > 2) {
         enemy.x += (edata.knockbackX * delta) / 1000;
         enemy.y += (edata.knockbackY * delta) / 1000;
-        edata.knockbackX *= 0.88;
-        edata.knockbackY *= 0.88;
+        const kbDamp = Math.pow(0.88, delta / 16.6667);
+        edata.knockbackX *= kbDamp;
+        edata.knockbackY *= kbDamp;
       }
 
       const dxToPlayer = this.player.x - enemy.x;
@@ -4656,7 +4806,7 @@ export class MainScene extends Phaser.Scene {
         if (this.weapons['ring']) {
           this.weapons['ring'].unlocked = true;
           this.weapons['ring'].level = 1;
-          this.nextRingPulse = this.time.now + 1000;
+          this.nextRingPulse = this.simTimeMs + 1000;
         }
         break;
       case 'ring_area':
@@ -4672,7 +4822,7 @@ export class MainScene extends Phaser.Scene {
         if (this.weapons['spark']) {
           this.weapons['spark'].unlocked = true;
           this.weapons['spark'].level = 1;
-          this.nextSparkBurst = this.time.now + 1200;
+          this.nextSparkBurst = this.simTimeMs + 1200;
         }
         break;
       case 'spark_count':
@@ -4687,7 +4837,7 @@ export class MainScene extends Phaser.Scene {
         if (this.weapons['shotgun']) {
           this.weapons['shotgun'].unlocked = true;
           this.weapons['shotgun'].level = 1;
-          this.nextShotgunBlast = this.time.now + 800;
+          this.nextShotgunBlast = this.simTimeMs + 800;
         }
         break;
       case 'shotgun_damage':

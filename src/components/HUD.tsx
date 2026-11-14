@@ -288,369 +288,380 @@ const HUDComponent: React.FC<HUDProps> = ({
         />
       </div>
 
-      {/* Top HUD Row (Respects safe-area insets) */}
+      {/* Top HUD Row (Respects safe-area insets; 3-column grid prevents mobile collisions) */}
       <div
-        className="w-full flex items-start justify-between gap-3"
+        className="w-full flex flex-col gap-1.5"
         style={{
-          paddingTop: 'calc(max(16px, env(safe-area-inset-top)) + 8px)',
-          paddingLeft: 'max(16px, env(safe-area-inset-left))',
-          paddingRight: 'max(16px, env(safe-area-inset-right))',
+          paddingTop: 'calc(max(12px, env(safe-area-inset-top)) + 6px)',
+          paddingLeft: 'max(12px, env(safe-area-inset-left))',
+          paddingRight: 'max(12px, env(safe-area-inset-right))',
         }}
       >
-        {/* Top-Left: Forged-Iron HP Bar Panel (+ Status Badges & Hidden Debug Overlay) */}
-        <div className="flex flex-col gap-2">
-          <ForgedIronFrame
-            seed="hud-hp-panel"
-            dripCount={3}
-            maxDripLength={18}
-            className="min-w-[184px] sm:min-w-[222px]"
-            contentClassName="px-3.5 py-2.5 flex flex-col gap-2"
-          >
-            <div className="flex items-center justify-between gap-3 text-xs">
-              <div className="flex items-center gap-1.5">
-                <Heart className="w-3.5 h-3.5 text-[#e5303a] fill-[#b3121a]" />
-                <span className="font-mono-numbers font-semibold text-[#d8c9a8]">
-                  {Math.round(hp)}
-                  <span className="text-[#8e8168]"> / {maxHp}</span>
-                </span>
-              </div>
-              <span
-                key={`hud-lv-${levelPopSeq}`}
-                className={`inline-block font-mono-numbers font-semibold text-[#d8c9a8] ${
-                  levelPopSeq > 0 ? 'hud-level-pop' : ''
-                }`}
-              >
-                Lv. {level}
-              </span>
-            </div>
-
-            <BloodHpBar hp={hp} maxHp={maxHp} />
-          </ForgedIronFrame>
-
-          {/* Compact HUD Tab Switcher: Status / Performance */}
-          <div
-            role="tablist"
-            aria-label="HUD Panels"
-            className="pointer-events-auto inline-flex items-center self-start rounded-[8px] border border-[#3a3f47] bg-[#121418]/92 p-0.5 shadow-[0_6px_16px_rgba(0,0,0,0.65)]"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeHudTab === 'status'}
-              onPointerDown={() => haptics.tap('light')}
-              onClick={() => setActiveHudTab('status')}
-              className={`px-2.5 py-1 rounded-[6px] text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer ${
-                activeHudTab === 'status'
-                  ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
-                  : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
-              }`}
-            >
-              <Shield className="w-3 h-3 text-[#e5303a]" />
-              <span>Status</span>
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={activeHudTab === 'performance'}
-              onPointerDown={() => haptics.tap('light')}
-              onClick={() => setActiveHudTab('performance')}
-              className={`px-2.5 py-1 rounded-[6px] text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer ${
-                activeHudTab === 'performance'
-                  ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
-                  : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
-              }`}
-            >
-              <Activity className="w-3 h-3 text-[#5de4ff]" />
-              <span>Performance</span>
-            </button>
-          </div>
-
-          {activeHudTab === 'performance' && (
+        <div className="w-full grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-1.5 sm:gap-3">
+          {/* Top-Left: Forged-Iron HP Bar Panel + Status / Performance Tabs */}
+          <div className="justify-self-start flex flex-col gap-1.5 sm:gap-2 min-w-0 max-w-full">
             <ForgedIronFrame
-              seed="hud-performance-panel"
-              dripCount={2}
-              maxDripLength={12}
-              borderColor="#3a3f47"
-              className="pointer-events-auto w-[268px] sm:w-[292px]"
-              contentClassName="px-3 py-2.5 flex flex-col gap-1.5"
+              seed="hud-hp-panel"
+              dripCount={3}
+              maxDripLength={16}
+              className="w-[126px] sm:w-[216px] max-w-full"
+              contentClassName="px-2.5 py-2 sm:px-3.5 sm:py-2.5 flex flex-col gap-1.5 sm:gap-2"
             >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-display text-[11px] font-bold tracking-wider uppercase text-[#d8c9a8] flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-[#e5303a]" />
-                  Run DPS Curve
-                </span>
-                <span className="text-[10px] font-mono-numbers text-[#8e8168]">
-                  {debugStats.killsPerMin} kills/m
-                </span>
-              </div>
-              <PerformanceChart
-                samples={dpsHistory}
-                currentDps={debugStats.playerDps}
-                width={260}
-                height={128}
-              />
-            </ForgedIronFrame>
-          )}
-
-          {/* Kill Combo, Pressure & Light Status indicators */}
-          {activeHudTab === 'status' &&
-            (combo > 1 ||
-              isUnderPressure ||
-              lightShardRemainingSec > 0 ||
-              redShardRemainingSec > 0 ||
-              darknessFallsRemainingSec > 0 ||
-              bloodFogRemainingSec > 0) && (
-            <div className="flex flex-wrap items-center gap-2 text-[11px] max-w-[260px]">
-              {combo > 1 && (
-                <ForgedIronFrame
-                  seed="hud-combo-badge"
-                  dripCount={2}
-                  maxDripLength={8}
-                  borderColor="#5de4ff"
-                  contentClassName="px-2.5 py-1 flex items-center gap-1.5"
-                >
-                  <span className="text-[#9c8e72]">XP</span>
-                  <span className="font-mono-numbers font-bold text-[#5de4ff]">x{combo}</span>
-                </ForgedIronFrame>
-              )}
-              {isUnderPressure && (
-                <ForgedIronFrame
-                  seed="hud-pressure-badge"
-                  dripCount={2}
-                  maxDripLength={9}
-                  borderColor="#b3121a"
-                  glowColor="#e5303a"
-                  glowStrength={6}
-                  contentClassName="px-2.5 py-1 flex items-center gap-1 text-[#e5303a]"
-                >
-                  <span className="font-semibold tracking-wider uppercase text-[10px]">
-                    Pressure
+              <div className="flex items-center justify-between gap-1.5 text-[11px] sm:text-xs">
+                <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
+                  <Heart className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#e5303a] fill-[#b3121a] shrink-0" />
+                  <span className="font-mono-numbers font-semibold text-[#d8c9a8] truncate tabular-nums">
+                    {Math.round(hp)}
+                    <span className="text-[#8e8168]">/{maxHp}</span>
                   </span>
-                </ForgedIronFrame>
-              )}
-              {lightShardRemainingSec > 0 && (
-                <ForgedIronFrame
-                  seed="hud-shard-badge"
-                  dripCount={2}
-                  maxDripLength={8}
-                  borderColor="#5de4ff"
-                  contentClassName="px-2.5 py-1 flex items-center gap-1.5 text-[#5de4ff]"
-                >
-                  <span className="font-semibold tracking-wide text-[10px] uppercase">
-                    Shard +35%
-                  </span>
-                  <span className="font-mono-numbers font-bold">{lightShardRemainingSec}s</span>
-                </ForgedIronFrame>
-              )}
-              {redShardRemainingSec > 0 && (
-                <ForgedIronFrame
-                  seed="hud-red-shard-badge"
-                  dripCount={2}
-                  maxDripLength={8}
-                  borderColor="#e5303a"
-                  contentClassName="px-2.5 py-1 flex items-center gap-1.5 text-[#e5303a]"
-                >
-                  <span className="font-semibold tracking-wide text-[10px] uppercase">
-                    Blood +15% DMG
-                  </span>
-                  <span className="font-mono-numbers font-bold">{redShardRemainingSec}s</span>
-                </ForgedIronFrame>
-              )}
-              {darknessFallsRemainingSec > 0 && (
-                <ForgedIronFrame
-                  seed="hud-darkness-badge"
-                  dripCount={2}
-                  maxDripLength={9}
-                  borderColor="#b3121a"
-                  contentClassName="px-2.5 py-1 flex items-center gap-1.5 text-[#d8c9a8]"
-                >
-                  <span className="font-semibold tracking-wide text-[10px] uppercase">
-                    Darkness · <span className="text-[#5de4ff]">+50% XP</span>
-                  </span>
-                  <span className="font-mono-numbers font-bold text-[#e5303a]">
-                    {darknessFallsRemainingSec}s
-                  </span>
-                </ForgedIronFrame>
-              )}
-              {bloodFogRemainingSec > 0 && (
-                <ForgedIronFrame
-                  seed="hud-blood-fog-badge"
-                  dripCount={3}
-                  maxDripLength={12}
-                  borderColor="#e5303a"
-                  glowColor="#e5303a"
-                  glowStrength={10}
-                  contentClassName="px-2.5 py-1 flex items-center gap-1.5 text-[#f7e7e2]"
-                >
-                  <span className="font-semibold tracking-wide text-[10px] uppercase text-[#ff7077]">
-                    Blood Fog · <span className="text-[#f2a93b]">+35% SPD · +65% Horde</span>
-                  </span>
-                  <span className="font-mono-numbers font-bold text-[#e5303a]">
-                    {bloodFogRemainingSec}s
-                  </span>
-                </ForgedIronFrame>
-              )}
-            </div>
-          )}
-
-          {/* Active Dynamic Challenge Pact Tracker */}
-          {activeHudTab === 'status' && activeChallenge && (
-            <ForgedIronFrame
-              seed={`hud-challenge-${activeChallenge.id}`}
-              dripCount={2}
-              maxDripLength={10}
-              borderColor={
-                activeChallenge.status === 'completed'
-                  ? '#f2a93b'
-                  : activeChallenge.status === 'failed'
-                    ? '#b3121a'
-                    : '#f2a93b'
-              }
-              glowColor={
-                activeChallenge.status === 'failed' ? '#e5303a' : '#f2a93b'
-              }
-              glowStrength={activeChallenge.status === 'active' ? 5 : 10}
-              className="max-w-[232px]"
-              contentClassName="px-2.5 py-1.5 flex flex-col gap-0.5 text-[11px]"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-semibold text-[#d8c9a8] truncate">
-                  {activeChallenge.title}
-                </span>
+                </div>
                 <span
-                  className={`text-[10px] font-bold uppercase tracking-wider shrink-0 ${
-                    activeChallenge.status === 'completed'
-                      ? 'text-[#f2a93b]'
-                      : activeChallenge.status === 'failed'
-                        ? 'text-[#e5303a]'
-                        : 'text-[#5de4ff]'
+                  key={`hud-lv-${levelPopSeq}`}
+                  className={`inline-block font-mono-numbers font-semibold text-[#d8c9a8] whitespace-nowrap shrink-0 ${
+                    levelPopSeq > 0 ? 'hud-level-pop' : ''
                   }`}
                 >
-                  {activeChallenge.status === 'completed'
-                    ? 'Cleared'
-                    : activeChallenge.status === 'failed'
-                      ? 'Failed'
-                      : 'Pact'}
+                  Lv.{level}
                 </span>
               </div>
-              <div className="flex items-center justify-between gap-2 text-[10px] font-mono-numbers">
-                <span
-                  className={
-                    activeChallenge.status === 'failed'
-                      ? 'text-[#e5303a]'
-                      : activeChallenge.status === 'completed'
-                        ? 'text-[#f2a93b]'
-                        : 'text-[#9c8e72]'
-                  }
-                >
-                  {activeChallenge.statusNote}
-                </span>
-                {activeChallenge.status === 'active' && (
-                  <span className="text-[#f2a93b] font-semibold shrink-0">
-                    +{activeChallenge.rewardCoins}c
+
+              <BloodHpBar hp={hp} maxHp={maxHp} />
+            </ForgedIronFrame>
+
+            {/* Compact HUD Tab Switcher: Status / Performance */}
+            <div
+              role="tablist"
+              aria-label="HUD Panels"
+              className="pointer-events-auto inline-flex items-center self-start rounded-[8px] border border-[#3a3f47] bg-[#121418]/92 p-0.5 shadow-[0_6px_16px_rgba(0,0,0,0.65)]"
+            >
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeHudTab === 'status'}
+                onPointerDown={() => haptics.tap('light')}
+                onClick={() => setActiveHudTab('status')}
+                className={`px-2 sm:px-2.5 py-1 rounded-[6px] text-[9px] sm:text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
+                  activeHudTab === 'status'
+                    ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
+                    : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
+                }`}
+              >
+                <Shield className="w-3 h-3 text-[#e5303a] shrink-0" />
+                <span>Status</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={activeHudTab === 'performance'}
+                onPointerDown={() => haptics.tap('light')}
+                onClick={() => setActiveHudTab('performance')}
+                className={`px-2 sm:px-2.5 py-1 rounded-[6px] text-[9px] sm:text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
+                  activeHudTab === 'performance'
+                    ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
+                    : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
+                }`}
+              >
+                <Activity className="w-3 h-3 text-[#5de4ff] shrink-0" />
+                <span>DPS</span>
+              </button>
+            </div>
+
+            {activeHudTab === 'performance' && (
+              <ForgedIronFrame
+                seed="hud-performance-panel"
+                dripCount={2}
+                maxDripLength={12}
+                borderColor="#3a3f47"
+                className="pointer-events-auto w-[min(284px,calc(100vw-24px))]"
+                contentClassName="px-3 py-2.5 flex flex-col gap-1.5"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-display text-[11px] font-bold tracking-wider uppercase text-[#d8c9a8] flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-[#e5303a]" />
+                    Run DPS Curve
                   </span>
+                  <span className="text-[10px] font-mono-numbers text-[#8e8168]">
+                    {debugStats.killsPerMin} kills/m
+                  </span>
+                </div>
+                <PerformanceChart
+                  samples={dpsHistory}
+                  currentDps={debugStats.playerDps}
+                  width={256}
+                  height={124}
+                />
+              </ForgedIronFrame>
+            )}
+
+            {/* Kill Combo, Pressure & Light Status indicators */}
+            {activeHudTab === 'status' &&
+              (combo > 1 ||
+                isUnderPressure ||
+                lightShardRemainingSec > 0 ||
+                redShardRemainingSec > 0 ||
+                darknessFallsRemainingSec > 0 ||
+                bloodFogRemainingSec > 0) && (
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] max-w-[min(256px,calc(100vw-24px))]">
+                {combo > 1 && (
+                  <ForgedIronFrame
+                    seed="hud-combo-badge"
+                    dripCount={2}
+                    maxDripLength={8}
+                    borderColor="#5de4ff"
+                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5"
+                  >
+                    <span className="text-[#9c8e72]">XP</span>
+                    <span className="font-mono-numbers font-bold text-[#5de4ff]">x{combo}</span>
+                  </ForgedIronFrame>
+                )}
+                {isUnderPressure && (
+                  <ForgedIronFrame
+                    seed="hud-pressure-badge"
+                    dripCount={2}
+                    maxDripLength={9}
+                    borderColor="#b3121a"
+                    glowColor="#e5303a"
+                    glowStrength={6}
+                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1 text-[#e5303a]"
+                  >
+                    <span className="font-semibold tracking-wider uppercase text-[10px]">
+                      Pressure
+                    </span>
+                  </ForgedIronFrame>
+                )}
+                {lightShardRemainingSec > 0 && (
+                  <ForgedIronFrame
+                    seed="hud-shard-badge"
+                    dripCount={2}
+                    maxDripLength={8}
+                    borderColor="#5de4ff"
+                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#5de4ff]"
+                  >
+                    <span className="font-semibold tracking-wide text-[10px] uppercase">
+                      Shard +35%
+                    </span>
+                    <span className="font-mono-numbers font-bold">{lightShardRemainingSec}s</span>
+                  </ForgedIronFrame>
+                )}
+                {redShardRemainingSec > 0 && (
+                  <ForgedIronFrame
+                    seed="hud-red-shard-badge"
+                    dripCount={2}
+                    maxDripLength={8}
+                    borderColor="#e5303a"
+                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#e5303a]"
+                  >
+                    <span className="font-semibold tracking-wide text-[10px] uppercase">
+                      Blood +15% DMG
+                    </span>
+                    <span className="font-mono-numbers font-bold">{redShardRemainingSec}s</span>
+                  </ForgedIronFrame>
+                )}
+                {darknessFallsRemainingSec > 0 && (
+                  <ForgedIronFrame
+                    seed="hud-darkness-badge"
+                    dripCount={2}
+                    maxDripLength={9}
+                    borderColor="#b3121a"
+                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#d8c9a8]"
+                  >
+                    <span className="font-semibold tracking-wide text-[10px] uppercase">
+                      Darkness · <span className="text-[#5de4ff]">+50% XP</span>
+                    </span>
+                    <span className="font-mono-numbers font-bold text-[#e5303a]">
+                      {darknessFallsRemainingSec}s
+                    </span>
+                  </ForgedIronFrame>
+                )}
+                {bloodFogRemainingSec > 0 && (
+                  <ForgedIronFrame
+                    seed="hud-blood-fog-badge"
+                    dripCount={3}
+                    maxDripLength={12}
+                    borderColor="#e5303a"
+                    glowColor="#e5303a"
+                    glowStrength={10}
+                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#f7e7e2]"
+                  >
+                    <span className="font-semibold tracking-wide text-[10px] uppercase text-[#ff7077]">
+                      Blood Fog · <span className="text-[#f2a93b]">+35% SPD · +65% Horde</span>
+                    </span>
+                    <span className="font-mono-numbers font-bold text-[#e5303a]">
+                      {bloodFogRemainingSec}s
+                    </span>
+                  </ForgedIronFrame>
                 )}
               </div>
-            </ForgedIronFrame>
-          )}
+            )}
 
-          {/* Hidden Debug Overlay (toggled via 5 taps in top-left corner) */}
-          {showDebug && (
+            {/* Active Dynamic Challenge Pact Tracker */}
+            {activeHudTab === 'status' && activeChallenge && (
+              <ForgedIronFrame
+                seed={`hud-challenge-${activeChallenge.id}`}
+                dripCount={2}
+                maxDripLength={10}
+                borderColor={
+                  activeChallenge.status === 'completed'
+                    ? '#f2a93b'
+                    : activeChallenge.status === 'failed'
+                      ? '#b3121a'
+                      : '#f2a93b'
+                }
+                glowColor={
+                  activeChallenge.status === 'failed' ? '#e5303a' : '#f2a93b'
+                }
+                glowStrength={activeChallenge.status === 'active' ? 5 : 10}
+                className="max-w-[232px]"
+                contentClassName="px-2.5 py-1.5 flex flex-col gap-0.5 text-[11px]"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold text-[#d8c9a8] truncate">
+                    {activeChallenge.title}
+                  </span>
+                  <span
+                    className={`text-[10px] font-bold uppercase tracking-wider shrink-0 ${
+                      activeChallenge.status === 'completed'
+                        ? 'text-[#f2a93b]'
+                        : activeChallenge.status === 'failed'
+                          ? 'text-[#e5303a]'
+                          : 'text-[#5de4ff]'
+                    }`}
+                  >
+                    {activeChallenge.status === 'completed'
+                      ? 'Cleared'
+                      : activeChallenge.status === 'failed'
+                        ? 'Failed'
+                        : 'Pact'}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 text-[10px] font-mono-numbers">
+                  <span
+                    className={
+                      activeChallenge.status === 'failed'
+                        ? 'text-[#e5303a]'
+                        : activeChallenge.status === 'completed'
+                          ? 'text-[#f2a93b]'
+                          : 'text-[#9c8e72]'
+                    }
+                  >
+                    {activeChallenge.statusNote}
+                  </span>
+                  {activeChallenge.status === 'active' && (
+                    <span className="text-[#f2a93b] font-semibold shrink-0">
+                      +{activeChallenge.rewardCoins}c
+                    </span>
+                  )}
+                </div>
+              </ForgedIronFrame>
+            )}
+
+            {/* Hidden Debug Overlay (toggled via 5 taps in top-left corner) */}
+            {showDebug && (
+              <ForgedIronFrame
+                seed="hud-debug-panel"
+                dripCount={2}
+                maxDripLength={12}
+                className="max-w-[208px]"
+                contentClassName="px-3 py-2 text-[11px] font-mono-numbers text-[#d8c9a8] flex flex-col gap-0.5"
+              >
+                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#e5303a] mb-0.5">
+                  Debug Telemetry
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9c8e72]">FPS</span>
+                  <span>{debugStats.fps}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9c8e72]">Enemies</span>
+                  <span>{debugStats.enemyCount}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9c8e72]">Kills/min</span>
+                  <span>{debugStats.killsPerMin}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9c8e72]">Player DPS</span>
+                  <span>{debugStats.playerDps}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-[#9c8e72]">Minute</span>
+                  <span>{debugStats.currentMinute}</span>
+                </div>
+              </ForgedIronFrame>
+            )}
+          </div>
+
+          {/* Top-Center: Centered Forged-Iron Run Timer */}
+          <div className="justify-self-center flex flex-col items-center shrink-0">
             <ForgedIronFrame
-              seed="hud-debug-panel"
+              seed="hud-timer-panel"
               dripCount={2}
               maxDripLength={12}
-              className="max-w-[208px]"
-              contentClassName="px-3 py-2 text-[11px] font-mono-numbers text-[#d8c9a8] flex flex-col gap-0.5"
+              contentClassName="px-2.5 sm:px-4 py-1.5 flex items-center justify-center min-h-[40px] sm:min-h-[44px]"
             >
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[#e5303a] mb-0.5">
-                Debug Telemetry
+              <span className="font-mono-numbers text-base sm:text-2xl font-bold tracking-wider text-[#d8c9a8] tabular-nums whitespace-nowrap">
+                {timeFormatted}
+              </span>
+            </ForgedIronFrame>
+          </div>
+
+          {/* Top-Right: Kill & Coin Counter + 56px Spacer for UIScene Pause Button */}
+          <div className="justify-self-end flex items-start gap-1.5 sm:gap-2.5 min-w-0">
+            <ForgedIronFrame
+              seed="hud-kills-coins"
+              dripCount={2}
+              maxDripLength={12}
+              contentClassName="px-2 sm:px-3.5 py-1.5 sm:py-2 flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs h-[40px] sm:h-[44px]"
+            >
+              <div className="flex items-center gap-1 whitespace-nowrap" title="Kills">
+                <Skull className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#e5303a] shrink-0" />
+                <span className="font-mono-numbers font-semibold text-[#d8c9a8] tabular-nums">
+                  {kills}
+                </span>
               </div>
-              <div className="flex justify-between">
-                <span className="text-[#9c8e72]">FPS</span>
-                <span>{debugStats.fps}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9c8e72]">Enemies</span>
-                <span>{debugStats.enemyCount}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9c8e72]">Kills/min</span>
-                <span>{debugStats.killsPerMin}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9c8e72]">Player DPS</span>
-                <span>{debugStats.playerDps}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-[#9c8e72]">Minute</span>
-                <span>{debugStats.currentMinute}</span>
+              <span className="h-3.5 w-px bg-[#3a3f47] shrink-0" aria-hidden="true" />
+              <div
+                key={`hud-coin-${coinPopSeq}`}
+                className={`flex items-center gap-1 whitespace-nowrap ${coinPopSeq > 0 ? 'hud-coin-pop' : ''}`}
+                title="Coins"
+              >
+                <Coins className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#f2a93b] shrink-0" />
+                <span className="font-mono-numbers font-semibold text-[#d8c9a8] tabular-nums">
+                  {coins}
+                </span>
               </div>
             </ForgedIronFrame>
-          )}
+
+            {/* Dedicated 56x56 slot matching UIScene interactive pause button */}
+            <div className="w-14 h-14 shrink-0 pointer-events-none" aria-hidden="true" />
+          </div>
         </div>
 
-        {/* Top-Center: Centered Forged-Iron Run Timer */}
-        <div className="flex flex-col items-center">
-          <ForgedIronFrame
-            seed="hud-timer-panel"
-            dripCount={2}
-            maxDripLength={14}
-            contentClassName="px-4 py-1.5 flex items-center justify-center"
-          >
-            <span className="font-mono-numbers text-xl sm:text-2xl font-bold tracking-wider text-[#d8c9a8]">
-              {timeFormatted}
-            </span>
-          </ForgedIronFrame>
-
-          {!boss && (
-            <div className="mt-1 flex items-center gap-1 text-[11px] text-[#9c8e72] pointer-events-auto">
+        {/* Dedicated Centered Boss Countdown Strip (cleanly below top HUD row, zero horizontal overlap) */}
+        {!boss && (
+          <div className="w-full flex justify-center pointer-events-none">
+            <div className="pointer-events-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-[8px] bg-[#0e1014]/75 border border-[#3a3f47]/65 text-[10px] sm:text-[11px] text-[#9c8e72] whitespace-nowrap shadow-[0_4px_12px_rgba(0,0,0,0.45)]">
               <span>
                 Boss in{' '}
-                <span className="font-mono-numbers font-medium text-[#e5303a]">
+                <span className="font-mono-numbers font-semibold text-[#e5303a] tabular-nums">
                   {bossTimeStr}
                 </span>
-                <span className="text-[#6b3a2a] mx-1" aria-hidden="true">·</span>
-                <span className="font-mono-numbers text-[#f2a93b]">Rec. Lv. 60</span>
               </span>
+              <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
+              <span className="font-mono-numbers text-[#f2a93b]">Rec. Lv. 60</span>
+              <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
               <button
+                type="button"
                 onPointerDown={() => haptics.tap('light')}
                 onClick={onSpawnBossNow}
-                className="min-h-[56px] px-2.5 -my-4 inline-flex items-center text-[11px] text-[#d8c9a8] hover:text-[#e5303a] transition-colors cursor-pointer underline underline-offset-2"
+                className="px-1.5 py-0.5 text-[10px] sm:text-[11px] font-semibold text-[#d8c9a8] hover:text-[#e5303a] transition-colors cursor-pointer underline underline-offset-2"
                 title="Summon Boss now (Recommended Level 60)"
               >
                 Summon
               </button>
             </div>
-          )}
-        </div>
-
-        {/* Top-Right: Kill & Coin Counter + 56px Spacer for UIScene Pause Button */}
-        <div className="flex items-start gap-2.5">
-          <ForgedIronFrame
-            seed="hud-kills-coins"
-            dripCount={2}
-            maxDripLength={14}
-            contentClassName="px-3.5 py-2 flex items-center gap-3 text-xs h-[44px]"
-          >
-            <div className="flex items-center gap-1.5" title="Kills">
-              <Skull className="w-3.5 h-3.5 text-[#e5303a]" />
-              <span className="font-mono-numbers font-semibold text-[#d8c9a8]">{kills}</span>
-            </div>
-            <span className="h-3.5 w-px bg-[#3a3f47]" aria-hidden="true" />
-            <div
-              key={`hud-coin-${coinPopSeq}`}
-              className={`flex items-center gap-1.5 ${coinPopSeq > 0 ? 'hud-coin-pop' : ''}`}
-              title="Coins"
-            >
-              <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
-              <span className="font-mono-numbers font-semibold text-[#d8c9a8]">{coins}</span>
-            </div>
-          </ForgedIronFrame>
-
-          {/* Dedicated 56x56 slot matching UIScene interactive pause button */}
-          <div className="w-14 h-14 shrink-0 pointer-events-none" aria-hidden="true" />
-        </div>
+          </div>
+        )}
       </div>
 
       {/* 2s Event Warning Banner */}
@@ -743,7 +754,7 @@ const HUDComponent: React.FC<HUDProps> = ({
           </div>
         </button>
 
-        <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-[11px] text-[#9c8e72]">
+        <div className="max-w-[58vw] sm:max-w-[54vw] flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 text-[10px] sm:text-[11px] text-[#9c8e72] text-right">
           {activeSynergyMetas.map((synergyMeta, idx) => (
             <React.Fragment key={synergyMeta.id}>
               {idx > 0 && (
