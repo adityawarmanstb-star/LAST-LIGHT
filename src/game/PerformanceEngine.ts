@@ -121,8 +121,9 @@ export function resolveRenderScale(
       break;
     case 'auto':
     default: {
-      // Scale 540x960 base by devicePixelRatio (capped at 2) in Medium/High quality for crisp sub-pixel motion
-      desired = gameManager.getQualityTier() === 'low' ? 1.0 : Math.min(2, Math.max(1, dpr));
+      // On Android/mobile WebView, cap auto scale at 1.5 (810x1440) to protect WebGL GPU memory & frame pacing
+      const autoCap = isAndroidOrMobileDevice() ? 1.5 : 2.0;
+      desired = gameManager.getQualityTier() === 'low' ? 1.0 : Math.min(autoCap, Math.max(1, dpr));
       break;
     }
   }
@@ -155,8 +156,18 @@ export function attachUpscaleSharpFilter(
   enabled: boolean
 ): UpscaleSharpFilterController | null {
   try {
+    if (
+      !scene?.sys ||
+      scene.sys.settings?.status === Phaser.Scenes.DESTROYED ||
+      !camera?.filters?.external
+    ) {
+      return null;
+    }
     const renderer = scene.game?.renderer;
     if (!renderer || !(renderer instanceof Phaser.Renderer.WebGL.WebGLRenderer)) {
+      return null;
+    }
+    if (renderer.gl?.isContextLost?.()) {
       return null;
     }
 
@@ -293,30 +304,34 @@ export class PerformanceRuntime {
    * across 60, 90, and 120 FPS.
    */
   public smoothFrameDelta(rawDeltaMs: number): number {
+    if (!Number.isFinite(rawDeltaMs)) return 16.6667;
     return Math.max(0.5, Math.min(rawDeltaMs, 50));
   }
 
   /**
    * Monitors frame-time budget against target FPS (11.1ms for 90fps, 8.3ms for 120fps)
-   * and returns optional automatic quality/DRS actions without thrashing.
+   * and returns optional automatic quality tier actions without resizing the WebGL canvas mid-combat.
    */
   public sampleFrame(
     nowMs: number,
     rawDeltaMs: number,
-    maxTexSize: number
+    _maxTexSize: number
   ): {
     nextQualityTier?: 'high' | 'low';
     nextRenderScale?: number;
   } {
+    if (!Number.isFinite(rawDeltaMs) || !Number.isFinite(nowMs)) {
+      return {};
+    }
     const safeDelta = Math.max(1, Math.min(rawDeltaMs, 80));
     const emAlpha = 1 - Math.pow(0.9, safeDelta / 16.6667);
     this.avgFrameMs = this.avgFrameMs * (1 - emAlpha) + safeDelta * emAlpha;
 
     const targetFps = this.currentConfig.targetFps;
     const budgetMs = 1000 / targetFps;
-    // Allow brief spikes without downscaling; trigger DRS if sustained above 1.24x budget
-    const overloaded = this.avgFrameMs > budgetMs * 1.24;
-    const roomy = this.avgFrameMs < budgetMs * 0.92;
+    // Allow brief spikes without downscaling; adapt quality tier if sustained above 1.28x budget
+    const overloaded = this.avgFrameMs > budgetMs * 1.28;
+    const roomy = this.avgFrameMs < budgetMs * 0.9;
 
     const result: { nextQualityTier?: 'high' | 'low'; nextRenderScale?: number } = {};
 
@@ -330,36 +345,19 @@ export class PerformanceRuntime {
       this.lowPerfAccumMs = Math.max(0, this.lowPerfAccumMs - safeDelta * 0.25);
     }
 
-    // Dynamic Resolution Scaling in 'auto' mode (stepped smoothly with >= 3.5s cooldown)
-    const cooldownElapsed = nowMs - this.lastResAdjustAtMs >= 3500;
-    if (cooldownElapsed && this.lowPerfAccumMs >= 1800) {
+    // Adapt quality tier cleanly with >= 4s cooldown (never resize WebGL backing canvas mid-combat)
+    const cooldownElapsed = nowMs - this.lastResAdjustAtMs >= 4000;
+    if (cooldownElapsed && this.lowPerfAccumMs >= 2000) {
       this.lowPerfAccumMs = 0;
       this.lastResAdjustAtMs = nowMs;
-
-      if (this.currentConfig.resolutionMode === 'auto' && this.currentRenderScale > 1.125) {
-        const stepped = Math.max(1.0, Math.round((this.currentRenderScale - 0.25) * 8) / 8);
-        if (stepped !== this.currentRenderScale) {
-          this.currentRenderScale = stepped;
-          result.nextRenderScale = stepped;
-        }
-      } else if (gameManager.getQualityTier() !== 'low') {
+      if (gameManager.getQualityTier() !== 'low') {
         result.nextQualityTier = 'low';
       }
-    } else if (cooldownElapsed && this.highHeadroomAccumMs >= 6000) {
+    } else if (cooldownElapsed && this.highHeadroomAccumMs >= 7000) {
       this.highHeadroomAccumMs = 0;
       this.lastResAdjustAtMs = nowMs;
-
       if (gameManager.getQualityTier() === 'low') {
         result.nextQualityTier = 'high';
-      } else if (this.currentConfig.resolutionMode === 'auto') {
-        const capScale = resolveRenderScale('auto', maxTexSize);
-        if (this.currentRenderScale < capScale) {
-          const stepped = Math.min(capScale, Math.round((this.currentRenderScale + 0.25) * 8) / 8);
-          if (stepped !== this.currentRenderScale) {
-            this.currentRenderScale = stepped;
-            result.nextRenderScale = stepped;
-          }
-        }
       }
     }
 

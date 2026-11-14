@@ -50,6 +50,7 @@ export class DarknessScene extends Phaser.Scene {
   private unsubBrightness: (() => void) | null = null;
   private unsubQuality: (() => void) | null = null;
   private unsubGraphics: (() => void) | null = null;
+  private contextRestoredHandler: (() => void) | null = null;
 
   // Temporal RenderTexture scroll compensation for 90-120fps frame pacing
   private lastRtScrollX: number = 0;
@@ -187,17 +188,20 @@ export class DarknessScene extends Phaser.Scene {
     this.stripInteractivity(this.edgeArrowGraphics);
 
     this.unsubBrightness = gameManager.onBrightnessChange((val) => {
+      if (!this.sys?.isActive()) return;
       this.brightness = val;
       this.forceRtRedraw = true;
     });
 
     this.unsubQuality = gameManager.onQualityChange((tier) => {
+      if (!this.sys?.isActive() || !this.darkRT || !this.darkRT.scene) return;
       this.currentRtScale = this.computeDesiredRtScale(tier);
       this.resizeDarkRT();
       this.forceRtRedraw = true;
     });
 
     this.unsubGraphics = gameManager.onGraphicsChange(() => {
+      if (!this.sys?.isActive() || !this.darkRT || !this.darkRT.scene) return;
       const desired = this.computeDesiredRtScale(gameManager.getQualityTier());
       if (Math.abs(desired - this.currentRtScale) > 0.02) {
         this.currentRtScale = desired;
@@ -208,7 +212,20 @@ export class DarknessScene extends Phaser.Scene {
 
     this.scale.on('resize', this.handleResize, this);
 
+    if (this.game?.canvas) {
+      this.contextRestoredHandler = () => {
+        if (this.sys?.isActive()) {
+          this.forceRtRedraw = true;
+        }
+      };
+      this.game.canvas.addEventListener('webglcontextrestored', this.contextRestoredHandler, false);
+    }
+
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.contextRestoredHandler && this.game?.canvas) {
+        this.game.canvas.removeEventListener('webglcontextrestored', this.contextRestoredHandler, false);
+      }
+      this.contextRestoredHandler = null;
       if (this.unsubBrightness) {
         this.unsubBrightness();
         this.unsubBrightness = null;
@@ -236,7 +253,7 @@ export class DarknessScene extends Phaser.Scene {
   }
 
   private resizeDarkRT() {
-    if (!this.darkRT) return;
+    if (!this.sys?.isActive() || !this.darkRT || !this.darkRT.scene) return;
     const scaledW = Math.max(1, Math.ceil((LOGICAL_WIDTH + RT_OVERSCAN * 2) * this.currentRtScale));
     const scaledH = Math.max(1, Math.ceil((LOGICAL_HEIGHT + RT_OVERSCAN * 2) * this.currentRtScale));
     this.darkRT.resize(scaledW, scaledH);
@@ -246,6 +263,7 @@ export class DarknessScene extends Phaser.Scene {
   }
 
   private handleResize(gameSize: Phaser.Structs.Size) {
+    if (!this.sys?.isActive() || !this.cameras?.main) return;
     const nextScale = Math.max(1, gameSize.width / LOGICAL_WIDTH);
     syncLogicalCamera(this.cameras.main, nextScale, true);
     this.forceRtRedraw = true;
@@ -329,11 +347,20 @@ export class DarknessScene extends Phaser.Scene {
 
   update(_time: number, rawDelta: number) {
     try {
+      if (!this.sys?.isActive() || !this.darkRT || !this.darkRT.scene) return;
       const main = this.scene.get('MainScene') as MainScene | undefined;
-      if (!main || !main.scene.isActive()) return;
+      if (!main || !main.scene?.isActive()) return;
 
       const snap = main.getLightingData();
-      if (!snap || !snap.player || !snap.player.active) return;
+      if (
+        !snap ||
+        !snap.player ||
+        !snap.player.active ||
+        !Number.isFinite(snap.player.x) ||
+        !Number.isFinite(snap.player.y)
+      ) {
+        return;
+      }
 
       const delta = snap.isGamePaused ? 0 : performanceRuntime.smoothFrameDelta(rawDelta);
       this.effectTimeMs += delta;
@@ -878,6 +905,7 @@ export class DarknessScene extends Phaser.Scene {
     size: number,
     time: number
   ) {
+    if (!Number.isFinite(targetScreenX) || !Number.isFinite(targetScreenY)) return;
     const cx = w * 0.5;
     const cy = h * 0.5;
     const dx = targetScreenX - cx;

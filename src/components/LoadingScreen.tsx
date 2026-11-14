@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { UI_ASSETS, preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
+import { IronCard } from './IronCard';
 
 interface LoadingScreenProps {
   visible: boolean;
@@ -26,9 +28,14 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   const [rendered, setRendered] = useState(visible);
   const [fadedIn, setFadedIn] = useState(visible);
   const [displayProgress, setDisplayProgress] = useState(0);
+  const [bgError, setBgError] = useState(false);
   const [tipIndex, setTipIndex] = useState(() =>
     Math.floor(Math.random() * SURVIVAL_TIPS.length)
   );
+
+  useEffect(() => {
+    preloadAllChromaKeyUiAssets();
+  }, []);
 
   // Mount/unmount with silky fade-in & fade-out transitions
   useEffect(() => {
@@ -87,105 +94,124 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       role="status"
       aria-live="polite"
       aria-label={`Loading ${pctRounded}%`}
-      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center safe-area-pad select-none bg-[#0d0e11] transition-all duration-500 ease-out ${
+      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center safe-area-pad select-none bg-[#080a0d] transition-all duration-500 ease-out ${
         fadedIn ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-[1.02] pointer-events-none'
       }`}
-      style={{
-        backgroundImage:
-          'radial-gradient(circle at 50% 42%, rgba(93, 228, 255, 0.08) 0%, rgba(179, 18, 26, 0.14) 26%, rgba(11, 12, 15, 0.98) 72%)',
-      }}
     >
-      {/* Subtle drifting atmospheric blood/iron shadow glow */}
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 overflow-hidden"
-      >
+      {/* bg_dungeon.png Backdrop + Moody Dark Radial Vignette */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        {!bgError && (
+          <img
+            src={UI_ASSETS.bgDungeon}
+            alt=""
+            referrerPolicy="no-referrer"
+            onError={() => setBgError(true)}
+            className="w-full h-full object-cover object-center opacity-80 brightness-90"
+          />
+        )}
         <div
-          className="absolute left-1/2 top-[44%] -translate-x-1/2 -translate-y-1/2 w-[340px] h-[340px] sm:w-[440px] sm:h-[440px] rounded-full blur-3xl opacity-35 animate-pulse"
+          className="absolute inset-0"
           style={{
             background:
-              'radial-gradient(circle, rgba(145,16,24,0.34) 0%, rgba(56,96,112,0.16) 48%, transparent 74%)',
+              'radial-gradient(circle at 50% 42%, rgba(0, 0, 0, 0.38) 0%, rgba(0, 0, 0, 0.65) 55%, rgba(0, 0, 0, 0.88) 100%)',
           }}
         />
       </div>
 
       {/* Center Emblem + Brand + Progress */}
-      <div className="relative z-10 flex flex-col items-center w-full max-w-sm px-6 text-center">
-        {/* Character Head Emblem with Forged Iron Ring & Blood Rim */}
-        <div className="relative w-24 h-24 sm:w-32 sm:h-32 mb-4 sm:mb-6 flex items-center justify-center">
+      <div className="relative z-10 flex flex-col items-center w-full max-w-sm px-5 text-center">
+        {/* Enlarged 130x130 Circular Dark Warden Emblem with Pulsing Cyan Lantern Glow */}
+        <div
+          className="relative w-[130px] h-[130px] mb-5 flex items-center justify-center"
+          style={{
+            filter: 'drop-shadow(0 0 24px rgba(34, 211, 238, 0.5))',
+          }}
+        >
           <div
             aria-hidden="true"
-            className="absolute -inset-3 rounded-full blur-xl opacity-55"
+            className="absolute -inset-4 rounded-full blur-2xl hero-lantern-breathe"
             style={{
               background:
-                'radial-gradient(circle, rgba(138,16,22,0.45) 0%, rgba(45,86,102,0.2) 55%, transparent 75%)',
+                'radial-gradient(circle, rgba(34, 211, 238, 0.42) 0%, rgba(93, 228, 255, 0.14) 55%, transparent 78%)',
             }}
           />
           <div
             aria-hidden="true"
-            className="absolute -inset-1.5 rounded-full border-2 border-[#545c69] shadow-[inset_0_1px_0_rgba(180,190,204,0.3),0_0_18px_rgba(0,0,0,0.9)]"
+            className="absolute -inset-2 rounded-full border-2 border-[#596475] shadow-[inset_0_1px_0_rgba(200,215,235,0.35),0_0_20px_rgba(0,0,0,0.92)]"
           />
           <div
             aria-hidden="true"
-            className="absolute -inset-3 rounded-full border border-dashed border-[#8c1820]/65 animate-[spin_22s_linear_infinite]"
+            className="absolute -inset-3.5 rounded-full border border-dashed border-[#22d3ee]/55 animate-[spin_24s_linear_infinite]"
           />
           <img
             src="./app-icon.webp"
             alt="Last Light — Dark Warden"
-            className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover shadow-[0_10px_32px_rgba(0,0,0,0.94)] ring-2 ring-[#383e48]"
+            referrerPolicy="no-referrer"
+            className="relative w-[130px] h-[130px] rounded-full object-cover shadow-[0_12px_34px_rgba(0,0,0,0.95)] ring-2 ring-[#3c4654]"
           />
         </div>
 
         {/* Title */}
         <h1
-          className="font-display font-black tracking-[0.2em] text-2xl sm:text-3xl text-[#e8dcc2] mb-1"
+          className="font-display font-black tracking-[0.18em] text-3xl sm:text-4xl leading-none uppercase mb-1.5"
           style={{
-            textShadow:
-              '0 2px 10px rgba(0, 0, 0, 0.95), 0 0 18px rgba(155, 22, 29, 0.35)',
+            backgroundImage:
+              'linear-gradient(180deg, #fff1c7 0%, #e6aa45 50%, #9b5d14 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            filter:
+              'drop-shadow(0 3px 0 #170805) drop-shadow(0 6px 14px rgba(0, 0, 0, 0.96))',
           }}
         >
           LAST LIGHT
         </h1>
-        <p className="text-[11px] font-display tracking-[0.22em] uppercase text-[#9c8e72] mb-5 sm:mb-7">
-          {mode === 'boot' ? 'Awakening the Lantern' : 'Entering the Ashfen'}
+
+        <p
+          className="font-display font-extrabold text-xs tracking-[0.26em] uppercase mb-6"
+          style={{
+            backgroundImage:
+              'linear-gradient(180deg, #f59a9e 0%, #d4202a 55%, #73080e 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            filter: 'drop-shadow(0 2px 3px rgba(0, 0, 0, 0.98))',
+          }}
+        >
+          {mode === 'boot' ? 'AWAKENING THE LANTERN' : 'ENTERING THE ASHFEN'}
         </p>
 
-        {/* Forged-Iron & Blood Progress Bar */}
-        <div className="w-full max-w-[300px]">
-          <div className="flex items-center justify-between text-xs mb-2 px-0.5">
-            <span className="text-[#d8c9a8]/90 font-medium tracking-wide truncate pr-2">
+        {/* Progress Header + panel_iron_card.png Progress Bar */}
+        <div className="w-[82vw] max-w-[340px] flex flex-col items-center">
+          <div className="w-full flex items-center justify-between gap-2 mb-2 px-1">
+            <span className="font-display text-xs font-bold text-[#e8dcc2] tracking-wide text-left">
               {phase}
             </span>
-            <span className="font-mono-numbers font-bold text-[#d49635] shrink-0">
+            <span className="font-display text-xs font-bold text-[#f2c464] shrink-0 tabular-nums">
               {pctRounded}%
             </span>
           </div>
 
-          <div className="relative w-full h-3.5 rounded-full bg-[#111317] border-2 border-[#464d59] overflow-hidden shadow-[inset_0_2px_6px_rgba(0,0,0,0.92),0_3px_10px_rgba(0,0,0,0.85)]">
-            <div
-              className="h-full rounded-l-full transition-[width] duration-150 ease-out relative"
-              style={{
-                width: `${Math.max(3, displayProgress)}%`,
-                background:
-                  'linear-gradient(180deg, #d12832 0%, #8c0e15 55%, #3d0508 100%)',
-                boxShadow: 'inset 0 1px 0 rgba(255, 195, 195, 0.25)',
-              }}
-            />
-            {/* Iron collar endcaps with rivets */}
-            <span
-              aria-hidden="true"
-              className="absolute inset-y-0 left-0 w-1.5 bg-[#3a404a] border-r border-[#0a0b0e]"
-            />
-            <span
-              aria-hidden="true"
-              className="absolute inset-y-0 right-0 w-1.5 bg-[#3a404a] border-l border-[#0a0b0e]"
-            />
-          </div>
+          <IronCard
+            className="w-full h-[36px]"
+            contentClassName="h-full px-3 flex items-center"
+          >
+            <div className="w-full h-3 rounded-[4px] bg-[#08090c] border border-[#3a3f47] overflow-hidden p-[1px]">
+              <div
+                className="h-full rounded-[3px] transition-[width] duration-150 ease-out"
+                style={{
+                  width: `${Math.max(4, displayProgress)}%`,
+                  background:
+                    'linear-gradient(90deg, #8c0e15 0%, #d12832 52%, #f2a93b 100%)',
+                  boxShadow:
+                    '0 0 12px rgba(242, 169, 59, 0.65), inset 0 1px 0 rgba(255, 225, 175, 0.35)',
+                }}
+              />
+            </div>
+          </IronCard>
         </div>
 
-        {/* Atmospheric Survival Tip */}
-        <div className="mt-5 sm:mt-7 min-h-[38px] px-3 flex items-center justify-center">
-          <p className="text-[11px] sm:text-xs text-[#8f836c] leading-relaxed italic max-w-xs">
+        {/* Atmospheric Survival Tip in Rajdhani */}
+        <div className="mt-5 min-h-[40px] px-2 flex items-center justify-center">
+          <p className="font-body text-sm font-medium text-[#cbbba0] leading-relaxed max-w-xs">
             “{SURVIVAL_TIPS[tipIndex]}”
           </p>
         </div>

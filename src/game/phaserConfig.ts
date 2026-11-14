@@ -22,8 +22,14 @@ export function getCappedDpr(): number {
 export function createPhaserGame(parentContainerId: string): Phaser.Game {
   // If an existing game instance is running, destroy it first cleanly
   if (gameManager.phaserGame) {
-    gameManager.phaserGame.destroy(true);
+    try {
+      gameManager.phaserGame.destroy(true);
+    } catch {
+      // Ignore teardown errors on already-disposed instances
+    }
     gameManager.phaserGame = null;
+    gameManager.activeScene = null;
+    gameManager.activeUiScene = null;
     // WebAudioSoundManager.destroy() suspends a shared context; resume it immediately for the new run
     soundManager.resumeAudio();
   }
@@ -62,9 +68,9 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       autoMobileTextures: false,
       mipmapFilter: 'LINEAR_MIPMAP_LINEAR',
       mipmapRegeneration: false,
-      desynchronized: true,
+      desynchronized: false,
     },
-    audio: sharedCtx ? { context: sharedCtx } : undefined,
+    audio: sharedCtx && sharedCtx.state !== 'closed' ? { context: sharedCtx } : undefined,
     loader: {
       imageLoadType: 'HTMLImageElement',
       maxRetries: 2,
@@ -79,7 +85,10 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       },
     },
     scale: {
-      mode: Phaser.Scale.FIT,
+      mode:
+        typeof window !== 'undefined' && window.innerHeight >= window.innerWidth
+          ? Phaser.Scale.ENVELOP
+          : Phaser.Scale.FIT,
       autoCenter: Phaser.Scale.CENTER_BOTH,
       width: bufferW,
       height: bufferH,
@@ -91,7 +100,27 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
   const game = new Phaser.Game(config);
   gameManager.phaserGame = game;
 
+  let destroyed = false;
+
+  const onContextLost = (e: Event) => {
+    e.preventDefault();
+  };
+  const onContextRestored = () => {
+    if (destroyed || gameManager.phaserGame !== game) return;
+    gameManager.emitLoadProgress({
+      active: false,
+      progress: 1,
+      phase: 'Restored',
+      ready: true,
+    });
+  };
+
   game.events.once(Phaser.Core.Events.READY, () => {
+    if (destroyed || gameManager.phaserGame !== game) return;
+    if (game.canvas) {
+      game.canvas.addEventListener('webglcontextlost', onContextLost, false);
+      game.canvas.addEventListener('webglcontextrestored', onContextRestored, false);
+    }
     const maxTex = getWebGlMaxTextureSize(game);
     const verifiedScale = resolveRenderScale(gfx.resolutionMode, maxTex);
     if (Math.abs(verifiedScale - performanceRuntime.currentRenderScale) > 0.01) {
@@ -102,6 +131,14 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       );
     }
     performanceRuntime.setTargetFpsOnGame(game, gfx.targetFps);
+  });
+
+  game.events.once(Phaser.Core.Events.DESTROY, () => {
+    destroyed = true;
+    if (game.canvas) {
+      game.canvas.removeEventListener('webglcontextlost', onContextLost, false);
+      game.canvas.removeEventListener('webglcontextrestored', onContextRestored, false);
+    }
   });
 
   // Start AudioScene and MainScene; MainScene.create() launches DarknessScene then UIScene and enforces bringToTop('UIScene')

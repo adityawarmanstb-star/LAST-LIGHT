@@ -27,7 +27,7 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
       aria-label={`${boss.name} health ${clampedHp} of ${safeMaxHp}`}
       className="fixed left-1/2 -translate-x-1/2 z-30 w-[calc(100%-2rem)] max-w-md pointer-events-none"
       style={{
-        top: 'calc(max(12px, env(safe-area-inset-top)) + 68px)',
+        top: 'calc(max(8px, env(safe-area-inset-top)) + 52px)',
       }}
     >
       <div className="relative">

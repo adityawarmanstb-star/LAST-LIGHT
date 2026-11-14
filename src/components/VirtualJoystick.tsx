@@ -104,19 +104,15 @@ export const VirtualJoystick: React.FC = () => {
   return (
     <div
       ref={containerRef}
-      className="absolute left-0 bottom-0 w-[68vw] h-[calc(100vh-96px)] pointer-events-auto touch-none z-20"
+      className="absolute inset-0 w-full h-full pointer-events-auto touch-none z-10"
       onTouchStart={(e) => {
         if (activeTouchIdRef.current !== null) return;
+        const targetEl = e.target as HTMLElement | null;
+        if (targetEl?.closest('button, a, [role="button"], input, select')) {
+          return;
+        }
         const touch = e.changedTouches[0];
         if (!touch) return;
-        // Ignore touches that start on the top-right 56px+ pause button area
-        if (touch.clientX > window.innerWidth - 110 && touch.clientY < 110) {
-          return;
-        }
-        // Ignore touches in top header bar
-        if (touch.clientY < 96) {
-          return;
-        }
 
         soundManager.onUserGesture();
         activeTouchIdRef.current = touch.identifier;

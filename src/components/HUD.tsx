@@ -1,5 +1,17 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Coins, Skull, Heart, AlertTriangle, Wind, Gem } from 'lucide-react';
+import {
+  AlertTriangle,
+  CircleDot,
+  Coins,
+  Disc,
+  Flame,
+  Gem,
+  Heart,
+  Skull,
+  Sparkles,
+  Wind,
+  Zap,
+} from 'lucide-react';
 import {
   ActiveDynamicChallenge,
   BossInfo,
@@ -9,13 +21,14 @@ import {
   RelicSetId,
   WeaponState,
 } from '../game/types';
-import { RELIC_SETS, getRelicById } from '../game/relics';
+import { getRelicById } from '../game/relics';
 import { VirtualJoystick } from './VirtualJoystick';
-import { ForgedIronFrame } from './ForgedIronFrame';
+import { IronCard } from './IronCard';
 import { BloodHpBar } from './BloodHpBar';
 import { BloodSplatterHit, BloodSplatterOverlay } from './BloodSplatterOverlay';
 import { BossHealthOverlay } from './BossHealthOverlay';
 import { CritImpactPayload, gameManager } from '../game/GameManager';
+import { preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
 
 interface HUDProps {
@@ -51,6 +64,40 @@ interface HUDProps {
   onTriggerDash: () => void;
 }
 
+export const getWeaponIcon = (
+  weaponId: WeaponState['id'],
+  sizeClass = 'w-4 h-4'
+) => {
+  switch (weaponId) {
+    case 'bolt':
+    case 'light_bolt':
+      return <Zap className={`${sizeClass} text-[#5de4ff] shrink-0`} />;
+    case 'blades':
+    case 'orbit_blade':
+      return <Disc className={`${sizeClass} text-[#f2a93b] shrink-0`} />;
+    case 'ring':
+    case 'shadow_wave':
+      return <CircleDot className={`${sizeClass} text-[#e5303a] shrink-0`} />;
+    case 'spark':
+      return <Sparkles className={`${sizeClass} text-[#5de4ff] shrink-0`} />;
+    case 'shotgun':
+    case 'ember_aura':
+      return <Flame className={`${sizeClass} text-[#f2a93b] shrink-0`} />;
+    default:
+      return <Sparkles className={`${sizeClass} text-[#d8c9a8] shrink-0`} />;
+  }
+};
+
+const DASH_RING_RADIUS = 29;
+const DASH_RING_CIRCUMFERENCE = 2 * Math.PI * DASH_RING_RADIUS;
+
+const SLIM_BADGE_STYLE: React.CSSProperties = {
+  background: 'rgba(10, 14, 20, 0.68)',
+  padding: '3px 8px',
+  fontSize: '10px',
+  maxWidth: '155px',
+};
+
 const HUDComponent: React.FC<HUDProps> = ({
   hp,
   maxHp,
@@ -75,6 +122,7 @@ const HUDComponent: React.FC<HUDProps> = ({
   equippedRelicIds = [],
   activeRelicSynergies = [],
   eventWarning,
+  onTogglePause,
   onSpawnBossNow,
   onTriggerDash,
 }) => {
@@ -88,6 +136,10 @@ const HUDComponent: React.FC<HUDProps> = ({
   const [levelPopSeq, setLevelPopSeq] = useState<number>(0);
   const [splatterHit, setSplatterHit] = useState<BloodSplatterHit | null>(null);
   const [critFlash, setCritFlash] = useState<CritImpactPayload | null>(null);
+
+  useEffect(() => {
+    preloadAllChromaKeyUiAssets();
+  }, []);
 
   useEffect(() => {
     if (coins > prevCoinsRef.current) {
@@ -164,13 +216,26 @@ const HUDComponent: React.FC<HUDProps> = ({
   const equippedRelics = equippedRelicIds
     .map((id) => getRelicById(id))
     .filter((relic): relic is RelicDefinition => relic !== null);
-  const activeSynergyMetas = activeRelicSynergies
-    .map((id) => RELIC_SETS[id])
-    .filter((meta): meta is NonNullable<typeof meta> => Boolean(meta));
+  const activeSynergySet = new Set(activeRelicSynergies);
+
+  const dashReady = dashCharges > 0;
+  const ringProgress = dashReady
+    ? 1
+    : Math.max(0, Math.min(1, dashCooldownProgress));
+  const ringDashOffset = DASH_RING_CIRCUMFERENCE * (1 - ringProgress);
+
+  const hasSubLeftBadges =
+    combo > 1 ||
+    isUnderPressure ||
+    lightShardRemainingSec > 0 ||
+    redShardRemainingSec > 0 ||
+    darknessFallsRemainingSec > 0 ||
+    bloodFogRemainingSec > 0 ||
+    Boolean(activeChallenge);
 
   return (
-    <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between overflow-hidden">
-      {/* Virtual Joystick for touch */}
+    <div className="fixed inset-0 pointer-events-none select-none z-20 overflow-hidden">
+      {/* Full-screen Virtual Joystick underneath HUD controls */}
       <VirtualJoystick />
 
       {/* Visceral screen-edge blood splatter flash when taking damage */}
@@ -239,441 +304,427 @@ const HUDComponent: React.FC<HUDProps> = ({
         />
       )}
 
-      {/* Forged-Iron XP Conduit across the top edge with subdued soul-steel fill */}
+      {/* Top Slim HUD Bar + Non-Intrusive Sub-Header */}
       <div
-        className="fixed top-0 left-0 right-0 z-30 h-[8px] pointer-events-none"
+        className="relative z-20 w-full pointer-events-none"
         style={{
-          background: 'linear-gradient(180deg, #0b0c0f 0%, #181a1f 100%)',
-          borderBottom: '1.5px solid #454c59',
-          boxShadow: 'inset 0 1px 0 rgba(120, 128, 142, 0.35), 0 2px 6px rgba(0, 0, 0, 0.85)',
+          paddingTop: 'max(8px, env(safe-area-inset-top))',
+          paddingLeft: 'max(10px, env(safe-area-inset-left))',
+          paddingRight: 'max(10px, env(safe-area-inset-right))',
         }}
       >
-        <div
-          className="h-full transition-all duration-150 ease-out"
-          style={{
-            width: `${xpPercent}%`,
-            background: 'linear-gradient(180deg, #6ba6bd 0%, #3d768c 55%, #234757 100%)',
-            boxShadow: 'inset 0 1px 0 rgba(210, 236, 245, 0.35)',
-          }}
-        />
-      </div>
-
-      {/* Top HUD Row (Respects safe-area insets; 3-column grid prevents mobile collisions) */}
-      <div
-        className="w-full flex flex-col gap-1.5"
-        style={{
-          paddingTop: 'calc(max(12px, env(safe-area-inset-top)) + 6px)',
-          paddingLeft: 'max(12px, env(safe-area-inset-left))',
-          paddingRight: 'max(12px, env(safe-area-inset-right))',
-        }}
-      >
-        <div className="w-full grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-start gap-1.5 sm:gap-3">
-          {/* Top-Left: Forged-Iron HP Bar Panel + Status / Performance Tabs */}
-          <div className="justify-self-start flex flex-col gap-1.5 sm:gap-2 min-w-0 max-w-full">
-            <ForgedIronFrame
-              seed="hud-hp-panel"
-              dripCount={3}
-              maxDripLength={16}
-              className="w-[126px] sm:w-[216px] max-w-full"
-              contentClassName="px-2.5 py-2 sm:px-3.5 sm:py-2.5 flex flex-col gap-1.5 sm:gap-2"
+        {/* Row 1: Single Slim Row (44px HP+EXP | 36px Combined Pill | 42px Pause) */}
+        <div className="w-full grid grid-cols-[145px_minmax(0,1fr)_42px] sm:grid-cols-[1fr_auto_1fr] items-center gap-1.5 sm:gap-3">
+          {/* Top-Left: Compact 145x44 HP + EXP IronCard */}
+          <div className="justify-self-start pointer-events-none">
+            <IronCard
+              className="w-[145px] h-[44px] shrink-0"
+              contentClassName="h-full px-2 py-[4px] flex flex-col justify-between"
             >
-              <div className="flex items-center justify-between gap-1.5 text-[11px] sm:text-xs">
-                <div className="flex items-center gap-1 sm:gap-1.5 min-w-0">
-                  <Heart className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#e5303a] fill-[#b3121a] shrink-0" />
-                  <span className="font-mono-numbers font-semibold text-[#d8c9a8] truncate tabular-nums">
+              <div className="flex items-center justify-between gap-1 text-[10.5px] leading-none">
+                <div className="flex items-center gap-1 min-w-0">
+                  <Heart className="w-2.5 h-2.5 text-[#e5303a] fill-[#b3121a] shrink-0" />
+                  <span className="font-display font-bold text-[#ede0c4] tabular-nums whitespace-nowrap">
                     {Math.round(hp)}
-                    <span className="text-[#8e8168]">/{maxHp}</span>
+                    <span className="text-[#9c8e72] font-semibold">/{maxHp}</span>
                   </span>
                 </div>
                 <span
                   key={`hud-lv-${levelPopSeq}`}
-                  className={`inline-block font-mono-numbers font-semibold text-[#d8c9a8] whitespace-nowrap shrink-0 ${
+                  className={`inline-block font-display font-extrabold text-[10px] tracking-[0.04em] text-[#f2c464] whitespace-nowrap shrink-0 ${
                     levelPopSeq > 0 ? 'hud-level-pop' : ''
                   }`}
                 >
-                  Lv.{level}
+                  LV.{level}
                 </span>
               </div>
 
-              <BloodHpBar hp={hp} maxHp={maxHp} />
-            </ForgedIronFrame>
+              <BloodHpBar hp={hp} maxHp={maxHp} compact />
 
-            {/* Kill Combo, Pressure & Light Status indicators */}
-            {(combo > 1 ||
-              isUnderPressure ||
-              lightShardRemainingSec > 0 ||
-              redShardRemainingSec > 0 ||
-              darknessFallsRemainingSec > 0 ||
-              bloodFogRemainingSec > 0) && (
-              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] max-w-[min(256px,calc(100vw-24px))]">
-                {combo > 1 && (
-                  <ForgedIronFrame
-                    seed="hud-combo-badge"
-                    dripCount={2}
-                    maxDripLength={8}
-                    borderColor="#5de4ff"
-                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5"
-                  >
-                    <span className="text-[#9c8e72]">XP</span>
-                    <span className="font-mono-numbers font-bold text-[#5de4ff]">x{combo}</span>
-                  </ForgedIronFrame>
-                )}
-                {isUnderPressure && (
-                  <ForgedIronFrame
-                    seed="hud-pressure-badge"
-                    dripCount={2}
-                    maxDripLength={9}
-                    borderColor="#b3121a"
-                    glowColor="#e5303a"
-                    glowStrength={6}
-                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1 text-[#e5303a]"
-                  >
-                    <span className="font-semibold tracking-wider uppercase text-[10px]">
-                      Pressure
-                    </span>
-                  </ForgedIronFrame>
-                )}
-                {lightShardRemainingSec > 0 && (
-                  <ForgedIronFrame
-                    seed="hud-shard-badge"
-                    dripCount={2}
-                    maxDripLength={8}
-                    borderColor="#5de4ff"
-                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#5de4ff]"
-                  >
-                    <span className="font-semibold tracking-wide text-[10px] uppercase">
-                      Shard +35%
-                    </span>
-                    <span className="font-mono-numbers font-bold">{lightShardRemainingSec}s</span>
-                  </ForgedIronFrame>
-                )}
-                {redShardRemainingSec > 0 && (
-                  <ForgedIronFrame
-                    seed="hud-red-shard-badge"
-                    dripCount={2}
-                    maxDripLength={8}
-                    borderColor="#e5303a"
-                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#e5303a]"
-                  >
-                    <span className="font-semibold tracking-wide text-[10px] uppercase">
-                      Blood +15% DMG
-                    </span>
-                    <span className="font-mono-numbers font-bold">{redShardRemainingSec}s</span>
-                  </ForgedIronFrame>
-                )}
-                {darknessFallsRemainingSec > 0 && (
-                  <ForgedIronFrame
-                    seed="hud-darkness-badge"
-                    dripCount={2}
-                    maxDripLength={9}
-                    borderColor="#b3121a"
-                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#d8c9a8]"
-                  >
-                    <span className="font-semibold tracking-wide text-[10px] uppercase">
-                      Darkness · <span className="text-[#5de4ff]">+50% XP</span>
-                    </span>
-                    <span className="font-mono-numbers font-bold text-[#e5303a]">
-                      {darknessFallsRemainingSec}s
-                    </span>
-                  </ForgedIronFrame>
-                )}
-                {bloodFogRemainingSec > 0 && (
-                  <ForgedIronFrame
-                    seed="hud-blood-fog-badge"
-                    dripCount={3}
-                    maxDripLength={12}
-                    borderColor="#e5303a"
-                    glowColor="#e5303a"
-                    glowStrength={10}
-                    contentClassName="px-2 sm:px-2.5 py-1 flex items-center gap-1.5 text-[#f7e7e2]"
-                  >
-                    <span className="font-semibold tracking-wide text-[10px] uppercase text-[#ff7077]">
-                      Blood Fog · <span className="text-[#f2a93b]">+35% SPD · +65% Horde</span>
-                    </span>
-                    <span className="font-mono-numbers font-bold text-[#e5303a]">
-                      {bloodFogRemainingSec}s
-                    </span>
-                  </ForgedIronFrame>
-                )}
-              </div>
-            )}
-
-            {/* Active Dynamic Challenge Pact Tracker */}
-            {activeChallenge && (
-              <ForgedIronFrame
-                seed={`hud-challenge-${activeChallenge.id}`}
-                dripCount={2}
-                maxDripLength={10}
-                borderColor={
-                  activeChallenge.status === 'completed'
-                    ? '#f2a93b'
-                    : activeChallenge.status === 'failed'
-                      ? '#b3121a'
-                      : '#f2a93b'
-                }
-                glowColor={
-                  activeChallenge.status === 'failed' ? '#e5303a' : '#f2a93b'
-                }
-                glowStrength={activeChallenge.status === 'active' ? 5 : 10}
-                className="max-w-[232px]"
-                contentClassName="px-2.5 py-1.5 flex flex-col gap-0.5 text-[11px]"
+              {/* Thin Cyan EXP Progress Bar directly underneath */}
+              <div
+                aria-label={`Experience ${Math.round(xpPercent)}%`}
+                className="relative w-full h-[3.5px] rounded-full overflow-hidden bg-[#0a0c10] border border-[#3a424d]/80"
               >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-semibold text-[#d8c9a8] truncate">
-                    {activeChallenge.title}
-                  </span>
-                  <span
-                    className={`text-[10px] font-bold uppercase tracking-wider shrink-0 ${
-                      activeChallenge.status === 'completed'
-                        ? 'text-[#f2a93b]'
-                        : activeChallenge.status === 'failed'
-                          ? 'text-[#e5303a]'
-                          : 'text-[#5de4ff]'
-                    }`}
-                  >
-                    {activeChallenge.status === 'completed'
-                      ? 'Cleared'
-                      : activeChallenge.status === 'failed'
-                        ? 'Failed'
-                        : 'Pact'}
-                  </span>
-                </div>
-                <div className="flex items-center justify-between gap-2 text-[10px] font-mono-numbers">
-                  <span
-                    className={
-                      activeChallenge.status === 'failed'
-                        ? 'text-[#e5303a]'
-                        : activeChallenge.status === 'completed'
-                          ? 'text-[#f2a93b]'
-                          : 'text-[#9c8e72]'
-                    }
-                  >
-                    {activeChallenge.statusNote}
-                  </span>
-                  {activeChallenge.status === 'active' && (
-                    <span className="text-[#f2a93b] font-semibold shrink-0">
-                      +{activeChallenge.rewardCoins}c
-                    </span>
-                  )}
-                </div>
-              </ForgedIronFrame>
-            )}
-
+                <div
+                  className="h-full rounded-full transition-[width] duration-150 ease-out"
+                  style={{
+                    width: `${xpPercent}%`,
+                    background:
+                      'linear-gradient(90deg, #22d3ee 0%, #5de4ff 60%, #f2c464 100%)',
+                    boxShadow: '0 0 6px rgba(93, 228, 255, 0.65)',
+                  }}
+                />
+              </div>
+            </IronCard>
           </div>
 
-          {/* Top-Center: Centered Forged-Iron Run Timer */}
-          <div className="justify-self-center flex flex-col items-center shrink-0">
-            <ForgedIronFrame
-              seed="hud-timer-panel"
-              dripCount={2}
-              maxDripLength={12}
-              contentClassName="px-2.5 sm:px-4 py-1.5 flex items-center justify-center min-h-[40px] sm:min-h-[44px]"
+          {/* Top-Center: Sleek Dark-Translucent 36px Combined Timer + Kills + Coins Pill */}
+          <div className="justify-self-center pointer-events-none min-w-0">
+            <div
+              className="h-[36px] px-2.5 sm:px-3.5 rounded-full flex items-center justify-center gap-1.5 sm:gap-2.5 border border-[#3a424d]/65 shadow-[0_4px_12px_rgba(0,0,0,0.65)]"
+              style={{
+                background: 'rgba(10, 14, 20, 0.72)',
+                backdropFilter: 'blur(4px)',
+                WebkitBackdropFilter: 'blur(4px)',
+              }}
             >
-              <span className="font-mono-numbers text-base sm:text-2xl font-bold tracking-wider text-[#d8c9a8] tabular-nums whitespace-nowrap">
+              <span className="font-display text-[11.5px] sm:text-[13px] font-black tracking-[0.06em] text-[#ede0c4] tabular-nums whitespace-nowrap">
                 {timeFormatted}
               </span>
-            </ForgedIronFrame>
-          </div>
 
-          {/* Top-Right: Kill & Coin Counter + 56px Spacer for UIScene Pause Button */}
-          <div className="justify-self-end flex items-start gap-1.5 sm:gap-2.5 min-w-0">
-            <ForgedIronFrame
-              seed="hud-kills-coins"
-              dripCount={2}
-              maxDripLength={12}
-              contentClassName="px-2 sm:px-3.5 py-1.5 sm:py-2 flex items-center gap-2 sm:gap-3 text-[11px] sm:text-xs h-[40px] sm:h-[44px]"
-            >
+              <span className="w-px h-3 bg-[#4a505c]/75 shrink-0" aria-hidden="true" />
+
               <div className="flex items-center gap-1 whitespace-nowrap" title="Kills">
-                <Skull className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#e5303a] shrink-0" />
-                <span className="font-mono-numbers font-semibold text-[#d8c9a8] tabular-nums">
+                <Skull className="w-3 h-3 text-[#e5303a] shrink-0" />
+                <span className="font-display text-[11px] sm:text-xs font-bold text-[#ede0c4] tabular-nums">
                   {kills}
                 </span>
               </div>
-              <span className="h-3.5 w-px bg-[#3a3f47] shrink-0" aria-hidden="true" />
+
+              <span className="w-px h-3 bg-[#4a505c]/75 shrink-0" aria-hidden="true" />
+
               <div
                 key={`hud-coin-${coinPopSeq}`}
-                className={`flex items-center gap-1 whitespace-nowrap ${coinPopSeq > 0 ? 'hud-coin-pop' : ''}`}
+                className={`flex items-center gap-1 whitespace-nowrap ${
+                  coinPopSeq > 0 ? 'hud-coin-pop' : ''
+                }`}
                 title="Coins"
               >
-                <Coins className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-[#f2a93b] shrink-0" />
-                <span className="font-mono-numbers font-semibold text-[#d8c9a8] tabular-nums">
+                <Coins className="w-3 h-3 text-[#f2c464] shrink-0" />
+                <span className="font-display text-[11px] sm:text-xs font-bold text-[#f2c464] tabular-nums">
                   {coins}
                 </span>
               </div>
-            </ForgedIronFrame>
+            </div>
+          </div>
 
-            {/* Dedicated 56x56 slot matching UIScene interactive pause button */}
-            <div className="w-14 h-14 shrink-0 pointer-events-none" aria-hidden="true" />
+          {/* Top-Right: Compact 42x42 Tactile Pause Button */}
+          <div
+            className="justify-self-end pointer-events-auto relative z-30"
+            onTouchStart={(e) => e.stopPropagation()}
+          >
+            <IronCard
+              asButton
+              ariaLabel="Pause Game"
+              onClick={() => {
+                haptics.tap('medium');
+                onTogglePause();
+              }}
+              className="w-[42px] h-[42px] shrink-0 active:scale-95"
+              contentClassName="w-full h-full p-0 flex items-center justify-center"
+            >
+              <div className="flex items-center gap-[3.5px]" aria-hidden="true">
+                <span className="w-[4px] h-[14px] rounded-[1.5px] bg-gradient-to-b from-[#fff1c7] via-[#e2d2b0] to-[#9c8459] shadow-[0_1px_2px_rgba(0,0,0,0.95)]" />
+                <span className="w-[4px] h-[14px] rounded-[1.5px] bg-gradient-to-b from-[#fff1c7] via-[#e2d2b0] to-[#9c8459] shadow-[0_1px_2px_rgba(0,0,0,0.95)]" />
+              </div>
+            </IronCard>
           </div>
         </div>
 
-        {/* Dedicated Centered Boss Countdown Strip (cleanly below top HUD row, zero horizontal overlap) */}
-        {!boss && (
-          <div className="w-full flex justify-center pointer-events-none">
-            <div className="pointer-events-auto inline-flex items-center gap-1.5 px-3 py-1 rounded-[8px] bg-[#0e1014]/75 border border-[#3a3f47]/65 text-[10px] sm:text-[11px] text-[#9c8e72] whitespace-nowrap shadow-[0_4px_12px_rgba(0,0,0,0.45)]">
-              <span>
-                Boss in{' '}
-                <span className="font-mono-numbers font-semibold text-[#e5303a] tabular-nums">
-                  {bossTimeStr}
-                </span>
-              </span>
-              <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-              <span className="font-mono-numbers text-[#f2a93b]">Rec. Lv. 60</span>
-              <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-              <button
-                type="button"
-                onPointerDown={() => haptics.tap('light')}
-                onClick={onSpawnBossNow}
-                className="px-1.5 py-0.5 text-[10px] sm:text-[11px] font-semibold text-[#d8c9a8] hover:text-[#e5303a] transition-colors cursor-pointer underline underline-offset-2"
-                title="Summon Boss now (Recommended Level 60)"
-              >
-                Summon
-              </button>
+        {/* Sub-Header Row: Active Buffs & Pact (Left, pointer-events-none) + Boss Countdown Strip (Center-aligned under Timer Pill) */}
+        {(hasSubLeftBadges || !boss) && (
+          <div className="w-full grid grid-cols-[155px_minmax(0,1fr)] sm:grid-cols-[1fr_auto_1fr] items-start gap-1.5 mt-1 pointer-events-none">
+            {/* Directly below Top-Left HP bar: Ultra-slim semi-transparent Buff & Pact Badges */}
+            <div className="justify-self-start flex flex-col items-start gap-1 pointer-events-none min-w-0">
+              {combo > 1 && (
+                <div
+                  className="rounded-[6px] border border-[#22d3ee]/35 flex items-center gap-1 leading-tight pointer-events-none whitespace-nowrap"
+                  style={SLIM_BADGE_STYLE}
+                >
+                  <span className="font-display font-bold text-[#9c8e72] uppercase">
+                    XP
+                  </span>
+                  <span className="font-display font-extrabold text-[#5de4ff] tabular-nums">
+                    x{combo}
+                  </span>
+                </div>
+              )}
+
+              {lightShardRemainingSec > 0 && (
+                <div
+                  className="rounded-[6px] border border-[#22d3ee]/35 flex items-center justify-between gap-1.5 leading-tight pointer-events-none whitespace-nowrap"
+                  style={SLIM_BADGE_STYLE}
+                >
+                  <span className="font-display font-bold uppercase text-[#5de4ff] truncate">
+                    SHARD +35%
+                  </span>
+                  <span className="font-display font-extrabold text-[#ede0c4] tabular-nums shrink-0">
+                    {lightShardRemainingSec}s
+                  </span>
+                </div>
+              )}
+
+              {redShardRemainingSec > 0 && (
+                <div
+                  className="rounded-[6px] border border-[#e5303a]/40 flex items-center justify-between gap-1.5 leading-tight pointer-events-none whitespace-nowrap"
+                  style={SLIM_BADGE_STYLE}
+                >
+                  <span className="font-display font-bold uppercase text-[#ff7b82] truncate">
+                    BLOOD +15%
+                  </span>
+                  <span className="font-display font-extrabold text-[#ede0c4] tabular-nums shrink-0">
+                    {redShardRemainingSec}s
+                  </span>
+                </div>
+              )}
+
+              {darknessFallsRemainingSec > 0 && (
+                <div
+                  className="rounded-[6px] border border-[#e5303a]/40 flex items-center justify-between gap-1.5 leading-tight pointer-events-none whitespace-nowrap"
+                  style={SLIM_BADGE_STYLE}
+                >
+                  <span className="font-display font-bold uppercase text-[#ede0c4] truncate">
+                    DARKNESS <span className="text-[#5de4ff]">+50% XP</span>
+                  </span>
+                  <span className="font-display font-extrabold text-[#e5303a] tabular-nums shrink-0">
+                    {darknessFallsRemainingSec}s
+                  </span>
+                </div>
+              )}
+
+              {bloodFogRemainingSec > 0 && (
+                <div
+                  className="rounded-[6px] border border-[#e5303a]/45 flex items-center justify-between gap-1.5 leading-tight pointer-events-none whitespace-nowrap"
+                  style={SLIM_BADGE_STYLE}
+                >
+                  <span className="font-display font-bold uppercase text-[#ff7077] truncate">
+                    BLOOD FOG
+                  </span>
+                  <span className="font-display font-extrabold text-[#e5303a] tabular-nums shrink-0">
+                    {bloodFogRemainingSec}s
+                  </span>
+                </div>
+              )}
+
+              {isUnderPressure && (
+                <div
+                  className="rounded-[6px] border border-[#e5303a]/45 flex items-center leading-tight pointer-events-none whitespace-nowrap"
+                  style={SLIM_BADGE_STYLE}
+                >
+                  <span className="font-display font-bold uppercase tracking-wider text-[#e5303a]">
+                    PRESSURE
+                  </span>
+                </div>
+              )}
+
+              {activeChallenge && (
+                <div
+                  className={`rounded-[6px] border leading-tight pointer-events-none truncate ${
+                    activeChallenge.status === 'failed'
+                      ? 'border-[#e5303a]/50 text-[#e5303a]'
+                      : activeChallenge.status === 'completed'
+                        ? 'border-[#f2a93b]/55 text-[#f2c464]'
+                        : 'border-[#4a505c]/60 text-[#d8c9a8]'
+                  }`}
+                  style={SLIM_BADGE_STYLE}
+                >
+                  <span className="font-display font-bold uppercase">
+                    {activeChallenge.title}
+                  </span>
+                  <span className="text-[#8e8168]"> · </span>
+                  <span className="font-body font-semibold text-[#cbbba0]">
+                    {activeChallenge.statusNote}
+                  </span>
+                </div>
+              )}
             </div>
+
+            {/* Directly below Top-Center Timer Pill: Tiny 26px Boss Countdown Strip + Clickable Crimson SUMMON Badge */}
+            {!boss && (
+              <div className="justify-self-start sm:justify-self-center pointer-events-none">
+                <div
+                  className="h-[26px] px-2.5 rounded-full flex items-center gap-1.5 border border-[#3a424d]/55 text-[11px] whitespace-nowrap"
+                  style={{
+                    background: 'rgba(10, 14, 20, 0.68)',
+                    backdropFilter: 'blur(4px)',
+                    WebkitBackdropFilter: 'blur(4px)',
+                  }}
+                >
+                  <span className="font-body font-semibold text-[#cbbba0]">
+                    Boss in{' '}
+                    <span className="font-display font-bold text-[#e5303a] tabular-nums">
+                      {bossTimeStr}
+                    </span>
+                  </span>
+
+                  <button
+                    type="button"
+                    aria-label="Summon Boss Now"
+                    onTouchStart={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={() => {
+                      haptics.tap('medium');
+                      onSpawnBossNow();
+                    }}
+                    className="pointer-events-auto relative z-30 inline-flex items-center gap-0.5 px-1.5 py-[1px] rounded bg-gradient-to-b from-[#99151d] to-[#5a0b10] border border-[#e5303a]/80 font-display font-extrabold text-[9.5px] tracking-[0.06em] uppercase text-[#ffd7d9] shadow-[0_0_8px_rgba(229,48,58,0.45)] active:scale-95 transition-transform cursor-pointer"
+                  >
+                    SUMMON
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       {/* 2s Event Warning Banner */}
       {eventWarning && (
-        <div className="w-full max-w-md mx-auto px-4">
-          <ForgedIronFrame
-            seed={`event-warning-${eventWarning.title}`}
-            dripCount={3}
-            maxDripLength={18}
-            borderColor="#b3121a"
-            glowColor="#e5303a"
-            glowStrength={12}
-            contentClassName="px-4 py-2.5 flex items-center gap-3 justify-center text-center"
+        <div className="fixed left-1/2 -translate-x-1/2 top-24 z-30 w-full max-w-sm px-4 pointer-events-none">
+          <IronCard
+            highlight="blood"
+            contentClassName="px-3.5 py-2 flex items-center gap-2.5 justify-center text-center"
           >
-            <AlertTriangle className="w-5 h-5 text-[#e5303a] shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-[#e5303a] shrink-0" />
             <div className="flex flex-col">
-              <span className="font-display text-sm font-bold tracking-wider text-[#e5303a]">
+              <span className="font-display text-xs font-bold tracking-wider text-[#e5303a]">
                 {eventWarning.title}
               </span>
-              <span className="text-[11px] text-[#d8c9a8]">{eventWarning.subtitle}</span>
+              <span className="font-body text-[11px] font-medium text-[#ede0c4]">
+                {eventWarning.subtitle}
+              </span>
             </div>
-          </ForgedIronFrame>
+          </IronCard>
         </div>
       )}
 
       {/* Persistent Boss Health Overlay (fixed top-center when boss is active) */}
       <BossHealthOverlay boss={boss} playerLevel={level} />
 
-      {/* Bottom Area: Dash charge control + quiet unboxed weapon levels on bottom-right (keeps bottom-left clear for joystick) */}
+      {/* Bottom-Left: Single Horizontal Row of 36x36 Compact Weapon & Relic Icon Slots (pointer-events-none) */}
       <div
-        className="w-full flex flex-col items-end gap-2.5"
+        className="fixed z-20 pointer-events-none flex flex-nowrap items-center gap-[6px] max-w-[calc(100vw-104px)] overflow-hidden"
         style={{
-          paddingBottom: 'max(14px, env(safe-area-inset-bottom))',
-          paddingRight: 'max(16px, env(safe-area-inset-right))',
-          paddingLeft: 'max(16px, env(safe-area-inset-left))',
+          bottom: 'max(16px, env(safe-area-inset-bottom))',
+          left: 'max(12px, env(safe-area-inset-left))',
         }}
       >
-        <button
-          type="button"
-          onPointerDown={() => {
-            if (dashCharges > 0) {
-              haptics.tap('light');
-              onTriggerDash();
-            }
-          }}
-          disabled={dashCharges <= 0}
-          aria-label="Dash"
-          className={`pointer-events-auto min-h-[56px] min-w-[106px] px-3.5 py-2 rounded-[9px] border-2 flex items-center justify-between gap-2.5 transition-all cursor-pointer active:scale-95 ${
-            dashCharges > 0
-              ? 'rusted-iron-plate border-[#6a7382] text-[#e8dcc2] hover:border-[#8f2424]'
-              : 'bg-[#101215]/88 border-[#323740] text-[#7c7361] cursor-not-allowed'
+        {equippedRelics.map((relic) => {
+          const hasSynergy = activeSynergySet.has(relic.setId);
+          return (
+            <IronCard
+              key={relic.id}
+              highlight={hasSynergy ? 'gold' : 'none'}
+              className="w-[36px] h-[36px] shrink-0"
+              contentClassName="w-full h-full p-0 flex items-center justify-center relative"
+            >
+              <Gem
+                className="w-4 h-4 shrink-0"
+                style={{ color: relic.accentColor }}
+              />
+              <span
+                className="absolute bottom-[1px] right-[2px] font-display font-extrabold text-[8px] leading-none px-[2px] rounded-[2px] bg-[#090b0f]/90"
+                style={{ color: hasSynergy ? '#f2c464' : '#9c8e72' }}
+              >
+                R
+              </span>
+            </IronCard>
+          );
+        })}
+
+        {unlockedWeapons.map((w) => (
+          <IronCard
+            key={w.id}
+            className="w-[36px] h-[36px] shrink-0"
+            contentClassName="w-full h-full p-0 flex items-center justify-center relative"
+          >
+            {getWeaponIcon(w.id, 'w-4 h-4')}
+            <span className="absolute bottom-[1px] right-[2px] font-display font-extrabold text-[8.5px] leading-none text-[#f2c464] bg-[#090b0f]/90 px-[2px] rounded-[2px] tabular-nums">
+              Lv.{w.level}
+            </span>
+          </IronCard>
+        ))}
+      </div>
+
+      {/* Bottom-Right: Compact 68x68 Circular Tactile DASH Button (opacity 0.9) */}
+      <button
+        type="button"
+        onTouchStart={(e) => e.stopPropagation()}
+        onPointerDown={(e) => {
+          e.stopPropagation();
+          if (dashReady) {
+            haptics.tap('light');
+            onTriggerDash();
+          }
+        }}
+        disabled={!dashReady}
+        aria-label="Dash"
+        style={{
+          bottom: 'max(16px, env(safe-area-inset-bottom))',
+          right: 'max(16px, env(safe-area-inset-right))',
+          boxShadow: dashReady
+            ? '0 8px 20px rgba(0, 0, 0, 0.88), 0 0 14px rgba(34, 211, 238, 0.3), inset 0 2px 3px rgba(180, 194, 214, 0.28), inset 0 -3px 5px rgba(4, 6, 10, 0.95)'
+            : '0 6px 14px rgba(0, 0, 0, 0.8), inset 0 2px 3px rgba(90, 98, 112, 0.18), inset 0 -3px 5px rgba(4, 6, 10, 0.95)',
+        }}
+        className={`fixed z-30 pointer-events-auto opacity-90 w-[68px] h-[68px] shrink-0 rounded-full flex flex-col items-center justify-center transition-transform duration-150 ${
+          dashReady
+            ? 'rusted-iron-plate border-[2.5px] border-[#596475] text-[#f4ecda] cursor-pointer active:scale-95'
+            : 'bg-[#101318]/90 border-[2.5px] border-[#2e343e] text-[#6d7480] cursor-not-allowed'
+        }`}
+      >
+        {/* Glowing Cyan Radial Cooldown Ring */}
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 68 68"
+          className="pointer-events-none absolute -inset-[2.5px] w-[68px] h-[68px] -rotate-90"
+        >
+          <circle
+            cx="34"
+            cy="34"
+            r={DASH_RING_RADIUS}
+            fill="none"
+            stroke="rgba(34, 211, 238, 0.16)"
+            strokeWidth="3.5"
+          />
+          <circle
+            cx="34"
+            cy="34"
+            r={DASH_RING_RADIUS}
+            fill="none"
+            stroke={dashReady ? '#22d3ee' : '#5de4ff'}
+            strokeWidth="3.5"
+            strokeLinecap="round"
+            strokeDasharray={DASH_RING_CIRCUMFERENCE}
+            strokeDashoffset={ringDashOffset}
+            style={{
+              filter: dashReady
+                ? 'drop-shadow(0 0 5px rgba(34, 211, 238, 0.85))'
+                : 'drop-shadow(0 0 3px rgba(93, 228, 255, 0.5))',
+              transition: 'stroke-dashoffset 75ms linear',
+            }}
+          />
+        </svg>
+
+        <Wind
+          className={`relative z-10 w-5 h-5 transition-colors ${
+            dashReady
+              ? 'text-[#5de4ff] drop-shadow-[0_0_8px_rgba(34,211,238,0.65)]'
+              : 'text-[#4d5663]'
+          }`}
+        />
+        <span
+          className={`relative z-10 mt-0.5 font-display text-[10px] font-black tracking-[0.1em] uppercase leading-none ${
+            dashReady ? 'text-[#ede0c4]' : 'text-[#6e747e]'
           }`}
         >
-          <div className="flex items-center gap-2">
-            <Wind
-              className={`w-4 h-4 ${dashCharges > 0 ? 'text-[#7db9cf]' : 'text-[#5a606b]'}`}
-            />
-            <div className="flex flex-col items-start leading-tight">
-              <span className="font-display text-[11px] font-bold tracking-wider uppercase">
-                Dash
-              </span>
-              <span className="text-[9px] text-[#9c8e72] font-mono-numbers">
-                {dashCharges > 0 ? 'Ready' : 'Recharge'}
-              </span>
-            </div>
-          </div>
+          DASH
+        </span>
 
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex items-center gap-1">
-              {Array.from({ length: maxDashCharges }).map((_, idx) => {
-                const ready = idx < dashCharges;
-                return (
-                  <span
-                    key={idx}
-                    className={`w-2.5 h-2.5 rounded-full border transition-all ${
-                      ready
-                        ? 'bg-[#6aaac2] border-[#b7dce8]'
-                        : 'bg-[#1a1d22] border-[#3a3f47]'
-                    }`}
-                  />
-                );
-              })}
-            </div>
-            {dashCharges < maxDashCharges && (
-              <div className="w-8 h-1 rounded-full bg-[#17191e] border border-[#2f343d] overflow-hidden">
-                <div
-                  className="h-full bg-[#5a96ad] transition-all duration-75"
-                  style={{ width: `${Math.round(dashCooldownProgress * 100)}%` }}
-                />
-              </div>
-            )}
-          </div>
-        </button>
-
-        <div className="max-w-[58vw] sm:max-w-[54vw] flex flex-wrap items-center justify-end gap-x-2.5 gap-y-1 text-[10px] sm:text-[11px] text-[#9c8e72] text-right">
-          {activeSynergyMetas.map((synergyMeta, idx) => (
-            <React.Fragment key={synergyMeta.id}>
-              {idx > 0 && (
-                <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-              )}
+        {maxDashCharges > 1 && (
+          <div className="relative z-10 mt-0.5 flex items-center gap-1">
+            {Array.from({ length: maxDashCharges }).map((_, idx) => (
               <span
-                className="flex items-center gap-1 font-semibold"
-                style={{ color: synergyMeta.accentColor }}
-                title={synergyMeta.bonusSummary}
-              >
-                <span>★ {synergyMeta.synergyTitle}</span>
-              </span>
-            </React.Fragment>
-          ))}
-          {activeSynergyMetas.length > 0 &&
-            (equippedRelics.length > 0 || unlockedWeapons.length > 0) && (
-              <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-            )}
-          {equippedRelics.map((relic, idx) => (
-            <React.Fragment key={relic.id}>
-              {idx > 0 && (
-                <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-              )}
-              <span className="flex items-center gap-1 text-[#d8c9a8]">
-                <Gem className="w-3 h-3" style={{ color: relic.accentColor }} />
-                <span className="font-medium">{relic.name}</span>
-              </span>
-            </React.Fragment>
-          ))}
-          {equippedRelics.length > 0 && unlockedWeapons.length > 0 && (
-            <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-          )}
-          {unlockedWeapons.map((w, idx) => (
-            <React.Fragment key={w.id}>
-              {idx > 0 && (
-                <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-              )}
-              <span className="flex items-center gap-1">
-                <span className="text-[#d8c9a8] font-medium">{w.name}</span>
-                <span className="font-mono-numbers text-[#e5303a] font-semibold">
-                  {w.level}
-                </span>
-              </span>
-            </React.Fragment>
-          ))}
-        </div>
-      </div>
+                key={idx}
+                className={`w-1.5 h-1.5 rounded-full ${
+                  idx < dashCharges
+                    ? 'bg-[#22d3ee] shadow-[0_0_4px_#22d3ee]'
+                    : 'bg-[#2a303a]'
+                }`}
+              />
+            ))}
+          </div>
+        )}
+      </button>
     </div>
   );
 };

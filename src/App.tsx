@@ -13,7 +13,7 @@ import { SettingsModal } from './components/SettingsModal';
 import { HowToPlayModal } from './components/HowToPlayModal';
 import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
-import { ForgedIronFrame, IronButton } from './components/ForgedIronFrame';
+import { PauseModal } from './components/PauseModal';
 import { LoadingScreen } from './components/LoadingScreen';
 import { gameManager, GraphicsConfig } from './game/GameManager';
 import { createPhaserGame } from './game/phaserConfig';
@@ -33,7 +33,6 @@ import {
   UpgradeOption,
   WeaponState,
 } from './game/types';
-import { Play, RotateCcw, Settings } from 'lucide-react';
 import { MainScene } from './game/scenes/MainScene';
 import { initCapacitorMobile } from './mobile/capacitorBridge';
 import { haptics } from './mobile/haptics';
@@ -230,12 +229,23 @@ export default function App() {
       unsubEventWarning();
       unsubTogglePause();
       unsubLoadProgress();
+      if (loadingFinishTimerRef.current !== null) {
+        window.clearTimeout(loadingFinishTimerRef.current);
+        loadingFinishTimerRef.current = null;
+      }
+      if (loadingFailsafeTimerRef.current !== null) {
+        window.clearTimeout(loadingFailsafeTimerRef.current);
+        loadingFailsafeTimerRef.current = null;
+      }
     };
   }, []);
 
   // Smooth initial app boot entrance until fonts & shell hydrate
   useEffect(() => {
     let cancelled = false;
+    let finalizeDelayTimer: number | null = null;
+    let fontsDelayTimer: number | null = null;
+
     const t1 = window.setTimeout(() => {
       if (!cancelled) {
         setLoadingOverlay((prev) =>
@@ -253,7 +263,11 @@ export default function App() {
           ? { ...prev, progress: 100, phase: 'Lantern Lit…' }
           : prev
       );
-      window.setTimeout(() => {
+      if (finalizeDelayTimer !== null) {
+        window.clearTimeout(finalizeDelayTimer);
+      }
+      finalizeDelayTimer = window.setTimeout(() => {
+        finalizeDelayTimer = null;
         if (!cancelled) {
           setLoadingOverlay((prev) =>
             prev.mode === 'boot' ? { ...prev, visible: false } : prev
@@ -265,13 +279,17 @@ export default function App() {
     const maxWait = window.setTimeout(finalizeBoot, 950);
     const fontsReady = document.fonts?.ready ?? Promise.resolve();
     fontsReady.then(() => {
-      window.setTimeout(finalizeBoot, 460);
+      if (!cancelled) {
+        fontsDelayTimer = window.setTimeout(finalizeBoot, 460);
+      }
     });
 
     return () => {
       cancelled = true;
       window.clearTimeout(t1);
       window.clearTimeout(maxWait);
+      if (finalizeDelayTimer !== null) window.clearTimeout(finalizeDelayTimer);
+      if (fontsDelayTimer !== null) window.clearTimeout(fontsDelayTimer);
     };
   }, []);
 
@@ -287,7 +305,6 @@ export default function App() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
         if (gameStateRef.current === 'PLAYING' || gameStateRef.current === 'PAUSED') {
-          console.log('pause pressed');
           handleTogglePauseRef.current();
         }
       }
@@ -302,7 +319,6 @@ export default function App() {
       if (document.hidden) {
         needsTapAudioResumeRef.current = true;
         if (gameStateRef.current === 'PLAYING') {
-          console.log('pause pressed');
           handleTogglePauseRef.current();
         } else {
           soundManager.pauseAudio();
@@ -314,7 +330,6 @@ export default function App() {
 
     const handleBlur = () => {
       if (gameStateRef.current === 'PLAYING') {
-        console.log('pause pressed');
         handleTogglePauseRef.current();
       }
     };
@@ -532,11 +547,13 @@ export default function App() {
   // Toggle pause: handles physics, timers, tweens, anims, DarknessScene, audio without conflicting with level up
   const handleTogglePause = () => {
     soundManager.playUiClick();
+    const scene = gameManager.activeScene as MainScene | null;
+    const isSceneReady = Boolean(scene && scene.sys?.isActive());
     if (gameState === 'PLAYING') {
       gameManager.setGameState('PAUSED');
       setGameState('PAUSED');
-      if (gameManager.activeScene) {
-        (gameManager.activeScene as MainScene).pauseGame();
+      if (isSceneReady && scene) {
+        scene.pauseGame();
       } else {
         soundManager.pauseAudio();
       }
@@ -544,8 +561,8 @@ export default function App() {
       gameManager.setGameState('PLAYING');
       setGameState('PLAYING');
       // If level-up card selection is active, physics stay paused until card choice, but audio resumes
-      if (!levelUpOptions && gameManager.activeScene) {
-        (gameManager.activeScene as MainScene).resumeGame();
+      if (!levelUpOptions && isSceneReady && scene) {
+        scene.resumeGame();
       } else {
         soundManager.resumeAudio();
       }
@@ -577,8 +594,14 @@ export default function App() {
     setGameState('TITLE');
     // Destroy Phaser game first because WebAudioSoundManager.destroy() suspends a shared AudioContext
     if (gameManager.phaserGame) {
-      gameManager.phaserGame.destroy(true);
+      try {
+        gameManager.phaserGame.destroy(true);
+      } catch (err) {
+        console.warn('[App] Phaser destroy error:', err);
+      }
       gameManager.phaserGame = null;
+      gameManager.activeScene = null;
+      gameManager.activeUiScene = null;
     }
     soundManager.resumeAudio();
     soundManager.playMenu();
@@ -592,19 +615,21 @@ export default function App() {
   const handleSelectUpgrade = (option: UpgradeOption, acceptChallenge: boolean) => {
     setLevelUpOptions(null);
     setLevelUpChallenge(null);
-    if (gameManager.activeScene) {
-      (gameManager.activeScene as MainScene).applyUpgrade(option, acceptChallenge);
+    const scene = gameManager.activeScene as MainScene | null;
+    if (scene && scene.sys?.isActive()) {
+      scene.applyUpgrade(option, acceptChallenge);
     }
   };
 
   const handleSpawnBossNow = () => {
-    if (gameManager.activeScene) {
-      (gameManager.activeScene as MainScene).spawnBoss();
+    const scene = gameManager.activeScene as MainScene | null;
+    if (scene && scene.sys?.isActive()) {
+      scene.spawnBoss();
     }
   };
 
   return (
-    <main className="relative w-screen h-screen overflow-hidden bg-[#121316]">
+    <main className="relative w-screen h-[100dvh] overflow-hidden bg-[#08090d]">
       {/* Phaser Canvas Container */}
       <div id="phaser-container" ref={containerRef} className="absolute inset-0 z-10" />
 
@@ -658,8 +683,9 @@ export default function App() {
           onTogglePause={handleTogglePause}
           onSpawnBossNow={handleSpawnBossNow}
           onTriggerDash={() => {
-            if (gameManager.activeScene) {
-              (gameManager.activeScene as MainScene).triggerDash();
+            const scene = gameManager.activeScene as MainScene | null;
+            if (scene && scene.sys?.isActive()) {
+              scene.triggerDash();
             }
           }}
         />
@@ -667,69 +693,15 @@ export default function App() {
 
       {/* Pause Screen Overlay: Hidden whenever Settings or HowToPlay sub-modal is open */}
       {gameState === 'PAUSED' && !showSettings && !showHowToPlay && (
-        <div
-          className="fixed inset-0 backdrop-blur-md flex flex-col items-center justify-center safe-area-pad z-50"
-          style={{
-            background:
-              'radial-gradient(circle at center, rgba(16, 14, 16, 0.8) 0%, rgba(34, 8, 12, 0.9) 100%)',
-          }}
-        >
-          <ForgedIronFrame
-            seed="pause-menu-panel"
-            dripCount={4}
-            maxDripLength={22}
-            className="max-w-sm w-full"
-            contentClassName="p-6 sm:p-7 text-center"
-          >
-            <h2 className="text-2xl font-display font-bold tracking-wider text-[#d8c9a8] mb-1.5">
-              PAUSED
-            </h2>
-            <p className="text-xs text-[#9c8e72] mb-6">
-              The lantern rests in the dark
-            </p>
-            <div className="flex flex-col gap-3">
-              <IronButton
-                seed="pause-resume-btn"
-                variant="blood"
-                dripCount={2}
-                onClick={handleTogglePause}
-                className="w-full min-h-[56px] px-6 font-display font-bold text-sm tracking-wider"
-              >
-                <Play className="w-4 h-4 fill-[#e5303a] text-[#e5303a]" />
-                <span>Resume</span>
-              </IronButton>
-
-              <IronButton
-                seed="pause-restart-btn"
-                dripCount={2}
-                onClick={handleRestartGame}
-                className="w-full min-h-[56px] px-6 text-sm font-semibold"
-              >
-                <RotateCcw className="w-4 h-4 text-[#e5303a]" />
-                <span>Restart</span>
-              </IronButton>
-
-              <IronButton
-                seed="pause-settings-btn"
-                dripCount={2}
-                onClick={() => setShowSettings(true)}
-                className="w-full min-h-[56px] px-6 text-sm font-semibold"
-              >
-                <Settings className="w-4 h-4 text-[#d8c9a8]" />
-                <span>Settings</span>
-              </IronButton>
-
-              <IronButton
-                seed="pause-quit-btn"
-                dripCount={2}
-                onClick={handleQuitToTitle}
-                className="w-full min-h-[56px] px-6 text-sm font-medium"
-              >
-                <span className="text-[#b3a487] group-hover:text-[#d8c9a8]">Quit to Menu</span>
-              </IronButton>
-            </div>
-          </ForgedIronFrame>
-        </div>
+        <PauseModal
+          weapons={weapons}
+          equippedRelicIds={equippedRelicIds}
+          activeRelicSynergies={activeRelicSynergies}
+          onResume={handleTogglePause}
+          onRestart={handleRestartGame}
+          onOpenSettings={() => setShowSettings(true)}
+          onQuitToTitle={handleQuitToTitle}
+        />
       )}
 
       {/* Modal: Settings (hidden cleanly while HowToPlay sub-modal is open so close buttons never stack) */}

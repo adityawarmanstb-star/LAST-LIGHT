@@ -3,6 +3,7 @@ import React, { useEffect, useRef, useState } from 'react';
 interface BloodHpBarProps {
   hp: number;
   maxHp: number;
+  compact?: boolean;
 }
 
 interface FallingDrop {
@@ -13,7 +14,11 @@ interface FallingDrop {
   driftX: number;
 }
 
-export const BloodHpBar: React.FC<BloodHpBarProps> = ({ hp, maxHp }) => {
+export const BloodHpBar: React.FC<BloodHpBarProps> = ({
+  hp,
+  maxHp,
+  compact = false,
+}) => {
   const hpPercent = Math.max(0, Math.min(100, (hp / Math.max(1, maxHp)) * 100));
   const [trailPercent, setTrailPercent] = useState<number>(hpPercent);
   const [drops, setDrops] = useState<FallingDrop[]>([]);
@@ -77,17 +82,19 @@ export const BloodHpBar: React.FC<BloodHpBarProps> = ({ hp, maxHp }) => {
     };
   }, []);
 
+  const borderThickness = compact ? '1.5px' : '2px';
+
   return (
     <div className="relative w-full">
       {/* Forged-iron tube housing */}
       <div
-        className="relative w-full h-3.5 rounded-full overflow-hidden"
+        className={`relative w-full ${compact ? 'h-[9px]' : 'h-3.5'} rounded-full overflow-hidden`}
         style={{
           background: 'linear-gradient(180deg, #0b0c0e 0%, #14161a 55%, #090a0c 100%)',
-          borderTop: '2px solid #4a515e',
-          borderLeft: '2px solid #3a3f47',
-          borderBottom: '2px solid #07080a',
-          borderRight: '2px solid #090a0c',
+          borderTop: `${borderThickness} solid #4a515e`,
+          borderLeft: `${borderThickness} solid #3a3f47`,
+          borderBottom: `${borderThickness} solid #07080a`,
+          borderRight: `${borderThickness} solid #090a0c`,
           boxShadow:
             'inset 0 2px 4px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(58, 63, 71, 0.45)',
         }}

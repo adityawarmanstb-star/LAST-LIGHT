@@ -545,12 +545,16 @@ export class MainScene extends Phaser.Scene {
   private pickupPool: Phaser.Physics.Arcade.Sprite[] = [];
   private enemyPool: Phaser.Physics.Arcade.Sprite[] = [];
   private readonly MAX_ENEMY_PROJECTILES = 24;
+  private readonly MAX_ENEMY_PROJECTILE_POOL = 64;
+  private readonly MAX_PLAYER_PROJECTILES = 140;
   private readonly MAX_ENEMY_TRAILS = 64;
   private readonly MAX_ACTIVE_XP_GEMS = 70;
+  private readonly MAX_ACTIVE_COINS = 60;
 
   // Skill & Impact Effect Pool (Cap at 40 active effects)
   private effectPool: EffectPoolItem[] = [];
   private readonly MAX_ACTIVE_EFFECTS = 40;
+  private levelUpSlowMoTimer: number | null = null;
 
   // Groups
   private enemiesGroup!: Phaser.Physics.Arcade.Group;
@@ -679,6 +683,10 @@ export class MainScene extends Phaser.Scene {
     this.nextSpawnTime = 1000;
     this.hitstopTimer = 0;
     this.isHitstopPausedPhysics = false;
+    if (this.levelUpSlowMoTimer !== null) {
+      window.clearTimeout(this.levelUpSlowMoTimer);
+      this.levelUpSlowMoTimer = null;
+    }
     this.unsubCritImpact?.();
     this.unsubCritImpact = null;
     this.isInvulnerable = false;
@@ -1167,6 +1175,7 @@ export class MainScene extends Phaser.Scene {
     this.player.on(
       Phaser.Animations.Events.ANIMATION_UPDATE,
       (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
+        if (this.isDead || !this.sys?.isActive() || !this.player?.active) return;
         if (_anim.key === 'attack') {
           const fIndex =
             typeof frame.textureFrame === 'number'
@@ -1181,6 +1190,7 @@ export class MainScene extends Phaser.Scene {
 
     // When attack animation completes, return to walk (if moving) or idle frame 0
     this.player.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
+      if (this.isDead || !this.sys?.isActive() || !this.player?.active) return;
       if (anim.key === 'attack') {
         this.isAttacking = false;
         this.muzzleFiredThisAttack = false;
@@ -1340,13 +1350,14 @@ export class MainScene extends Phaser.Scene {
 
     // Keep cameras, floor TileSprite, and GPU upscaler synced across Dynamic Resolution / 4K setting changes
     this.mainResizeHandler = (gameSize: Phaser.Structs.Size) => {
+      if (!this.sys?.isActive() || !this.cameras?.main) return;
       const nextScale = Math.max(1, gameSize.width / LOGICAL_WIDTH);
       performanceRuntime.currentRenderScale = nextScale;
       syncLogicalCamera(this.cameras.main, nextScale, false);
-      if (this.floor) {
+      if (this.floor && this.floor.scene) {
         this.floor.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5);
       }
-      if (this.lightVignette) {
+      if (this.lightVignette && this.lightVignette.scene) {
         const z = getScrollZeroOffset(this.cameras.main);
         this.lightVignette.setPosition(z.x, z.y);
       }
@@ -1362,6 +1373,7 @@ export class MainScene extends Phaser.Scene {
     // Live apply Settings -> Graphics & 90Hz/4K toggles immediately mid-run
     this.unsubGraphics?.();
     this.unsubGraphics = gameManager.onGraphicsChange((nextGfx) => {
+      if (!this.sys?.isActive() || !this.cameras?.main) return;
       performanceRuntime.currentConfig = { ...nextGfx };
       performanceRuntime.setTargetFpsOnGame(this.game, nextGfx.targetFps);
       const nextScale = resolveRenderScale(nextGfx.resolutionMode, this.maxWebGlTexSize);
@@ -1382,6 +1394,28 @@ export class MainScene extends Phaser.Scene {
 
     // Clean up activeScene reference and atmosphere graphics on shutdown/restart
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      if (this.levelUpSlowMoTimer !== null) {
+        window.clearTimeout(this.levelUpSlowMoTimer);
+        this.levelUpSlowMoTimer = null;
+      }
+      this.pendingEvent = null;
+      this.telegraphs = [];
+      this.activeBoss = null;
+      if (this.player) {
+        this.player.off(Phaser.Animations.Events.ANIMATION_UPDATE);
+        this.player.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
+      }
+      for (let i = 0; i < this.effectPool.length; i++) {
+        const fx = this.effectPool[i];
+        if (fx.timerEvent) {
+          fx.timerEvent.destroy();
+          fx.timerEvent = undefined;
+        }
+        if (fx.sprite) {
+          fx.sprite.off(Phaser.Animations.Events.ANIMATION_UPDATE);
+          fx.sprite.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
+        }
+      }
       this.unsubCritImpact?.();
       this.unsubCritImpact = null;
       this.unsubGraphics?.();
@@ -1616,6 +1650,10 @@ export class MainScene extends Phaser.Scene {
       item.timerEvent.destroy();
       item.timerEvent = undefined;
     }
+    if (!item.sprite || !item.sprite.scene) {
+      item.inUse = false;
+      return;
+    }
     item.sprite.off(Phaser.Animations.Events.ANIMATION_UPDATE);
     item.sprite.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
     item.sprite.anims.stop();
@@ -1777,6 +1815,7 @@ export class MainScene extends Phaser.Scene {
     item.sprite.on(
       Phaser.Animations.Events.ANIMATION_UPDATE,
       (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
+        if (this.isDead || !this.sys?.isActive() || !this.player?.active) return;
         const fIdx =
           typeof frame.textureFrame === 'number'
             ? frame.textureFrame
@@ -1867,18 +1906,22 @@ export class MainScene extends Phaser.Scene {
 
     // Visible for 0.25s per hit
     item.timerEvent = this.time.delayedCall(250, () => {
+      if (!this.sys?.isActive()) return;
       this.releasePooledEffect(item);
     });
   }
 
   private triggerChainLightning(source: Phaser.Physics.Arcade.Sprite, chainDamage: number) {
+    if (!source || !source.scene || !this.sys?.isActive() || !this.enemiesGroup) return;
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     let target: Phaser.Physics.Arcade.Sprite | null = null;
     let closestDistSq = 260 * 260;
 
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
-      if (!e.active || e === source) continue;
+      if (!e || !e.active || !e.scene || e === source) continue;
+      const edata = e.getData('data') as EnemyData | undefined;
+      if (!edata || edata.hp <= 0) continue;
       const dx = e.x - source.x;
       const dy = e.y - source.y;
       const dSq = dx * dx + dy * dy;
@@ -1888,7 +1931,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    if (target) {
+    if (target && target.active && target.scene) {
       this.spawnChainLightningEffect(source.x, source.y, target.x, target.y);
       soundManager.playLightning();
       this.damageEnemy(target, chainDamage, false, 0, 0, false);
@@ -1947,7 +1990,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private triggerAttackMuzzleEffect() {
-    if (this.muzzleFiredThisAttack) return;
+    if (this.muzzleFiredThisAttack || this.isDead || !this.sys?.isActive() || !this.player?.active) return;
     this.muzzleFiredThisAttack = true;
 
     // Small camera shake on attack frame 2
@@ -1970,7 +2013,9 @@ export class MainScene extends Phaser.Scene {
       scaleY: 0.5,
       alpha: 0,
       duration: 160,
-      onComplete: () => flash.destroy(),
+      onComplete: () => {
+        if (flash.scene) flash.destroy();
+      },
     });
 
     // Particle burst of sparks
@@ -1981,23 +2026,17 @@ export class MainScene extends Phaser.Scene {
   // Main Update Loop
   // -------------------------------------------------------------
   update(time: number, rawDelta: number) {
-    if (this.isDead || this.isGamePaused) return;
+    if (this.isDead || this.isGamePaused || !this.sys?.isActive() || !this.player?.active) return;
 
-    // 90Hz/120Hz Dynamic Resolution Scaling & Quality Tier adaptation
-    const perfAction = performanceRuntime.sampleFrame(time, rawDelta, this.maxWebGlTexSize);
-    if (perfAction.nextQualityTier && perfAction.nextQualityTier !== gameManager.getQualityTier()) {
-      gameManager.setQualityTier(perfAction.nextQualityTier);
-    }
-    if (perfAction.nextRenderScale && this.game?.scale) {
-      const nextScale = perfAction.nextRenderScale;
-      this.game.scale.setGameSize(
-        Math.round(LOGICAL_WIDTH * nextScale),
-        Math.round(LOGICAL_HEIGHT * nextScale)
-      );
-    }
+    try {
+      // 90Hz/120Hz Dynamic Resolution Scaling & Quality Tier adaptation
+      const perfAction = performanceRuntime.sampleFrame(time, rawDelta, this.maxWebGlTexSize);
+      if (perfAction.nextQualityTier && perfAction.nextQualityTier !== gameManager.getQualityTier()) {
+        gameManager.setQualityTier(perfAction.nextQualityTier);
+      }
 
-    // Exact real-time delta in ms (clamped at 50ms) so 60/90/120 FPS run identically
-    const delta = performanceRuntime.smoothFrameDelta(rawDelta);
+      // Exact real-time delta in ms (clamped at 50ms) so 60/90/120 FPS run identically
+      const delta = performanceRuntime.smoothFrameDelta(rawDelta);
 
     // Delta-time camera follow lerp (equivalent to 0.15 per 60Hz frame, sub-pixel)
     this.cameraController.updateFollowLerp(delta, 0.15);
@@ -2260,10 +2299,13 @@ export class MainScene extends Phaser.Scene {
     // 13. Enemy Spawning & Timeline Events (millisecond simulation clock)
     this.handleEnemySpawning(this.simTimeMs);
 
-    // 14. Periodic Stats Sync with UI (~115ms)
-    if (time - this.lastStatsEmitMs >= 115) {
-      this.lastStatsEmitMs = time;
-      this.emitStatsUpdate();
+      // 14. Periodic Stats Sync with UI (~115ms)
+      if (time - this.lastStatsEmitMs >= 115) {
+        this.lastStatsEmitMs = time;
+        this.emitStatsUpdate();
+      }
+    } catch (err) {
+      console.error('[MainScene] update error:', err);
     }
   }
 
@@ -2731,7 +2773,7 @@ export class MainScene extends Phaser.Scene {
     const radius = 95;
     const hitRadiusSq = 45 * 45;
     const nearby = canDealDamage
-      ? (this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])
+      ? [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])]
       : null;
     const now = this.time.now;
     const dmg = canDealDamage ? Math.round(blades.damage * this.playerStats.damageMultiplier) : 0;
@@ -2742,6 +2784,7 @@ export class MainScene extends Phaser.Scene {
       const by = this.player.y + Math.sin(angle) * radius;
 
       const blade = this.orbitingBlades[i];
+      if (!blade || !blade.scene) continue;
       // Orbit the sprite's POSITION around the player; keep sprite's baked spin animation fast & sharp
       blade.setPosition(bx, by);
       blade.setAlpha(canDealDamage ? 1.0 : 0.28);
@@ -2752,7 +2795,7 @@ export class MainScene extends Phaser.Scene {
       // Slicing check on nearby enemies using squared distance (only while standing still if ORBIT_BLADES_NEED_STANDING)
       for (let j = 0; j < nearby.length; j++) {
         const enemy = nearby[j];
-        if (!enemy.active) continue;
+        if (!enemy || !enemy.active || !enemy.scene) continue;
         const dx = enemy.x - bx;
         const dy = enemy.y - by;
         if (dx * dx + dy * dy < hitRadiusSq) {
@@ -2794,17 +2837,17 @@ export class MainScene extends Phaser.Scene {
       duration: 550,
       ease: 'Cubic.easeOut',
       onComplete: () => {
-        ringSprite.destroy();
+        if (ringSprite.scene) ringSprite.destroy();
       },
     });
 
-    // Damage all enemies in blast radius
-    const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+    // Damage all enemies in blast radius (snapshot children so mid-loop boss destroy cannot shrink array)
+    const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
     const dmg = Math.round(ring.damage * this.playerStats.damageMultiplier);
 
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
-      if (!enemy.active) continue;
+      if (!enemy || !enemy.active || !enemy.scene) continue;
       const dx = enemy.x - this.player.x;
       const dy = enemy.y - this.player.y;
       if (dx * dx + dy * dy <= maxRadiusSq) {
@@ -2928,11 +2971,12 @@ export class MainScene extends Phaser.Scene {
   // Projectiles Update (Enemy Orb Pulse/Trail/Particles & Near-Miss Dodge)
   // -------------------------------------------------------------
   private updateProjectiles(delta: number) {
-    const projs = this.projectilesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+    if (!this.projectilesGroup) return;
+    const projs = [...(this.projectilesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
     let magentaParticlesThisFrame = 0;
 
     for (const proj of projs) {
-      if (!proj.active) continue;
+      if (!proj || !proj.active || !proj.scene) continue;
       const data = proj.getData('data') as ProjectileData;
       if (!data) continue;
 
@@ -2993,7 +3037,7 @@ export class MainScene extends Phaser.Scene {
   // Enemies AI & Update
   // -------------------------------------------------------------
   private updateEnemies(time: number, delta: number) {
-    const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+    const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
     const pressureSpeedFactor = this.isUnderPressure ? 1 + SPAWN_TIMELINE.pressure.enemySpeedBonus : 1;
     const bloodFogSpeedFactor = this.bloodFogTimerMs > 0 ? HORDE_FRENZY.enemySpeedMultiplier : 1;
     const globalEnemySpeedFactor = pressureSpeedFactor * bloodFogSpeedFactor;
@@ -3004,7 +3048,7 @@ export class MainScene extends Phaser.Scene {
 
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
-      if (!enemy.active) continue;
+      if (!enemy || !enemy.active || !enemy.scene) continue;
 
       const edata = enemy.getData('data') as EnemyData;
       if (!edata) continue;
@@ -3329,11 +3373,31 @@ export class MainScene extends Phaser.Scene {
   }
 
   private acquireEnemyProjectile(x: number, y: number): Phaser.Physics.Arcade.Sprite {
-    let proj = this.enemyProjectilePool.find((p) => !p.active);
+    let proj = this.enemyProjectilePool.find((p) => !p.active && Boolean(p.scene));
     if (!proj) {
-      proj = this.projectilesGroup.create(x, y, 'fx_spitter_orb_sheet', 0) as Phaser.Physics.Arcade.Sprite;
-      proj.disableInteractive();
-      this.enemyProjectilePool.push(proj);
+      if (this.enemyProjectilePool.length >= this.MAX_ENEMY_PROJECTILE_POOL) {
+        let oldest: Phaser.Physics.Arcade.Sprite | undefined;
+        let maxLife = -1;
+        for (let i = 0; i < this.enemyProjectilePool.length; i++) {
+          const candidate = this.enemyProjectilePool[i];
+          if (!candidate.scene) continue;
+          const pdata = candidate.getData('data') as ProjectileData | undefined;
+          const life = pdata?.life ?? 0;
+          if (!oldest || life > maxLife) {
+            maxLife = life;
+            oldest = candidate;
+          }
+        }
+        if (oldest) {
+          this.releaseEnemyProjectile(oldest);
+          proj = oldest;
+        }
+      }
+      if (!proj) {
+        proj = this.projectilesGroup.create(x, y, 'fx_spitter_orb_sheet', 0) as Phaser.Physics.Arcade.Sprite;
+        proj.disableInteractive();
+        this.enemyProjectilePool.push(proj);
+      }
     }
     this.tweens.killTweensOf(proj);
     proj.anims.stop();
@@ -3349,11 +3413,35 @@ export class MainScene extends Phaser.Scene {
     y: number,
     texture: string
   ): Phaser.Physics.Arcade.Sprite {
-    let proj = this.playerProjectilePool.find((p) => !p.active);
+    let proj = this.playerProjectilePool.find((p) => !p.active && Boolean(p.scene));
     if (!proj) {
-      proj = this.projectilesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
-      proj.disableInteractive();
-      this.playerProjectilePool.push(proj);
+      if (this.playerProjectilePool.length >= this.MAX_PLAYER_PROJECTILES) {
+        let oldest: Phaser.Physics.Arcade.Sprite | undefined;
+        let maxLife = -1;
+        for (let i = 0; i < this.playerProjectilePool.length; i++) {
+          const candidate = this.playerProjectilePool[i];
+          if (!candidate.scene) continue;
+          const pdata = candidate.getData('data') as ProjectileData | undefined;
+          const life = pdata?.life ?? 0;
+          if (!oldest || life > maxLife) {
+            maxLife = life;
+            oldest = candidate;
+          }
+        }
+        if (oldest) {
+          this.releasePlayerProjectile(oldest);
+          proj = oldest;
+        }
+      }
+      if (!proj) {
+        proj = this.projectilesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
+        proj.disableInteractive();
+        this.playerProjectilePool.push(proj);
+      } else {
+        proj.setTexture(texture);
+        proj.enableBody(true, x, y, true, true);
+        proj.setAlpha(1);
+      }
     } else {
       proj.setTexture(texture);
       proj.enableBody(true, x, y, true, true);
@@ -3363,6 +3451,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private releasePlayerProjectile(proj: Phaser.Physics.Arcade.Sprite) {
+    if (!proj || !proj.scene) return;
     proj.clearTint();
     proj.disableBody(true, true);
     proj.setActive(false);
@@ -3374,7 +3463,7 @@ export class MainScene extends Phaser.Scene {
     y: number,
     texture: string
   ): Phaser.Physics.Arcade.Sprite {
-    let enemy = this.enemyPool.find((e) => !e.active);
+    let enemy = this.enemyPool.find((e) => !e.active && Boolean(e.scene));
     if (!enemy) {
       enemy = this.enemiesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
       enemy.disableInteractive();
@@ -3391,6 +3480,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private releaseEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
+    if (!enemy || !enemy.scene) return;
     this.tweens.killTweensOf(enemy);
     enemy.anims.stop();
     enemy.clearTint();
@@ -3407,7 +3497,7 @@ export class MainScene extends Phaser.Scene {
     y: number,
     texture: string
   ): Phaser.Physics.Arcade.Sprite {
-    let p = this.pickupPool.find((item) => !item.active);
+    let p = this.pickupPool.find((item) => !item.active && Boolean(item.scene));
     if (!p) {
       p = this.pickupsGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
       p.disableInteractive();
@@ -3422,6 +3512,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private releasePickup(p: Phaser.Physics.Arcade.Sprite) {
+    if (!p || !p.scene) return;
     p.setAlpha(1);
     p.disableBody(true, true);
     p.setActive(false);
@@ -4073,7 +4164,7 @@ export class MainScene extends Phaser.Scene {
 
   // Boss Spawn (5:00, recurring every 3 minutes, or Summon button)
   public spawnBoss(tier: number = 1) {
-    if (this.activeBoss) return;
+    if (this.activeBoss || this.isDead || !this.sys?.isActive() || !this.player?.active) return;
     this.bossSpawned = true;
 
     soundManager.playBossWarning();
@@ -4131,6 +4222,7 @@ export class MainScene extends Phaser.Scene {
     boss.on(
       Phaser.Animations.Events.ANIMATION_UPDATE,
       (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
+        if (!boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
         if (_anim.key === 'boss_attack') {
           const fIndex =
             typeof frame.textureFrame === 'number'
@@ -4148,6 +4240,7 @@ export class MainScene extends Phaser.Scene {
 
     // Return to boss_idle when boss_attack completes
     boss.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
+      if (!boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
       if (anim.key === 'boss_attack') {
         boss.setData('isAttacking', false);
         boss.setData('attackShockwaveDone', false);
@@ -4167,7 +4260,7 @@ export class MainScene extends Phaser.Scene {
 
   // Triggered on boss_attack frame index 10 (Boss ground slam)
   private triggerBossAreaAttack(boss: Phaser.Physics.Arcade.Sprite) {
-    if (!boss.active) return;
+    if (!boss || !boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
     const edata = boss.getData('data') as EnemyData | undefined;
 
     // fx_slam_sheet: 448x252, 14 frames, 14 fps, scaled to 295px damage radius; area damage on frame 8
@@ -4188,7 +4281,7 @@ export class MainScene extends Phaser.Scene {
       duration: 650,
       ease: 'Cubic.easeOut',
       onComplete: () => {
-        ring.destroy();
+        if (ring.scene) ring.destroy();
       },
     });
 
@@ -4200,7 +4293,8 @@ export class MainScene extends Phaser.Scene {
   // Damage & Combat Interactions
   // -------------------------------------------------------------
   private handleProjectileEnemyOverlap(proj: Phaser.Physics.Arcade.Sprite, enemy: Phaser.Physics.Arcade.Sprite) {
-    if (!proj.active || !enemy.active) return;
+    if (this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
+    if (!proj || !proj.active || !proj.scene || !enemy || !enemy.active || !enemy.scene) return;
     const pdata = proj.getData('data') as ProjectileData;
     if (!pdata || pdata.isEnemy) return;
 
@@ -4228,8 +4322,9 @@ export class MainScene extends Phaser.Scene {
     knockbackY: number = 0,
     canChain: boolean = true
   ) {
+    if (!enemy || !enemy.active || !enemy.scene || this.isDead || !this.sys?.isActive()) return;
     const edata = enemy.getData('data') as EnemyData;
-    if (!edata) return;
+    if (!edata || edata.hp <= 0) return;
 
     edata.hp -= damage;
     this.damageDealt += damage;
@@ -4242,6 +4337,14 @@ export class MainScene extends Phaser.Scene {
     // fx_lightning_sheet: chain lightning between enemies (stretched in X, 0.25s per hit)
     if (canChain && Math.random() < 0.65) {
       this.triggerChainLightning(enemy, Math.round(damage * 0.7));
+    }
+
+    // Check that enemy wasn't already killed/destroyed inside chain reaction
+    if (!enemy.active || !enemy.scene || edata.hp <= 0) {
+      if (edata.hp <= 0 && enemy.active && enemy.scene) {
+        this.killEnemy(enemy, edata);
+      }
+      return;
     }
 
     // Apply knockback
@@ -4267,11 +4370,6 @@ export class MainScene extends Phaser.Scene {
 
     // Spawn floating damage text
     this.showDamageNumber(enemy.x, enemy.y - 20, damage, isCrit);
-
-    // Check death
-    if (edata.hp <= 0) {
-      this.killEnemy(enemy, edata);
-    }
   }
 
   private killEnemy(enemy: Phaser.Physics.Arcade.Sprite, edata: EnemyData) {
@@ -4402,6 +4500,9 @@ export class MainScene extends Phaser.Scene {
       } else {
         soundManager.playGameplay();
       }
+      this.tweens.killTweensOf(enemy);
+      enemy.off(Phaser.Animations.Events.ANIMATION_UPDATE);
+      enemy.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
       enemy.destroy();
       return;
     }
@@ -4462,16 +4563,17 @@ export class MainScene extends Phaser.Scene {
     type: 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard',
     value: number
   ) {
-    // Cap active XP gems to keep overlap physics & lighting fast at 60 FPS; merge excess XP into nearest gem
-    if (type === 'gem' && this.pickupsGroup) {
+    // Cap active XP gems and Coins to keep overlap physics & memory bounded in long runs
+    if ((type === 'gem' || type === 'coin') && this.pickupsGroup) {
+      const cap = type === 'gem' ? this.MAX_ACTIVE_XP_GEMS : this.MAX_ACTIVE_COINS;
       const pickups = this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
-      let gemCount = 0;
+      let itemCount = 0;
       let mergeTarget: Phaser.Physics.Arcade.Sprite | null = null;
       let minDistSq = Infinity;
       for (let i = 0; i < pickups.length; i++) {
         const item = pickups[i];
-        if (!item.active || item.getData('type') !== 'gem') continue;
-        gemCount++;
+        if (!item || !item.active || !item.scene || item.getData('type') !== type) continue;
+        itemCount++;
         const dx = item.x - x;
         const dy = item.y - y;
         const dSq = dx * dx + dy * dy;
@@ -4480,7 +4582,7 @@ export class MainScene extends Phaser.Scene {
           mergeTarget = item;
         }
       }
-      if (gemCount >= this.MAX_ACTIVE_XP_GEMS && mergeTarget) {
+      if (itemCount >= cap && mergeTarget) {
         mergeTarget.setData('value', ((mergeTarget.getData('value') as number) || 1) + value);
         mergeTarget.setData('life', 0);
         return;
@@ -4517,7 +4619,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   private updatePickups(delta: number) {
-    const pickups = this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+    if (!this.pickupsGroup) return;
+    const pickups = [...(this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
     const magnetDist = this.playerStats.magnetRadius;
     const magnetDistSq = magnetDist * magnetDist;
     const dtSec = delta * 0.001;
@@ -4525,12 +4628,17 @@ export class MainScene extends Phaser.Scene {
 
     for (let i = 0; i < pickups.length; i++) {
       const p = pickups[i];
-      if (!p.active) continue;
+      if (!p || !p.active || !p.scene) continue;
       const type = p.getData('type') as 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard';
 
-      // XP gems expire after 12 seconds (blink in final 3s); Red Shards expire after 16s
-      if (type === 'gem' || type === 'red_shard') {
-        const expireMs = type === 'red_shard' ? 16000 : SPAWN_TIMELINE.pressure.gemExpireMs;
+      // XP gems expire after 12s, Red Shards after 16s, Coins after 45s
+      if (type === 'gem' || type === 'red_shard' || type === 'coin') {
+        const expireMs =
+          type === 'red_shard'
+            ? 16000
+            : type === 'coin'
+              ? 45000
+              : SPAWN_TIMELINE.pressure.gemExpireMs;
         const life = ((p.getData('life') as number) || 0) + delta;
         if (life >= expireMs) {
           this.releasePickup(p);
@@ -4563,7 +4671,8 @@ export class MainScene extends Phaser.Scene {
   }
 
   private handlePlayerPickupOverlap(_player: Phaser.Physics.Arcade.Sprite, pickup: Phaser.Physics.Arcade.Sprite) {
-    if (!pickup.active) return;
+    if (this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
+    if (!pickup || !pickup.active || !pickup.scene) return;
     const type = pickup.getData('type');
     const value = pickup.getData('value') || 1;
 
@@ -4676,6 +4785,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private triggerLevelUp() {
+    if (this.isDead || this.isGamePaused || !this.sys?.isActive() || !this.player?.active) return;
     this.levelUpPulseSeq++;
     soundManager.playLevelUp();
     haptics.onLevelUp();
@@ -4693,7 +4803,7 @@ export class MainScene extends Phaser.Scene {
       const knockbackForce = LIGHT.progression.lightBurst.knockback;
       const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
       for (const e of enemies) {
-        if (!e.active) continue;
+        if (!e || !e.active || !e.scene) continue;
         const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, e.x, e.y);
         if (dist <= burstRadius) {
           const ang = Phaser.Math.Angle.Between(this.player.x, this.player.y, e.x, e.y);
@@ -4711,10 +4821,16 @@ export class MainScene extends Phaser.Scene {
       soundManager.playRingPulse();
     }
 
-    // 0.3s slow-mo
+    // 0.3s slow-mo (tracked & guarded against scene destruction)
     this.time.timeScale = 0.25;
-    setTimeout(() => {
-      this.time.timeScale = 1.0;
+    if (this.levelUpSlowMoTimer !== null) {
+      window.clearTimeout(this.levelUpSlowMoTimer);
+    }
+    this.levelUpSlowMoTimer = window.setTimeout(() => {
+      this.levelUpSlowMoTimer = null;
+      if (this.sys?.isActive() && this.time) {
+        this.time.timeScale = 1.0;
+      }
     }, 300);
 
     this.spawnParticleBurst(this.player.x, this.player.y, 35, 'fx_spark', 120, 320, 0.25, 0.5);
@@ -4963,7 +5079,8 @@ export class MainScene extends Phaser.Scene {
   // Player Damage & Death
   // -------------------------------------------------------------
   private handlePlayerEnemyOverlap(_player: Phaser.Physics.Arcade.Sprite, enemy: Phaser.Physics.Arcade.Sprite) {
-    if (this.isInvulnerable || this.isDead || !enemy.active) return;
+    if (this.isInvulnerable || this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
+    if (!enemy || !enemy.active || !enemy.scene) return;
     const edata = enemy.getData('data') as EnemyData;
     if (!edata) return;
 
@@ -4971,7 +5088,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private damagePlayer(amount: number) {
-    if (this.isInvulnerable || this.isDead) return;
+    if (this.isInvulnerable || this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
 
     // Blend by playing attack only while the player is not hit, then return to walk
     if (this.isAttacking) {
@@ -5010,7 +5127,7 @@ export class MainScene extends Phaser.Scene {
       yoyo: true,
       repeat: 2,
       onComplete: () => {
-        if (this.player.active) {
+        if (this.player && this.player.active && this.player.scene) {
           this.player.setAlpha(1);
         }
       },
@@ -5025,23 +5142,35 @@ export class MainScene extends Phaser.Scene {
   }
 
   private handlePlayerDeath() {
-    this.isDead = true;
-    this.isAttacking = false;
-    this.player.anims.stop();
+    if (this.isDead || !this.sys?.isActive()) return;
 
     // Check Undying Ember (Revival meta upgrade)
     if (this.playerStats.hasRevive && !this.playerStats.usedRevive) {
       this.playerStats.usedRevive = true;
-      this.playerStats.currentHp = Math.round(this.playerStats.maxHp * 0.5);
+      this.playerStats.currentHp = Math.max(1, Math.round(this.playerStats.maxHp * 0.5));
+      this.isDead = false;
+      this.isAttacking = false;
+      this.muzzleFiredThisAttack = false;
+      this.isInvulnerable = true;
+      this.invulnTimerMs = 1800;
+
+      if (this.player && this.player.active && this.player.scene) {
+        this.tweens.killTweensOf(this.player);
+        this.player.setAlpha(1);
+        this.player.setScale(this.PLAYER_SCALE);
+        this.player.setTint(0xf2a93b);
+        this.startPlayerBobbing(this.isMoving);
+      }
 
       soundManager.playRevival();
       this.cameras.main.flash(500, 255, 255, 255);
       this.spawnParticleBurst(this.player.x, this.player.y, 40, 'fx_ring', 140, 300, 0.3, 0.6);
+      this.showFloatingCallout(this.player.x, this.player.y - 54, 'UNDYING EMBER!', '#f2a93b');
 
       // Push all nearby enemies away
-      const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+      const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
       for (const e of enemies) {
-        if (!e.active) continue;
+        if (!e || !e.active || !e.scene) continue;
         const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, e.x, e.y);
         const edata = e.getData('data') as EnemyData;
         if (edata) {
@@ -5049,11 +5178,16 @@ export class MainScene extends Phaser.Scene {
           edata.knockbackY = Math.sin(angle) * 380;
         }
       }
+      this.emitStatsUpdate();
       return;
     }
 
     // Run Over
     this.isDead = true;
+    this.isAttacking = false;
+    if (this.player?.anims) {
+      this.player.anims.stop();
+    }
     this.physics.pause();
 
     soundManager.playGameOverStinger();
@@ -5074,6 +5208,7 @@ export class MainScene extends Phaser.Scene {
       duration: 800,
       ease: 'Power2',
       onComplete: () => {
+        if (!this.sys?.isActive()) return;
         const stats: RunStats = {
           timeSurvived: Math.floor(this.runTime),
           enemiesKilled: this.enemiesKilled,
@@ -5316,6 +5451,12 @@ export class MainScene extends Phaser.Scene {
 
   // Comprehensive pause / resume (physics, timers, tweens, animations, darkness, audio)
   public pauseGame() {
+    if (!this.sys?.isActive()) return;
+    if (this.levelUpSlowMoTimer !== null) {
+      window.clearTimeout(this.levelUpSlowMoTimer);
+      this.levelUpSlowMoTimer = null;
+    }
+    this.time.timeScale = 1.0;
     this.isGamePaused = true;
     this.hitstopTimer = 0;
     this.isHitstopPausedPhysics = false;
@@ -5334,6 +5475,12 @@ export class MainScene extends Phaser.Scene {
   }
 
   public resumeGame() {
+    if (!this.sys?.isActive() || this.isDead) return;
+    if (this.levelUpSlowMoTimer !== null) {
+      window.clearTimeout(this.levelUpSlowMoTimer);
+      this.levelUpSlowMoTimer = null;
+    }
+    this.time.timeScale = 1.0;
     this.isGamePaused = false;
     this.physics.resume();
     this.time.paused = false;

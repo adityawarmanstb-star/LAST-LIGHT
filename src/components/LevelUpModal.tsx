@@ -1,26 +1,26 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Check,
+  CircleDot,
+  Coins,
+  Crosshair,
+  Disc,
+  Eye,
+  Flame,
+  Gem,
+  Heart,
+  Magnet,
+  ShieldAlert,
+  Skull,
   Sparkles,
+  Sun,
   Sword,
   Wind,
   Zap,
-  Heart,
-  Crosshair,
-  Magnet,
-  Disc,
-  CircleDot,
-  Flame,
-  Sun,
-  Eye,
-  Coins,
-  ShieldAlert,
-  Skull,
-  Gem,
-  Check,
 } from 'lucide-react';
 import { DynamicChallengeOffer, UpgradeOption } from '../game/types';
-import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
-import { BLOOD_IRON_COLORS } from '../game/ui/forgedIronPhaser';
+import { IronCard } from './IronCard';
+import { preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
 import { soundManager } from '../game/audio';
 import { haptics } from '../mobile/haptics';
 
@@ -32,10 +32,11 @@ interface LevelUpModalProps {
 
 type RarityTheme = {
   label: string;
-  borderColor: string;
-  glowColor: string;
+  outerShadow: string;
   accentText: string;
-  iconBg: string;
+  frameBorder: string;
+  frameBg: string;
+  tagColor: string;
 };
 
 export const LevelUpModal: React.FC<LevelUpModalProps> = ({
@@ -43,9 +44,11 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
   challengeOffer = null,
   onSelectUpgrade,
 }) => {
-  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
-  const [pressedIdx, setPressedIdx] = useState<number | null>(null);
   const [acceptChallenge, setAcceptChallenge] = useState<boolean>(false);
+
+  useEffect(() => {
+    preloadAllChromaKeyUiAssets();
+  }, []);
 
   // Reset pact selection whenever a new level-up offer arrives
   useEffect(() => {
@@ -75,42 +78,50 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
   const getRarityTheme = (option: UpgradeOption): RarityTheme => {
     if (option.rarity === 'epic') {
       return {
-        label: 'Epic',
-        borderColor: '#f2a93b',
-        glowColor: '#f2a93b',
-        accentText: 'text-[#f2a93b]',
-        iconBg: 'border-[#f2a93b]/55 bg-[#1b150c]',
+        label: 'EPIC',
+        outerShadow:
+          'drop-shadow(0 0 14px rgba(242, 169, 59, 0.58)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
+        accentText: 'text-[#f2c464]',
+        frameBorder: '#d99a32',
+        frameBg: 'linear-gradient(180deg, #2b2110 0%, #14100a 100%)',
+        tagColor: 'text-[#f2c464]',
       };
     }
     if (option.category === 'weapon_unlock') {
       return {
-        label: 'Relic',
-        borderColor: '#5de4ff',
-        glowColor: '#5de4ff',
+        label: 'RELIC',
+        outerShadow:
+          'drop-shadow(0 0 12px rgba(34, 211, 238, 0.5)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
         accentText: 'text-[#5de4ff]',
-        iconBg: 'border-[#5de4ff]/55 bg-[#0f1a20]',
+        frameBorder: '#22d3ee',
+        frameBg: 'linear-gradient(180deg, #10242c 0%, #091216 100%)',
+        tagColor: 'text-[#5de4ff]',
       };
     }
     if (option.rarity === 'rare') {
       return {
-        label: 'Rare',
-        borderColor: BLOOD_IRON_COLORS.freshBlood,
-        glowColor: BLOOD_IRON_COLORS.bloodGlow,
-        accentText: 'text-[#e5303a]',
-        iconBg: 'border-[#b3121a]/65 bg-[#240a0d]',
+        label: 'RARE',
+        outerShadow:
+          'drop-shadow(0 0 12px rgba(229, 48, 58, 0.52)) drop-shadow(0 0 8px rgba(242, 169, 59, 0.32)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
+        accentText: 'text-[#ff6b72]',
+        frameBorder: '#c4242d',
+        frameBg: 'linear-gradient(180deg, #2d1115 0%, #16090b 100%)',
+        tagColor: 'text-[#f2a93b]',
       };
     }
     return {
-      label: 'Common',
-      borderColor: '#666e7b',
-      glowColor: '#848e9c',
-      accentText: 'text-[#b9b09a]',
-      iconBg: 'border-[#3a3f47] bg-[#14161a]',
+      label: 'COMMON',
+      outerShadow:
+        'drop-shadow(0 0 10px rgba(34, 211, 238, 0.36)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
+      accentText: 'text-[#5de4ff]',
+      frameBorder: '#3f7688',
+      frameBg: 'linear-gradient(180deg, #172128 0%, #0c1115 100%)',
+      tagColor: 'text-[#5de4ff]',
     };
   };
 
   const renderIcon = (iconName: string, accentClass: string) => {
-    const cls = `w-7 h-7 ${accentClass}`;
+    const cls = `w-6 h-6 sm:w-7 sm:h-7 ${accentClass}`;
     switch (iconName) {
       case 'bolt':
         return <Zap className={cls} />;
@@ -147,11 +158,11 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
       case 'shard':
         return <Gem className={`${cls} text-[#e5303a]`} />;
       case 'coins':
-        return <Coins className={`${cls} text-[#f2a93b]`} />;
+        return <Coins className={`${cls} text-[#f2c464]`} />;
       case 'shield':
         return <ShieldAlert className={`${cls} text-[#5de4ff]`} />;
       case 'flame':
-        return <Flame className={`${cls} text-[#f2a93b]`} />;
+        return <Flame className={`${cls} text-[#f2c464]`} />;
       case 'skull':
         return <Skull className={`${cls} text-[#e5303a]`} />;
       case 'sun':
@@ -161,163 +172,195 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 backdrop-blur-md flex flex-col items-center justify-center safe-area-pad z-40"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="level-up-modal-title"
+      className="fixed inset-0 h-[100dvh] z-40 flex flex-col items-center justify-center select-none overflow-hidden"
       style={{
-        background:
-          'radial-gradient(circle at center, rgba(16, 15, 18, 0.8) 0%, rgba(22, 8, 11, 0.9) 100%)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
+        background: 'rgba(5, 8, 12, 0.85)',
+        paddingTop: 'max(10px, env(safe-area-inset-top))',
+        paddingBottom: 'max(10px, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(12px, env(safe-area-inset-left))',
+        paddingRight: 'max(12px, env(safe-area-inset-right))',
       }}
     >
-      <div className="max-w-4xl w-full max-h-[92vh] overflow-y-auto px-1 py-2 flex flex-col items-center">
+      <div className="w-full max-w-[440px] md:max-w-4xl flex flex-col items-center justify-center gap-2.5 sm:gap-3">
         {/* Header */}
-        <div className="text-center mb-4 sm:mb-6">
-          <div className="text-xs font-medium tracking-[0.22em] uppercase text-[#e5303a] mb-1">
-            Level Up
+        <div className="text-center shrink-0">
+          <div className="font-display text-[11px] font-extrabold tracking-[0.26em] uppercase text-[#e5303a] drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
+            LEVEL UP
           </div>
-          <h2 className="text-2xl md:text-3xl font-display font-bold tracking-wider text-[#d8c9a8]">
+          <h2
+            id="level-up-modal-title"
+            className="font-display font-black text-[22px] sm:text-3xl tracking-[0.12em] uppercase leading-tight mt-0.5"
+            style={{
+              backgroundImage:
+                'linear-gradient(180deg, #fff1c7 0%, #eab24e 52%, #a26318 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              filter:
+                'drop-shadow(0 2px 0 #170805) drop-shadow(0 0 12px rgba(242, 169, 59, 0.35))',
+            }}
+          >
             CHOOSE A BLESSING
           </h2>
         </div>
 
-        {/* Optional Dynamic Challenge Pact */}
+        {/* Dynamic Challenge / Pact Card using panel_iron_card.png */}
         {challengeOffer && (
-          <div className="w-full mb-4">
-            <ForgedIronFrame
-              seed={`dynamic-challenge-${challengeOffer.id}`}
-              dripCount={2}
-              maxDripLength={14}
-              borderColor={acceptChallenge ? '#f2a93b' : '#b3121a'}
-              glowColor={acceptChallenge ? '#f2a93b' : '#e5303a'}
-              glowStrength={acceptChallenge ? 14 : 6}
+          <div
+            className="w-full shrink-0"
+            style={{
+              filter: acceptChallenge
+                ? 'drop-shadow(0 0 14px rgba(242, 169, 59, 0.6)) drop-shadow(0 0 12px rgba(220, 38, 38, 0.5))'
+                : 'drop-shadow(0 0 12px rgba(220, 38, 38, 0.5)) drop-shadow(0 0 16px rgba(147, 51, 234, 0.32))',
+            }}
+          >
+            <IronCard
               className="w-full"
-              contentClassName="px-4 py-3.5 sm:px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              contentClassName="px-3.5 py-2.5 sm:px-4 sm:py-3 flex flex-col gap-2"
             >
-              <div className="flex items-start sm:items-center gap-3 min-w-0 text-left">
+              <div className="flex items-center gap-3 min-w-0">
+                {/* Metallic Icon Frame */}
                 <div
-                  className={`w-10 h-10 rounded-[9px] border flex items-center justify-center shrink-0 ${
-                    acceptChallenge
-                      ? 'border-[#f2a93b]/75 bg-[#22190c]'
-                      : 'border-[#b3121a]/65 bg-[#1b0c0e]'
-                  }`}
+                  className="w-11 h-11 rounded-[9px] flex items-center justify-center shrink-0"
+                  style={{
+                    background: acceptChallenge
+                      ? 'linear-gradient(180deg, #2d2010 0%, #140e07 100%)'
+                      : 'linear-gradient(180deg, #29111a 0%, #13080d 100%)',
+                    border: acceptChallenge
+                      ? '2px solid #eab24e'
+                      : '2px solid #a8243b',
+                    boxShadow:
+                      'inset 0 1px 0 rgba(255,255,255,0.16), 0 4px 10px rgba(0,0,0,0.85)',
+                  }}
                 >
                   {renderChallengeIcon(challengeOffer.icon)}
                 </div>
 
-                <div className="flex flex-col min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
-                    <span className="font-semibold uppercase tracking-[0.14em] text-[#e5303a]">
-                      Dynamic Challenge
-                    </span>
-                    <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-                    <span className="text-[#f2a93b] font-semibold font-mono-numbers">
-                      +{challengeOffer.rewardCoins} Coins · {challengeOffer.rewardBuffLabel}
+                {/* Title, Reward Badge & Concise Description */}
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <h3 className="font-display font-black text-sm tracking-[0.08em] uppercase text-[#f2c464] leading-none">
+                      {challengeOffer.title}
+                    </h3>
+                    <span className="font-display font-extrabold text-[10px] tracking-[0.06em] uppercase text-[#ffd98e] bg-[#2a1216]/90 border border-[#9e2833] px-1.5 py-0.5 rounded-[4px] whitespace-nowrap">
+                      +{challengeOffer.rewardCoins} COINS · {challengeOffer.rewardBuffLabel}
                     </span>
                   </div>
-                  <div className="text-sm font-display font-bold text-[#d8c9a8]">
-                    {challengeOffer.title}
-                  </div>
-                  <p className="text-xs text-[#b0a287] leading-snug">
+                  <p className="font-body font-medium text-[12.5px] sm:text-[13px] text-[#cbbba0] leading-tight mt-1 line-clamp-2">
                     {challengeOffer.description}
                   </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0 self-stretch sm:self-center">
-                <IronButton
-                  seed="challenge-accept-toggle"
-                  variant={acceptChallenge ? 'blood' : 'default'}
-                  dripCount={0}
-                  onClick={() => {
-                    soundManager.playUiClick();
-                    haptics.tap('medium');
-                    setAcceptChallenge((prev) => !prev);
-                  }}
-                  className="w-full sm:w-auto min-h-[48px] px-4 text-xs font-semibold whitespace-nowrap"
-                >
-                  {acceptChallenge && <Check className="w-4 h-4 text-[#f2a93b]" />}
-                  <span className={acceptChallenge ? 'text-[#f2a93b]' : 'text-[#d8c9a8]'}>
-                    {acceptChallenge ? 'Pact Accepted' : 'Accept Pact'}
-                  </span>
-                </IronButton>
-              </div>
-            </ForgedIronFrame>
+              {/* Prominent Beveled Crimson-Gold ACCEPT PACT Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  soundManager.playUiClick();
+                  haptics.tap('medium');
+                  setAcceptChallenge((prev) => !prev);
+                }}
+                className="w-full h-[36px] rounded-[7px] flex items-center justify-center gap-2 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
+                style={{
+                  background: acceptChallenge
+                    ? 'linear-gradient(180deg, #8f2222 0%, #5c1014 55%, #36080a 100%)'
+                    : 'linear-gradient(180deg, #52141a 0%, #310b0f 55%, #1d0608 100%)',
+                  border: acceptChallenge
+                    ? '1.5px solid #f2c464'
+                    : '1.5px solid #b55d29',
+                  boxShadow: acceptChallenge
+                    ? 'inset 0 1px 0 rgba(255, 226, 156, 0.35), 0 0 12px rgba(242, 169, 59, 0.45)'
+                    : 'inset 0 1px 0 rgba(242, 169, 59, 0.22), 0 4px 10px rgba(0, 0, 0, 0.8)',
+                }}
+              >
+                {acceptChallenge && (
+                  <Check className="w-4 h-4 text-[#f2c464] shrink-0" />
+                )}
+                <span className="font-display font-black text-[11px] tracking-[0.14em] uppercase text-[#f6dfa0]">
+                  {acceptChallenge ? 'PACT ACCEPTED' : 'ACCEPT PACT'}
+                </span>
+              </button>
+            </IronCard>
           </div>
         )}
 
-        {/* 3 Staggered Slide-Up Forged-Iron Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+        {/* 3 Compact Horizontal-Split Blessing Cards (Fit cleanly in 100dvh without scroll) */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-3 w-full">
           {options.map((option, index) => {
             const theme = getRarityTheme(option);
-            const isHovered = hoveredIdx === index;
-            const isPressed = pressedIdx === index;
 
             return (
-              <button
+              <div
                 key={option.id}
-                onClick={() => onSelectUpgrade(option, acceptChallenge)}
-                onMouseEnter={() => setHoveredIdx(index)}
-                onMouseLeave={() => {
-                  setHoveredIdx(null);
-                  setPressedIdx(null);
-                }}
-                onPointerDown={() => {
-                  setPressedIdx(index);
-                  haptics.tap('medium');
-                }}
-                onPointerUp={() => setPressedIdx(null)}
-                onPointerCancel={() => setPressedIdx(null)}
+                className="animate-card-slide-up w-full"
                 style={{
-                  animationDelay: `${index * 85}ms`,
+                  animationDelay: `${index * 70}ms`,
+                  filter: theme.outerShadow,
                 }}
-                className="animate-card-slide-up group relative text-center transition-transform duration-150 cursor-pointer hover:-translate-y-1 active:scale-[0.96] min-h-[210px] md:min-h-[260px] flex focus-visible:outline-2 focus-visible:outline-[#e5303a] focus-visible:outline-offset-2"
               >
-                <ForgedIronFrame
-                  seed={`lvlcard-${option.id}-${index}`}
-                  dripCount={3}
-                  maxDripLength={20}
-                  borderColor={theme.borderColor}
-                  glowColor={theme.glowColor}
-                  glowStrength={isHovered || isPressed ? 14 : 7}
-                  hovered={isHovered}
-                  pressed={isPressed}
-                  className="w-full h-full"
-                  contentClassName="w-full h-full p-5 sm:p-6 flex flex-col items-center justify-between"
+                <IronCard
+                  asButton
+                  onClick={() => {
+                    haptics.tap('medium');
+                    onSelectUpgrade(option, acceptChallenge);
+                  }}
+                  ariaLabel={`${option.title} (${theme.label})`}
+                  className="w-full active:scale-[0.97] hover:-translate-y-0.5 transition-transform duration-150"
+                  contentClassName="px-3.5 py-3 md:p-5 flex flex-row md:flex-col items-center gap-3.5 md:gap-3 text-left md:text-center min-h-[100px] md:min-h-[210px]"
                 >
-                  {/* Icon on top */}
-                  <div className="flex flex-col items-center w-full">
-                    <div
-                      className={`w-14 h-14 rounded-[10px] border flex items-center justify-center mb-4 transition-transform duration-200 group-hover:scale-105 ${theme.iconBg}`}
-                    >
-                      {renderIcon(option.icon, theme.accentText)}
-                    </div>
+                  {/* Left: Beveled Dark-Iron Metallic Icon Frame */}
+                  <div
+                    className="w-13 h-13 sm:w-14 sm:h-14 rounded-[10px] flex items-center justify-center shrink-0"
+                    style={{
+                      background: theme.frameBg,
+                      border: `2px solid ${theme.frameBorder}`,
+                      boxShadow:
+                        'inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -2px 4px rgba(0,0,0,0.85), 0 4px 12px rgba(0,0,0,0.85)',
+                    }}
+                  >
+                    {renderIcon(option.icon, theme.accentText)}
+                  </div>
 
-                    {/* Unboxed Rarity & Level metadata */}
-                    <div className="flex items-center justify-center gap-2 text-xs mb-1.5">
-                      <span className={`font-semibold ${theme.accentText}`}>
+                  {/* Right: Rarity Tag + Cinzel Title + 2-Line Rajdhani Description */}
+                  <div className="flex-1 min-w-0 flex flex-col justify-center md:items-center">
+                    <div className="flex items-center md:justify-center gap-1.5 text-[10px] mb-0.5">
+                      <span
+                        className={`font-display font-extrabold tracking-[0.12em] uppercase ${theme.tagColor}`}
+                      >
                         {theme.label}
                       </span>
-                      <span className="text-[#6b3a2a]" aria-hidden="true">·</span>
-                      <span className="font-mono-numbers text-[#9c8e72]">{option.levelText}</span>
+                      <span className="text-[#6b3a2a]" aria-hidden="true">
+                        ·
+                      </span>
+                      <span className="font-display font-bold text-[#9c8e72] uppercase">
+                        {option.levelText}
+                      </span>
+                      {acceptChallenge && (
+                        <>
+                          <span className="text-[#6b3a2a]" aria-hidden="true">
+                            ·
+                          </span>
+                          <span className="font-display font-bold text-[#f2c464] uppercase">
+                            +PACT
+                          </span>
+                        </>
+                      )}
                     </div>
 
-                    {/* Title */}
-                    <h3 className="font-display font-bold text-[#d8c9a8] text-lg leading-snug mb-2">
+                    <h3 className="font-display font-black text-[15px] sm:text-base text-[#f2e4c7] leading-tight tracking-[0.04em]">
                       {option.title}
                     </h3>
 
-                    {/* Description */}
-                    <p className="text-xs sm:text-[13px] text-[#b0a287] leading-relaxed">
+                    <p className="font-body font-medium text-[13px] text-[#cbbba0] leading-snug mt-0.5 line-clamp-2">
                       {option.description}
                     </p>
                   </div>
-
-                  {/* Tap Footer */}
-                  <div className="w-full pt-3 mt-4 border-t border-[#3a3f47]/70 flex items-center justify-center text-xs text-[#8e8168] group-hover:text-[#e5303a] transition-colors">
-                    <span className="font-display font-bold tracking-wider uppercase">
-                      {acceptChallenge ? 'Tap to Select + Pact' : 'Tap to Select'}
-                    </span>
-                  </div>
-                </ForgedIronFrame>
-              </button>
+                </IronCard>
+              </div>
             );
           })}
         </div>

@@ -235,9 +235,9 @@ class AudioManager {
     sound.mute = this.isMuted;
     sound.volume = this.masterVolume;
 
-    // Adopt Phaser's WebAudio context if ours doesn't exist yet
+    // Adopt Phaser's WebAudio context if ours doesn't exist yet or was closed
     const webAudioCtx = (sound as unknown as { context?: AudioContext }).context;
-    if (!this.ctx && webAudioCtx) {
+    if ((!this.ctx || this.ctx.state === 'closed') && webAudioCtx && webAudioCtx.state !== 'closed') {
       this.setupNodesOnContext(webAudioCtx);
     }
 
@@ -383,6 +383,15 @@ class AudioManager {
   }
 
   public initCtx(fromUserGesture: boolean = false) {
+    if (this.ctx && this.ctx.state === 'closed') {
+      this.ctx = null;
+      this.masterGain = null;
+      this.sfxGain = null;
+      this.musicGain = null;
+      this.activeSfxVoices = [];
+      this.activeMusicNodes = [];
+    }
+
     if (!this.ctx) {
       const phaserCtx = (this.phaserSound as unknown as { context?: AudioContext } | null)?.context;
       if (phaserCtx && phaserCtx.state !== 'closed') {
@@ -517,7 +526,6 @@ class AudioManager {
       };
 
       source.start(this.ctx.currentTime);
-      console.log(`sfx played: ${key}`);
     } catch {
       // fail silently
     }
@@ -980,7 +988,7 @@ class AudioManager {
     this.clearStingerTimer();
     this.queuedTrackKey = null;
     this.currentTrackKey = null;
-    if (!this.ctx) return;
+    if (!this.ctx || this.ctx.state === 'closed') return;
 
     const now = this.ctx.currentTime;
     const nodes = [...this.activeMusicNodes];
