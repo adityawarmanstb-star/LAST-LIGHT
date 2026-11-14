@@ -95,7 +95,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           'radial-gradient(circle at 50% 42%, rgba(93, 228, 255, 0.08) 0%, rgba(179, 18, 26, 0.14) 26%, rgba(11, 12, 15, 0.98) 72%)',
       }}
     >
-      {/* Subtle drifting atmospheric glow rings */}
+      {/* Subtle drifting atmospheric blood/iron shadow glow */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 overflow-hidden"
@@ -104,35 +104,35 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           className="absolute left-1/2 top-[44%] -translate-x-1/2 -translate-y-1/2 w-[340px] h-[340px] sm:w-[440px] sm:h-[440px] rounded-full blur-3xl opacity-35 animate-pulse"
           style={{
             background:
-              'radial-gradient(circle, rgba(93,228,255,0.28) 0%, rgba(229,48,58,0.12) 48%, transparent 74%)',
+              'radial-gradient(circle, rgba(145,16,24,0.34) 0%, rgba(56,96,112,0.16) 48%, transparent 74%)',
           }}
         />
       </div>
 
       {/* Center Emblem + Brand + Progress */}
       <div className="relative z-10 flex flex-col items-center w-full max-w-sm px-6 text-center">
-        {/* Character Head Emblem with Rotating Runic Rim & Cyan Halo */}
+        {/* Character Head Emblem with Forged Iron Ring & Blood Rim */}
         <div className="relative w-24 h-24 sm:w-32 sm:h-32 mb-4 sm:mb-6 flex items-center justify-center">
           <div
             aria-hidden="true"
-            className="absolute -inset-3 rounded-full blur-xl opacity-65 animate-pulse"
+            className="absolute -inset-3 rounded-full blur-xl opacity-55"
             style={{
               background:
-                'radial-gradient(circle, rgba(93,228,255,0.45) 0%, rgba(229,48,58,0.18) 55%, transparent 75%)',
+                'radial-gradient(circle, rgba(138,16,22,0.45) 0%, rgba(45,86,102,0.2) 55%, transparent 75%)',
             }}
           />
           <div
             aria-hidden="true"
-            className="absolute -inset-1.5 rounded-full border border-[#5de4ff]/35 shadow-[0_0_24px_rgba(93,228,255,0.28)]"
+            className="absolute -inset-1.5 rounded-full border-2 border-[#545c69] shadow-[inset_0_1px_0_rgba(180,190,204,0.3),0_0_18px_rgba(0,0,0,0.9)]"
           />
           <div
             aria-hidden="true"
-            className="absolute -inset-3 rounded-full border border-dashed border-[#f2a93b]/25 animate-[spin_18s_linear_infinite]"
+            className="absolute -inset-3 rounded-full border border-dashed border-[#8c1820]/65 animate-[spin_22s_linear_infinite]"
           />
           <img
             src="./app-icon.webp"
             alt="Last Light — Dark Warden"
-            className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover shadow-[0_10px_32px_rgba(0,0,0,0.92)] ring-2 ring-[#2a313c]"
+            className="relative w-24 h-24 sm:w-32 sm:h-32 rounded-full object-cover shadow-[0_10px_32px_rgba(0,0,0,0.94)] ring-2 ring-[#383e48]"
           />
         </div>
 
@@ -141,7 +141,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           className="font-display font-black tracking-[0.2em] text-2xl sm:text-3xl text-[#e8dcc2] mb-1"
           style={{
             textShadow:
-              '0 2px 10px rgba(0, 0, 0, 0.95), 0 0 22px rgba(93, 228, 255, 0.28)',
+              '0 2px 10px rgba(0, 0, 0, 0.95), 0 0 18px rgba(155, 22, 29, 0.35)',
           }}
         >
           LAST LIGHT
@@ -150,34 +150,36 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           {mode === 'boot' ? 'Awakening the Lantern' : 'Entering the Ashfen'}
         </p>
 
-        {/* Forged-Iron Smooth Progress Bar */}
+        {/* Forged-Iron & Blood Progress Bar */}
         <div className="w-full max-w-[300px]">
           <div className="flex items-center justify-between text-xs mb-2 px-0.5">
             <span className="text-[#d8c9a8]/90 font-medium tracking-wide truncate pr-2">
               {phase}
             </span>
-            <span className="font-mono-numbers font-bold text-[#5de4ff] shrink-0">
+            <span className="font-mono-numbers font-bold text-[#d49635] shrink-0">
               {pctRounded}%
             </span>
           </div>
 
-          <div className="relative w-full h-3 rounded-full bg-[#16181d] border border-[#323741] overflow-hidden shadow-[inset_0_2px_6px_rgba(0,0,0,0.85)]">
+          <div className="relative w-full h-3.5 rounded-full bg-[#111317] border-2 border-[#464d59] overflow-hidden shadow-[inset_0_2px_6px_rgba(0,0,0,0.92),0_3px_10px_rgba(0,0,0,0.85)]">
             <div
-              className="h-full rounded-full transition-[width] duration-150 ease-out relative"
+              className="h-full rounded-l-full transition-[width] duration-150 ease-out relative"
               style={{
                 width: `${Math.max(3, displayProgress)}%`,
                 background:
-                  'linear-gradient(90deg, #8c0a12 0%, #e5303a 42%, #f2a93b 78%, #5de4ff 100%)',
-                boxShadow:
-                  '0 0 14px rgba(93, 228, 255, 0.55), 0 0 8px rgba(229, 48, 58, 0.45)',
+                  'linear-gradient(180deg, #d12832 0%, #8c0e15 55%, #3d0508 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255, 195, 195, 0.25)',
               }}
-            >
-              {/* Leading lantern tip spark */}
-              <span
-                aria-hidden="true"
-                className="absolute right-0 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full bg-[#eefbff] shadow-[0_0_10px_#5de4ff]"
-              />
-            </div>
+            />
+            {/* Iron collar endcaps with rivets */}
+            <span
+              aria-hidden="true"
+              className="absolute inset-y-0 left-0 w-1.5 bg-[#3a404a] border-r border-[#0a0b0e]"
+            />
+            <span
+              aria-hidden="true"
+              className="absolute inset-y-0 right-0 w-1.5 bg-[#3a404a] border-l border-[#0a0b0e]"
+            />
           </div>
         </div>
 

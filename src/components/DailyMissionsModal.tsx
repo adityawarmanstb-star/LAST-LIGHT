@@ -173,8 +173,8 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
         <div className="px-4 sm:px-6 py-3 border-b border-[#3a3f47]/65 bg-[#101318] flex items-center justify-between gap-3 flex-wrap shrink-0">
           <div className="flex flex-col gap-1 flex-1 min-w-[190px]">
             <div className="flex items-center justify-between gap-2 text-xs">
-              <span className="flex items-center gap-1.5 font-display font-bold tracking-wider uppercase text-[#d8b4fe]">
-                <KeyRound className="w-3.5 h-3.5 text-[#c084fc]" />
+              <span className="flex items-center gap-1.5 font-display font-bold tracking-wider uppercase text-[#e3c3c9]">
+                <KeyRound className="w-3.5 h-3.5 text-[#c7566b]" />
                 <span>
                   {nextSlotInfo
                     ? `Relic Slot ${nextSlotInfo.nextSlotNumber} Progress`
@@ -193,16 +193,16 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
             </div>
             {nextSlotInfo ? (
               <div
-                className="w-full h-1.5 rounded-full overflow-hidden"
-                style={{ background: '#0b0c0e', border: '1px solid #3a3f47' }}
+                className="w-full h-2 rounded-full overflow-hidden"
+                style={{ background: '#0b0c0e', border: '1px solid #454c57' }}
               >
                 <div
                   className="h-full rounded-full transition-all duration-200"
                   style={{
                     width: `${Math.min(100, (relicSeals / nextSlotInfo.costSeals) * 100)}%`,
                     background: canUnlockSlotNow
-                      ? 'linear-gradient(90deg, #9333ea 0%, #5de4ff 100%)'
-                      : 'linear-gradient(90deg, #6b21a8 0%, #c084fc 100%)',
+                      ? 'linear-gradient(90deg, #8c121a 0%, #c9861f 100%)'
+                      : 'linear-gradient(90deg, #5e0d13 0%, #a61d24 100%)',
                   }}
                 />
               </div>
@@ -232,7 +232,7 @@ export const DailyMissionsModal: React.FC<DailyMissionsModalProps> = ({
                 }}
                 className={`min-h-[40px] px-3 rounded-[8px] border text-xs font-display font-bold tracking-wider uppercase transition-colors cursor-pointer shrink-0 ${
                   canUnlockSlotNow
-                    ? 'bg-[#1a1324] border-[#c084fc] text-[#e8dcc2] hover:border-[#5de4ff]'
+                    ? 'bg-[#360b10] border-[#a8242e] text-[#f2dfba] hover:border-[#cfa15c]'
                     : 'bg-[#15181d] border-[#3a3f47] text-[#9c8e72] hover:text-[#d8c9a8]'
                 }`}
               >

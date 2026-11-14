@@ -47,6 +47,8 @@ export interface SaveDataV1 {
   equippedRelicIds: RelicId[];
   relicSeals: number;
   maxRelicSlots: number;
+  dailyChestClaimedDateKey: string | null;
+  dailyDealsClaimed: { dateKey: string; boughtIds: string[] } | null;
   achievements: AchievementsProgressState;
 }
 
@@ -83,6 +85,8 @@ function createDefaultSaveData(): SaveDataV1 {
     equippedRelicIds: [],
     relicSeals: 0,
     maxRelicSlots: 2,
+    dailyChestClaimedDateKey: null,
+    dailyDealsClaimed: null,
     achievements: {
       stats: {
         totalKills: 0,
@@ -372,6 +376,23 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
     equippedRelicIds,
     relicSeals,
     maxRelicSlots,
+    dailyChestClaimedDateKey:
+      typeof obj.dailyChestClaimedDateKey === 'string' &&
+      /^\d{4}-\d{2}-\d{2}$/.test(obj.dailyChestClaimedDateKey)
+        ? obj.dailyChestClaimedDateKey
+        : null,
+    dailyDealsClaimed:
+      obj.dailyDealsClaimed &&
+      typeof obj.dailyDealsClaimed === 'object' &&
+      !Array.isArray(obj.dailyDealsClaimed) &&
+      typeof (obj.dailyDealsClaimed as Record<string, unknown>).dateKey === 'string'
+        ? {
+            dateKey: (obj.dailyDealsClaimed as Record<string, unknown>).dateKey as string,
+            boughtIds: sanitizeStringArray(
+              (obj.dailyDealsClaimed as Record<string, unknown>).boughtIds
+            ),
+          }
+        : null,
     achievements: sanitizeAchievements(obj.achievements, bestiaryKills),
   };
 }
@@ -498,6 +519,13 @@ class SaveDataStore {
       equippedRelicIds: [...this.cache.equippedRelicIds],
       relicSeals: this.cache.relicSeals,
       maxRelicSlots: this.cache.maxRelicSlots,
+      dailyChestClaimedDateKey: this.cache.dailyChestClaimedDateKey,
+      dailyDealsClaimed: this.cache.dailyDealsClaimed
+        ? {
+            dateKey: this.cache.dailyDealsClaimed.dateKey,
+            boughtIds: [...this.cache.dailyDealsClaimed.boughtIds],
+          }
+        : null,
       achievements: {
         stats: { ...this.cache.achievements.stats },
         unlockedIds: [...this.cache.achievements.unlockedIds],

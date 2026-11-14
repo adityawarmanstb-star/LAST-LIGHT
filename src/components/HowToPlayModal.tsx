@@ -56,14 +56,14 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
             <div className="min-w-0">
               <h2
                 id="how-to-play-title"
-                className="text-lg sm:text-xl font-display font-bold tracking-wider text-[#d8c9a8] truncate"
+                className="text-lg sm:text-xl font-display font-bold tracking-wider text-[#d8c9a8]"
               >
                 HOW TO PLAY
               </h2>
-              <p className="text-xs text-[#9c8e72] truncate">
+              <p className="font-body text-xs text-[#b5a589]">
                 {isFirstLaunch
                   ? 'Welcome, Warden · Master the lantern before entering the dark'
-                  : 'Movement controls, stance auto-fire & lantern survival'}
+                  : 'Touch controls, stance auto-fire & lantern survival'}
               </p>
             </div>
           </div>
@@ -94,18 +94,18 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
                 </h3>
               </div>
               <span className="text-[11px] text-[#9c8e72] whitespace-nowrap">
-                Touch Drag · WASD / Arrows
+                Touch Drag · Tap Dash
               </span>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-12 gap-3.5 items-center">
-              {/* Visual Diagram SVG: Virtual Joystick + WASD */}
+              {/* Visual Diagram SVG: Virtual Joystick + Dash */}
               <div className="sm:col-span-7 rounded-[10px] bg-[#101215] border border-[#2d323a] p-2.5 overflow-hidden">
                 <svg
                   viewBox="0 0 320 132"
                   className="w-full h-auto block"
                   role="img"
-                  aria-label="Diagram showing touch drag virtual joystick on the left and WASD or arrow keys on the right"
+                  aria-label="Diagram showing touch drag virtual joystick on the left and quick Dash button on the right"
                 >
                   <defs>
                     <radialGradient id="htpMoveGlow" cx="50%" cy="50%" r="50%">
@@ -130,32 +130,17 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
 
                   {/* Joystick Base */}
                   <circle cx="62" cy="74" r="32" fill="#0f1114" stroke="#3a3f47" strokeWidth="1.5" strokeDasharray="4 3" />
-                  {/* Directional Arrow */}
                   <line x1="62" y1="74" x2="88" y2="56" stroke="#5de4ff" strokeWidth="2" strokeLinecap="round" />
                   <polygon points="92,53 83,54 88,61" fill="#5de4ff" />
-                  {/* Thumb Knob */}
                   <circle cx="80" cy="62" r="14" fill="#1f252d" stroke="#5de4ff" strokeWidth="2" />
                   <circle cx="80" cy="62" r="5" fill="#5de4ff" opacity="0.85" />
 
-                  {/* Warden Motion Trail */}
                   <circle cx="122" cy="72" r="18" fill="url(#htpMoveGlow)" />
                   <path d="M104 82 Q113 78 120 72" fill="none" stroke="#5de4ff" strokeWidth="1.5" strokeDasharray="3 3" opacity="0.7" />
                   <circle cx="124" cy="70" r="8" fill="#1b2129" stroke="#d8c9a8" strokeWidth="1.8" />
                   <circle cx="127" cy="67" r="2.6" fill="#5de4ff" />
 
-                  {/* Divider */}
-                  <text
-                    x="160"
-                    y="72"
-                    textAnchor="middle"
-                    fill="#6b7280"
-                    fontSize="10"
-                    fontWeight="700"
-                  >
-                    OR
-                  </text>
-
-                  {/* Right Half: Keyboard WASD */}
+                  {/* Right Half: Dash Button */}
                   <rect x="166" y="6" width="148" height="120" rx="8" fill="#15181d" stroke="#282d35" />
                   <text
                     x="240"
@@ -166,24 +151,13 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
                     fontWeight="600"
                     letterSpacing="0.06em"
                   >
-                    KEYBOARD
+                    TAP TO DASH
                   </text>
 
-                  {/* Keycaps W, A, S, D */}
-                  <g transform="translate(202, 36)">
-                    {/* W */}
-                    <rect x="26" y="0" width="24" height="24" rx="5" fill="#1d2128" stroke="#4a515d" strokeWidth="1.4" />
-                    <text x="38" y="16" textAnchor="middle" fill="#d8c9a8" fontSize="11" fontWeight="700">W</text>
-                    {/* A */}
-                    <rect x="0" y="28" width="24" height="24" rx="5" fill="#1d2128" stroke="#4a515d" strokeWidth="1.4" />
-                    <text x="12" y="44" textAnchor="middle" fill="#d8c9a8" fontSize="11" fontWeight="700">A</text>
-                    {/* S */}
-                    <rect x="26" y="28" width="24" height="24" rx="5" fill="#1d2128" stroke="#4a515d" strokeWidth="1.4" />
-                    <text x="38" y="44" textAnchor="middle" fill="#d8c9a8" fontSize="11" fontWeight="700">S</text>
-                    {/* D */}
-                    <rect x="52" y="28" width="24" height="24" rx="5" fill="#1d2128" stroke="#5de4ff" strokeWidth="1.6" />
-                    <text x="64" y="44" textAnchor="middle" fill="#5de4ff" fontSize="11" fontWeight="700">D</text>
-                  </g>
+                  <rect x="196" y="46" width="88" height="40" rx="8" fill="#1d2128" stroke="#5de4ff" strokeWidth="1.6" />
+                  <text x="240" y="70" textAnchor="middle" fill="#e8dcc2" fontSize="12" fontWeight="700">
+                    DASH
+                  </text>
 
                   <text
                     x="240"
@@ -192,7 +166,7 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
                     fill="#9c8e72"
                     fontSize="9.5"
                   >
-                    WASD or Arrow Keys
+                    Evade swarms with i-frames
                   </text>
                 </svg>
               </div>
@@ -200,9 +174,10 @@ export const HowToPlayModal: React.FC<HowToPlayModalProps> = ({
               {/* Concise Explanation */}
               <div className="sm:col-span-5 flex flex-col gap-2 text-xs leading-relaxed text-[#b8ab90]">
                 <p>
-                  <strong className="text-[#d8c9a8] font-semibold">Drag anywhere</strong> on mobile
-                  or use <strong className="text-[#d8c9a8] font-semibold">WASD / Arrows</strong>{' '}
-                  to steer through the dark.
+                  <strong className="text-[#d8c9a8] font-semibold">Drag anywhere</strong> with your
+                  thumb to steer through the dark, and tap{' '}
+                  <strong className="text-[#5de4ff] font-semibold">Dash</strong> to slip through
+                  encirclements.
                 </p>
                 <p className="text-[#9c8e72]">
                   While moving, your weapons hold fire so you can dodge attacks and scoop up{' '}

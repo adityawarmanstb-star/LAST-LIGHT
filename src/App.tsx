@@ -4,16 +4,13 @@
  */
 
 import React, { useState, useEffect, useRef } from 'react';
-import { TitleScreen } from './components/TitleScreen';
+import { LobbyTabId, TitleScreen } from './components/TitleScreen';
+import { ShopSubTab } from './components/lobby/ShopPage';
 import { HUD } from './components/HUD';
 import { LevelUpModal } from './components/LevelUpModal';
-import { CampShopModal, CampShopTab } from './components/CampShopModal';
-import { DailyMissionsModal } from './components/DailyMissionsModal';
 import { GameOverModal } from './components/GameOverModal';
 import { SettingsModal } from './components/SettingsModal';
 import { HowToPlayModal } from './components/HowToPlayModal';
-import { BestiaryModal } from './components/BestiaryModal';
-import { AchievementsModal } from './components/AchievementsModal';
 import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
 import { ForgedIronFrame, IronButton } from './components/ForgedIronFrame';
@@ -43,11 +40,8 @@ import { haptics } from './mobile/haptics';
 
 export default function App() {
   const [gameState, setGameState] = useState<'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('TITLE');
-  const [showShop, setShowShop] = useState(false);
-  const [shopInitialTab, setShopInitialTab] = useState<CampShopTab>('upgrades');
-  const [showMissions, setShowMissions] = useState(false);
-  const [showBestiary, setShowBestiary] = useState(false);
-  const [showAchievements, setShowAchievements] = useState(false);
+  const [lobbyTab, setLobbyTab] = useState<LobbyTabId>('home');
+  const [lobbyShopSubTab, setLobbyShopSubTab] = useState<ShopSubTab>('market');
   const [showSettings, setShowSettings] = useState(false);
   const [showHowToPlay, setShowHowToPlay] = useState<boolean>(
     () => !saveDataStore.read().hasSeenHowToPlay
@@ -123,14 +117,8 @@ export default function App() {
   const needsTapAudioResumeRef = useRef<boolean>(false);
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
-  const showShopRef = useRef(showShop);
-  showShopRef.current = showShop;
-  const showMissionsRef = useRef(showMissions);
-  showMissionsRef.current = showMissions;
-  const showBestiaryRef = useRef(showBestiary);
-  showBestiaryRef.current = showBestiary;
-  const showAchievementsRef = useRef(showAchievements);
-  showAchievementsRef.current = showAchievements;
+  const lobbyTabRef = useRef(lobbyTab);
+  lobbyTabRef.current = lobbyTab;
   const showSettingsRef = useRef(showSettings);
   showSettingsRef.current = showSettings;
   const showHowToPlayRef = useRef(showHowToPlay);
@@ -398,20 +386,8 @@ export default function App() {
           setShowSettings(false);
           return true;
         }
-        if (showMissionsRef.current) {
-          setShowMissions(false);
-          return true;
-        }
-        if (showBestiaryRef.current) {
-          setShowBestiary(false);
-          return true;
-        }
-        if (showAchievementsRef.current) {
-          setShowAchievements(false);
-          return true;
-        }
-        if (showShopRef.current) {
-          setShowShop(false);
+        if (gameStateRef.current === 'TITLE' && lobbyTabRef.current !== 'home') {
+          setLobbyTab('home');
           return true;
         }
         if (gameStateRef.current === 'PLAYING' || gameStateRef.current === 'PAUSED') {
@@ -441,10 +417,6 @@ export default function App() {
   }, []);
 
   const handleStartGame = () => {
-    setShowShop(false);
-    setShowMissions(false);
-    setShowBestiary(false);
-    setShowAchievements(false);
     setShowSettings(false);
     setShowHowToPlay(false);
 
@@ -587,7 +559,7 @@ export default function App() {
     handleStartGame();
   };
 
-  const handleQuitToTitle = () => {
+  const navigateToLobbyPage = (tab: LobbyTabId = 'home', shopSubTab: ShopSubTab = 'market') => {
     soundManager.playUiClick();
     if (loadingFinishTimerRef.current !== null) {
       window.clearTimeout(loadingFinishTimerRef.current);
@@ -599,6 +571,8 @@ export default function App() {
     }
     setLoadingOverlay((prev) => ({ ...prev, visible: false }));
     setLevelUpOptions(null);
+    setLobbyTab(tab);
+    setLobbyShopSubTab(shopSubTab);
     gameManager.setGameState('TITLE');
     setGameState('TITLE');
     // Destroy Phaser game first because WebAudioSoundManager.destroy() suspends a shared AudioContext
@@ -608,6 +582,10 @@ export default function App() {
     }
     soundManager.resumeAudio();
     soundManager.playMenu();
+  };
+
+  const handleQuitToTitle = () => {
+    navigateToLobbyPage('home', 'market');
   };
   handleQuitToTitleRef.current = handleQuitToTitle;
 
@@ -630,26 +608,18 @@ export default function App() {
       {/* Phaser Canvas Container */}
       <div id="phaser-container" ref={containerRef} className="absolute inset-0 z-10" />
 
-      {/* Screen: Title Screen */}
+      {/* Screen: Full-Screen Multi-Page Lobby */}
       {gameState === 'TITLE' && (
         <TitleScreen
           isMuted={isMuted}
-          isModalOpen={
-            showShop ||
-            showSettings ||
-            showMissions ||
-            showBestiary ||
-            showAchievements ||
-            showHowToPlay
-          }
-          onStartGame={handleStartGame}
-          onOpenShop={(tab = 'upgrades') => {
-            setShopInitialTab(tab);
-            setShowShop(true);
+          isModalOpen={showSettings || showHowToPlay}
+          initialTab={lobbyTab}
+          initialShopSubTab={lobbyShopSubTab}
+          onTabChange={(tab, sub) => {
+            setLobbyTab(tab);
+            if (sub) setLobbyShopSubTab(sub);
           }}
-          onOpenMissions={() => setShowMissions(true)}
-          onOpenBestiary={() => setShowBestiary(true)}
-          onOpenAchievements={() => setShowAchievements(true)}
+          onStartGame={handleStartGame}
           onToggleMute={handleToggleMute}
           onOpenSettings={() => setShowSettings(true)}
         />
@@ -680,8 +650,6 @@ export default function App() {
           dashCooldownProgress={dashCooldownProgress}
           equippedRelicIds={equippedRelicIds}
           activeRelicSynergies={activeRelicSynergies}
-          debugStats={debugStats}
-          dpsHistory={dpsHistory}
           eventWarning={eventWarning}
           isMuted={isMuted}
           isPaused={gameState === 'PAUSED'}
@@ -775,6 +743,8 @@ export default function App() {
         isMuted={isMuted}
         hapticsEnabled={hapticsEnabled}
         graphicsConfig={graphicsConfig}
+        debugStats={debugStats}
+        dpsHistory={dpsHistory}
         onMasterVolumeChange={handleMasterVolumeChange}
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
@@ -801,48 +771,17 @@ export default function App() {
         />
       )}
 
-      {/* Modal: Game Over / Run Summary (hidden while nested Shop or Missions modal is open) */}
-      {gameState === 'GAME_OVER' && runSummary && !showShop && !showMissions && (
+      {/* Modal: Game Over / Run Summary */}
+      {gameState === 'GAME_OVER' && runSummary && (
         <GameOverModal
           stats={runSummary}
-          isModalOpen={showShop || showMissions}
+          isModalOpen={showSettings || showHowToPlay}
           onRestart={handleStartGame}
           onQuitToTitle={handleQuitToTitle}
-          onOpenShop={(tab = 'upgrades') => {
-            setShopInitialTab(tab);
-            setShowShop(true);
-          }}
-          onOpenMissions={() => setShowMissions(true)}
-        />
-      )}
-
-      {/* Modal: Daily Missions */}
-      {showMissions && (
-        <DailyMissionsModal
-          onClose={() => setShowMissions(false)}
-          onOpenRelicShop={() => {
-            setShowMissions(false);
-            setShopInitialTab('relics');
-            setShowShop(true);
-          }}
-        />
-      )}
-
-      {/* Modal: Bestiary */}
-      {showBestiary && (
-        <BestiaryModal onClose={() => setShowBestiary(false)} />
-      )}
-
-      {/* Modal: Achievements */}
-      {showAchievements && (
-        <AchievementsModal onClose={() => setShowAchievements(false)} />
-      )}
-
-      {/* Modal: Permanent Camp Upgrades & Relics Forge */}
-      {showShop && (
-        <CampShopModal
-          initialTab={shopInitialTab}
-          onClose={() => setShowShop(false)}
+          onOpenShop={(tab = 'upgrades') =>
+            navigateToLobbyPage('shop', tab === 'relics' ? 'relics' : 'market')
+          }
+          onOpenMissions={() => navigateToLobbyPage('missions')}
         />
       )}
 

@@ -39,7 +39,7 @@
 
   body {
     background-color: var(--bg-void);
-    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-family: 'Rajdhani', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     color: var(--bone-text);
     user-select: none;
     -webkit-user-select: none;
@@ -54,15 +54,15 @@
 }
 
 .font-blood {
-  font-family: 'Nosifer', 'Cinzel', Georgia, 'Times New Roman', serif;
+  font-family: 'Cinzel', Georgia, 'Times New Roman', serif;
 }
 
 .font-body {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Rajdhani', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
 }
 
 .font-mono-numbers {
-  font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Cinzel', Georgia, 'Times New Roman', serif;
   font-variant-numeric: tabular-nums;
 }
 
@@ -588,7 +588,11 @@ input[type='range'].df-slider::-webkit-slider-thumb:active {
   .blood-fog-drift-a,
   .blood-fog-drift-b,
   .blood-title-drip,
-  .crit-color-flash {
+  .crit-color-flash,
+  .dungeon-mist-drift,
+  .ember-border-pulse,
+  .home-gate-glow,
+  .lantern-floor-pool {
     animation: none;
   }
   .blood-edge-impact,
@@ -604,6 +608,99 @@ input[type='range'].df-slider::-webkit-slider-thumb:active {
     opacity: 1;
     transform: none;
   }
+}
+
+/* Dark Fantasy Iron, Chains & Blood Lobby Textures & Motion */
+@keyframes dungeonMistDrift {
+  0%,
+  100% {
+    transform: translate3d(-3%, 0, 0) scale(1.04);
+    opacity: 0.34;
+  }
+  50% {
+    transform: translate3d(3%, -1.5%, 0) scale(1.08);
+    opacity: 0.52;
+  }
+}
+
+@keyframes bloodForgePulse {
+  0%,
+  100% {
+    box-shadow:
+      0 6px 18px rgba(0, 0, 0, 0.88),
+      0 0 10px rgba(138, 16, 22, 0.35),
+      inset 0 1px 0 rgba(160, 168, 180, 0.22),
+      inset 0 -2px 0 rgba(8, 5, 6, 0.95);
+  }
+  50% {
+    box-shadow:
+      0 8px 22px rgba(0, 0, 0, 0.92),
+      0 0 16px rgba(168, 22, 29, 0.52),
+      inset 0 1px 0 rgba(190, 170, 160, 0.28),
+      inset 0 -2px 0 rgba(8, 5, 6, 0.95);
+  }
+}
+
+@keyframes homeGateGlow {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: scale(0.99);
+  }
+  50% {
+    opacity: 0.92;
+    transform: scale(1.02);
+  }
+}
+
+@keyframes lanternFloorPool {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scaleX(0.96) scaleY(0.96);
+  }
+  50% {
+    opacity: 0.68;
+    transform: scaleX(1.04) scaleY(1.02);
+  }
+}
+
+.dungeon-mist-drift {
+  animation: dungeonMistDrift 11s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.ember-border-pulse {
+  animation: bloodForgePulse 2.8s ease-in-out infinite;
+  will-change: box-shadow;
+}
+
+.home-gate-glow {
+  animation: homeGateGlow 2.6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.lantern-floor-pool {
+  animation: lanternFloorPool 3.2s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.rusted-iron-plate {
+  background:
+    radial-gradient(circle at 12% 18%, rgba(62, 12, 16, 0.42) 0%, transparent 44%),
+    radial-gradient(circle at 88% 82%, rgba(88, 42, 26, 0.34) 0%, transparent 48%),
+    linear-gradient(180deg, #2b2e35 0%, #181a1f 48%, #0d0e12 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(154, 162, 176, 0.3),
+    inset 0 -2px 0 rgba(5, 6, 8, 0.95),
+    0 6px 18px rgba(0, 0, 0, 0.84);
+}
+
+.rusted-play-bar {
+  background:
+    radial-gradient(circle at 14% 24%, rgba(110, 12, 18, 0.48) 0%, transparent 42%),
+    radial-gradient(circle at 86% 74%, rgba(92, 18, 16, 0.44) 0%, transparent 44%),
+    linear-gradient(180deg, #2d1b1d 0%, #1b1315 48%, #0e0a0b 100%);
 }
 
 /* Ensure Phaser canvas respects Scale.FIT + autoCenter cleanly */

@@ -12,8 +12,18 @@ const RELIC_SET_BY_ID: Record<RelicId, RelicSetId> = {
 
 export const INITIAL_UPGRADES: MetaUpgrade[] = [
   {
+    id: 'lantern',
+    name: 'Lantern Brightness',
+    description: 'Expands your lantern light radius in the dark by 10% per rank.',
+    cost: [25, 55, 120, 260, 520],
+    currentRank: 0,
+    maxRank: 5,
+    statPerRank: '+10% Light Radius',
+    icon: 'sun',
+  },
+  {
     id: 'vitality',
-    name: 'Enduring Vessel',
+    name: 'Soul Vitality',
     description: 'Increases maximum health by 15% per rank.',
     cost: [25, 60, 140, 300, 600],
     currentRank: 0,
@@ -160,6 +170,7 @@ export function calculateBasePlayerStats(): PlayerStats {
   upgrades.forEach((u) => rankMap.set(u.id, u.currentRank));
 
   const vitRank = rankMap.get('vitality') || 0;
+  const lanternRank = rankMap.get('lantern') || 0;
   const mightRank = rankMap.get('might') || 0;
   const swiftRank = rankMap.get('swiftness') || 0;
   const magnetRank = rankMap.get('magnet') || 0;
@@ -179,7 +190,7 @@ export function calculateBasePlayerStats(): PlayerStats {
   const hasRevive = reviveRank > 0;
   let dashCharges = 1;
   let dashCooldownMs = 3000;
-  let lightRadiusMultiplier = 1;
+  let lightRadiusMultiplier = 1 + lanternRank * 0.1;
   let eliteKillHeal = 0;
 
   const equippedRelicIds = [...saved.equippedRelicIds];

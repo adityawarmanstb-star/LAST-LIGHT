@@ -1,23 +1,27 @@
 import React from 'react';
 import {
+  Activity,
+  BookOpen,
+  Cpu,
+  Gauge,
+  Monitor,
+  Music,
+  Sliders,
+  Smartphone,
+  Sparkles,
+  Sun,
   Volume2,
   VolumeX,
   X,
-  Sparkles,
-  Music,
   Zap,
-  Sliders,
-  Sun,
-  Smartphone,
-  BookOpen,
-  Monitor,
-  Gauge,
-  Cpu,
 } from 'lucide-react';
 import { soundManager } from '../game/audio';
-import { ForgedIronFrame, IronButton } from './ForgedIronFrame';
 import { GraphicsConfig } from '../game/GameManager';
 import { ResolutionQualityMode, TargetFpsOption } from '../game/saveData';
+import { DebugStats, DpsSample } from '../game/types';
+import { IronButton } from './ForgedIronFrame';
+import { IronCard } from './IronCard';
+import { PerformanceChart } from './PerformanceChart';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -29,6 +33,8 @@ interface SettingsModalProps {
   isMuted: boolean;
   hapticsEnabled: boolean;
   graphicsConfig: GraphicsConfig;
+  debugStats: DebugStats;
+  dpsHistory: DpsSample[];
   onMasterVolumeChange: (val: number) => void;
   onMusicVolumeChange: (val: number) => void;
   onSfxVolumeChange: (val: number) => void;
@@ -57,6 +63,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   isMuted,
   hapticsEnabled,
   graphicsConfig,
+  debugStats,
+  dpsHistory,
   onMasterVolumeChange,
   onMusicVolumeChange,
   onSfxVolumeChange,
@@ -85,31 +93,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="settings-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center safe-area-pad backdrop-blur-md select-none"
       style={{
         background:
-          'radial-gradient(circle at center, rgba(16, 15, 18, 0.82) 0%, rgba(30, 10, 13, 0.92) 100%)',
+          'radial-gradient(circle at center, rgba(16, 15, 18, 0.84) 0%, rgba(30, 10, 13, 0.94) 100%)',
       }}
     >
-      <ForgedIronFrame
-        seed="settings-modal-panel"
-        dripCount={3}
-        maxDripLength={20}
+      <IronCard
+        highlight="blood"
         className="w-full max-w-md max-h-[90vh] flex flex-col"
         contentClassName="flex flex-col max-h-[90vh] overflow-hidden"
       >
         {/* Fixed Header */}
-        <div className="flex items-center justify-between gap-3 p-5 sm:p-6 border-b border-[#3a3f47]/80 shrink-0">
+        <div className="flex items-center justify-between gap-3 p-5 border-b border-[#3a3f47]/80 shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#3a3f47] flex items-center justify-center text-[#d8c9a8] shrink-0">
+            <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#4a4f59] flex items-center justify-center text-[#d8c9a8] shrink-0">
               <Sliders className="w-5 h-5" />
             </div>
             <div className="min-w-0">
-              <h2 className="text-xl font-display font-bold tracking-wider text-[#d8c9a8] truncate">
+              <h2
+                id="settings-modal-title"
+                className="text-xl font-display font-bold tracking-wider text-[#e8dcc2]"
+              >
                 SETTINGS
               </h2>
-              <p className="text-xs text-[#9c8e72] truncate">
-                Audio, display &amp; 90Hz / 4K tuning
+              <p className="font-body text-xs text-[#b5a589]">
+                Audio, display, 90Hz/4K tuning &amp; performance
               </p>
             </div>
           </div>
@@ -118,7 +130,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             seed="settings-close-btn"
             dripCount={0}
             onClick={onClose}
-            className="w-14 h-14 min-h-[56px] min-w-[56px] shrink-0"
+            className="w-12 h-12 min-h-[48px] min-w-[48px] shrink-0"
             aria-label="Close Settings"
           >
             <X className="w-4 h-4 text-[#d8c9a8]" />
@@ -126,15 +138,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Scrollable Body */}
-        <div className="p-5 sm:p-6 overflow-y-auto flex-1 flex flex-col gap-5">
+        <div className="p-5 overflow-y-auto flex-1 flex flex-col gap-5">
           {/* Master Volume */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs font-medium">
-              <span className="text-[#d8c9a8] flex items-center gap-2">
+              <span className="font-body text-sm text-[#e8dcc2] flex items-center gap-2">
                 <Volume2 className="w-4 h-4 text-[#e5303a]" />
                 <span>Master Volume</span>
               </span>
-              <span className="font-mono-numbers text-[#d8c9a8] font-semibold">
+              <span className="font-mono-numbers text-[#e8dcc2] font-bold">
                 {isMuted ? 'Muted' : `${masterPercent}%`}
               </span>
             </div>
@@ -162,11 +174,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Music Volume */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs font-medium">
-              <span className="text-[#d8c9a8] flex items-center gap-2">
+              <span className="font-body text-sm text-[#e8dcc2] flex items-center gap-2">
                 <Music className="w-4 h-4 text-[#b3121a]" />
                 <span>Music Volume</span>
               </span>
-              <span className="font-mono-numbers text-[#d8c9a8] font-semibold">
+              <span className="font-mono-numbers text-[#e8dcc2] font-bold">
                 {isMuted ? 'Muted' : `${musicPercent}%`}
               </span>
             </div>
@@ -194,11 +206,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* SFX Volume */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs font-medium">
-              <span className="text-[#d8c9a8] flex items-center gap-2">
+              <span className="font-body text-sm text-[#e8dcc2] flex items-center gap-2">
                 <Zap className="w-4 h-4 text-[#f2a93b]" />
                 <span>SFX Volume</span>
               </span>
-              <span className="font-mono-numbers text-[#d8c9a8] font-semibold">
+              <span className="font-mono-numbers text-[#e8dcc2] font-bold">
                 {isMuted ? 'Muted' : `${sfxPercent}%`}
               </span>
             </div>
@@ -223,14 +235,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             />
           </div>
 
-          {/* Lantern Brightness (50% - 150%, cyan light accent) */}
+          {/* Lantern Brightness */}
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs font-medium">
-              <span className="text-[#d8c9a8] flex items-center gap-2">
+              <span className="font-body text-sm text-[#e8dcc2] flex items-center gap-2">
                 <Sun className="w-4 h-4 text-[#5de4ff]" />
                 <span>Lantern Brightness</span>
               </span>
-              <span className="font-mono-numbers text-[#5de4ff] font-semibold">
+              <span className="font-mono-numbers text-[#5de4ff] font-bold">
                 {brightnessPercent}%
               </span>
             </div>
@@ -263,8 +275,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Volume2 className="w-4 h-4 text-[#9c8e72]" />
               )}
               <div className="flex flex-col">
-                <span className="text-xs font-semibold text-[#d8c9a8]">Mute All Audio</span>
-                <span className="text-[11px] text-[#8e8168]">
+                <span className="font-body text-sm font-bold text-[#e8dcc2]">Mute All Audio</span>
+                <span className="font-body text-xs text-[#9c8e72]">
                   {isMuted ? 'Audio muted' : 'Audio enabled'}
                 </span>
               </div>
@@ -278,9 +290,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 soundManager.playUiClick();
                 onToggleMute();
               }}
-              className="min-h-[56px] px-5 text-xs font-semibold"
+              className="min-h-[48px] px-5 text-xs font-display font-bold"
             >
-              <span className={isMuted ? 'text-[#e5303a]' : 'text-[#d8c9a8]'}>
+              <span className={isMuted ? 'text-[#e5303a]' : 'text-[#e8dcc2]'}>
                 {isMuted ? 'Unmute' : 'Mute'}
               </span>
             </IronButton>
@@ -293,8 +305,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 className={`w-4 h-4 ${hapticsEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'}`}
               />
               <div className="flex flex-col">
-                <span className="text-xs font-semibold text-[#d8c9a8]">Haptic Feedback</span>
-                <span className="text-[11px] text-[#8e8168]">
+                <span className="font-body text-sm font-bold text-[#e8dcc2]">Haptic Feedback</span>
+                <span className="font-body text-xs text-[#9c8e72]">
                   {hapticsEnabled ? 'Vibrates on hit & level-up' : 'Vibration disabled'}
                 </span>
               </div>
@@ -308,7 +320,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 soundManager.playUiClick();
                 onToggleHaptics();
               }}
-              className="min-h-[56px] px-5 text-xs font-semibold"
+              className="min-h-[48px] px-5 text-xs font-display font-bold"
             >
               <span className={hapticsEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'}>
                 {hapticsEnabled ? 'On' : 'Off'}
@@ -321,23 +333,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           {/* Graphics, 90Hz/120Hz & 4K Upscaler Section */}
           <div className="flex flex-col gap-3.5">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-display font-bold tracking-wider text-[#d8c9a8] flex items-center gap-2">
+              <span className="text-xs font-display font-bold tracking-wider text-[#e8dcc2] flex items-center gap-2">
                 <Monitor className="w-4 h-4 text-[#5de4ff]" />
                 <span>GRAPHICS &amp; 4K ENGINE</span>
               </span>
-              <span className="text-[11px] text-[#9c8e72] font-mono-numbers">
+              <span className="text-xs text-[#9c8e72] font-mono-numbers">
                 {graphicsConfig.targetFps}Hz Target
               </span>
             </div>
 
             {/* Target FPS Selector */}
             <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between text-[11px] text-[#9c8e72]">
+              <div className="flex items-center justify-between font-body text-xs text-[#9c8e72]">
                 <span className="flex items-center gap-1.5">
                   <Gauge className="w-3.5 h-3.5 text-[#f2a93b]" />
                   <span>Target Frame Rate</span>
                 </span>
-                <span className="text-[#d8c9a8] font-medium">Android Smooth Lock</span>
+                <span className="text-[#e8dcc2] font-semibold">Android Smooth Lock</span>
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {FPS_OPTIONS.map((fps) => {
@@ -352,9 +364,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         soundManager.playUiClick();
                         onGraphicsConfigChange({ targetFps: fps });
                       }}
-                      className="min-h-[46px] px-2 text-xs font-semibold"
+                      className="min-h-[46px] px-2 text-xs font-mono-numbers font-bold"
                     >
-                      <span className={selected ? 'text-[#5de4ff]' : 'text-[#d8c9a8]'}>
+                      <span className={selected ? 'text-[#5de4ff]' : 'text-[#e8dcc2]'}>
                         {fps} FPS
                       </span>
                     </IronButton>
@@ -363,11 +375,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
 
-            {/* Render Resolution & 4K Scaling Selector */}
+            {/* Render Resolution Selector */}
             <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between text-[11px] text-[#9c8e72]">
+              <div className="flex items-center justify-between font-body text-xs text-[#9c8e72]">
                 <span>Render Resolution</span>
-                <span className="text-[#8e8168]">
+                <span className="text-[#b5a589]">
                   {graphicsConfig.resolutionMode === 'ultra_4k'
                     ? 'Native 2160x3840 4K'
                     : graphicsConfig.resolutionMode === 'auto'
@@ -392,13 +404,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     >
                       <div className="flex flex-col items-center leading-tight">
                         <span
-                          className={`font-semibold ${
-                            selected ? 'text-[#f2a93b]' : 'text-[#d8c9a8]'
+                          className={`font-display font-bold ${
+                            selected ? 'text-[#f2a93b]' : 'text-[#e8dcc2]'
                           }`}
                         >
                           {opt.label}
                         </span>
-                        <span className="text-[10px] text-[#9c8e72]">{opt.hint}</span>
+                        <span className="font-body text-[11px] text-[#9c8e72]">{opt.hint}</span>
                       </div>
                     </IronButton>
                   );
@@ -406,7 +418,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
             </div>
 
-            {/* GPU Edge-Adaptive 4K Upscaler (RCAS) */}
+            {/* GPU Edge-Adaptive 4K Upscaler */}
             <div className="flex items-center justify-between gap-3 pt-0.5">
               <div className="flex items-center gap-2.5 min-w-0">
                 <Sparkles
@@ -414,9 +426,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     graphicsConfig.upscalerEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
                   }`}
                 />
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-semibold text-[#d8c9a8]">GPU 4K Upscaler</span>
-                  <span className="text-[11px] text-[#8e8168] truncate">
+                <div className="flex flex-col">
+                  <span className="font-body text-sm font-bold text-[#e8dcc2]">GPU 4K Upscaler</span>
+                  <span className="font-body text-xs text-[#9c8e72]">
                     Contrast-adaptive edge sharpening
                   </span>
                 </div>
@@ -430,12 +442,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   soundManager.playUiClick();
                   onGraphicsConfigChange({ upscalerEnabled: !graphicsConfig.upscalerEnabled });
                 }}
-                className="min-h-[48px] px-5 text-xs font-semibold shrink-0"
+                className="min-h-[46px] px-5 text-xs font-display font-bold shrink-0"
               >
                 <span
-                  className={
-                    graphicsConfig.upscalerEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
-                  }
+                  className={graphicsConfig.upscalerEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'}
                 >
                   {graphicsConfig.upscalerEnabled ? 'On' : 'Off'}
                 </span>
@@ -450,9 +460,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     graphicsConfig.frameGenEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
                   }`}
                 />
-                <div className="flex flex-col min-w-0">
-                  <span className="text-xs font-semibold text-[#d8c9a8]">Frame Gen &amp; Pacing</span>
-                  <span className="text-[11px] text-[#8e8168] truncate">
+                <div className="flex flex-col">
+                  <span className="font-body text-sm font-bold text-[#e8dcc2]">
+                    Frame Gen &amp; Pacing
+                  </span>
+                  <span className="font-body text-xs text-[#9c8e72]">
                     Temporal lighting &amp; zero-drop smoothing
                   </span>
                 </div>
@@ -466,12 +478,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   soundManager.playUiClick();
                   onGraphicsConfigChange({ frameGenEnabled: !graphicsConfig.frameGenEnabled });
                 }}
-                className="min-h-[48px] px-5 text-xs font-semibold shrink-0"
+                className="min-h-[46px] px-5 text-xs font-display font-bold shrink-0"
               >
                 <span
-                  className={
-                    graphicsConfig.frameGenEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'
-                  }
+                  className={graphicsConfig.frameGenEnabled ? 'text-[#5de4ff]' : 'text-[#9c8e72]'}
                 >
                   {graphicsConfig.frameGenEnabled ? 'On' : 'Off'}
                 </span>
@@ -481,15 +491,66 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
           <div className="h-px bg-[#3a3f47]/70 w-full" />
 
+          {/* PERFORMANCE Debug Metrics (Moved from HUD into Settings Modal) */}
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs font-display font-bold tracking-wider text-[#e8dcc2] flex items-center gap-2">
+                <Activity className="w-4 h-4 text-[#e5303a]" />
+                <span>PERFORMANCE</span>
+              </span>
+              <span className="font-mono-numbers text-xs text-[#5de4ff] font-bold">
+                {debugStats.fps} FPS
+              </span>
+            </div>
+
+            <div className="grid grid-cols-4 gap-2 rounded-[8px] border border-[#3a3f47] bg-[#0e1014] p-2.5 text-center">
+              <div>
+                <div className="font-body text-[11px] text-[#9c8e72]">Enemies</div>
+                <div className="font-mono-numbers text-xs font-bold text-[#e8dcc2]">
+                  {debugStats.enemyCount}
+                </div>
+              </div>
+              <div>
+                <div className="font-body text-[11px] text-[#9c8e72]">Kills/min</div>
+                <div className="font-mono-numbers text-xs font-bold text-[#e8dcc2]">
+                  {debugStats.killsPerMin}
+                </div>
+              </div>
+              <div>
+                <div className="font-body text-[11px] text-[#9c8e72]">DPS</div>
+                <div className="font-mono-numbers text-xs font-bold text-[#f2a93b]">
+                  {debugStats.playerDps}
+                </div>
+              </div>
+              <div>
+                <div className="font-body text-[11px] text-[#9c8e72]">Minute</div>
+                <div className="font-mono-numbers text-xs font-bold text-[#5de4ff]">
+                  {debugStats.currentMinute}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[8px] border border-[#3a3f47] bg-[#0e1014] p-2.5">
+              <PerformanceChart
+                samples={dpsHistory}
+                currentDps={debugStats.playerDps}
+                width={320}
+                height={108}
+              />
+            </div>
+          </div>
+
+          <div className="h-px bg-[#3a3f47]/70 w-full" />
+
           {/* Preview Audio Row */}
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-[#9c8e72]">Preview Audio</span>
+            <span className="font-body text-sm text-[#b5a589]">Preview Audio</span>
             <div className="flex items-center gap-2">
               <IronButton
                 seed="settings-test-attack"
                 dripCount={0}
                 onClick={handleTestShoot}
-                className="min-h-[52px] px-4 text-xs font-medium"
+                className="min-h-[46px] px-4 text-xs font-display font-bold"
               >
                 <Zap className="w-3.5 h-3.5 text-[#e5303a]" />
                 <span>Attack</span>
@@ -498,7 +559,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 seed="settings-test-gem"
                 dripCount={0}
                 onClick={handleTestSfx}
-                className="min-h-[52px] px-4 text-xs font-medium"
+                className="min-h-[46px] px-4 text-xs font-display font-bold"
               >
                 <Sparkles className="w-3.5 h-3.5 text-[#f2a93b]" />
                 <span>Gem</span>
@@ -511,8 +572,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="flex items-center gap-2.5">
               <BookOpen className="w-4 h-4 text-[#5de4ff]" />
               <div className="flex flex-col">
-                <span className="text-xs font-semibold text-[#d8c9a8]">How to Play</span>
-                <span className="text-[11px] text-[#8e8168]">Controls &amp; auto-fire guide</span>
+                <span className="font-body text-sm font-bold text-[#e8dcc2]">How to Play</span>
+                <span className="font-body text-xs text-[#9c8e72]">Touch controls &amp; survival guide</span>
               </div>
             </div>
 
@@ -523,7 +584,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 soundManager.playUiClick();
                 onOpenHowToPlay();
               }}
-              className="min-h-[52px] px-4 text-xs font-semibold whitespace-nowrap shrink-0"
+              className="min-h-[46px] px-4 text-xs font-display font-bold whitespace-nowrap shrink-0"
             >
               <span>View Guide</span>
             </IronButton>
@@ -531,18 +592,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* Fixed Footer */}
-        <div className="p-4 sm:px-6 border-t border-[#3a3f47]/80 bg-[#0d0e11]/70 shrink-0">
+        <div className="p-4 border-t border-[#3a3f47]/80 bg-[#0d0e11]/70 shrink-0">
           <IronButton
             seed="settings-done-btn"
             variant="blood"
             dripCount={2}
             onClick={onClose}
-            className="w-full min-h-[56px] font-semibold text-sm tracking-wide"
+            className="w-full min-h-[52px] font-display font-bold text-sm tracking-wider"
           >
             Done
           </IronButton>
         </div>
-      </ForgedIronFrame>
+      </IronCard>
     </div>
   );
 };

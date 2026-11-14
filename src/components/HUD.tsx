@@ -1,10 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Activity, Coins, Skull, Heart, AlertTriangle, Shield, Wind, Gem } from 'lucide-react';
+import { Coins, Skull, Heart, AlertTriangle, Wind, Gem } from 'lucide-react';
 import {
   ActiveDynamicChallenge,
   BossInfo,
-  DebugStats,
-  DpsSample,
   EventWarningInfo,
   RelicDefinition,
   RelicId,
@@ -17,7 +15,6 @@ import { ForgedIronFrame } from './ForgedIronFrame';
 import { BloodHpBar } from './BloodHpBar';
 import { BloodSplatterHit, BloodSplatterOverlay } from './BloodSplatterOverlay';
 import { BossHealthOverlay } from './BossHealthOverlay';
-import { PerformanceChart } from './PerformanceChart';
 import { CritImpactPayload, gameManager } from '../game/GameManager';
 import { haptics } from '../mobile/haptics';
 
@@ -44,8 +41,6 @@ interface HUDProps {
   dashCooldownProgress?: number;
   equippedRelicIds?: RelicId[];
   activeRelicSynergies?: RelicSetId[];
-  debugStats: DebugStats;
-  dpsHistory?: DpsSample[];
   eventWarning: EventWarningInfo | null;
   isMuted: boolean;
   isPaused: boolean;
@@ -79,15 +74,10 @@ const HUDComponent: React.FC<HUDProps> = ({
   dashCooldownProgress = 1,
   equippedRelicIds = [],
   activeRelicSynergies = [],
-  debugStats,
-  dpsHistory = [],
   eventWarning,
   onSpawnBossNow,
   onTriggerDash,
 }) => {
-  const [activeHudTab, setActiveHudTab] = useState<'status' | 'performance'>('status');
-  const [showDebug, setShowDebug] = useState(false);
-  const debugTapTimestampsRef = useRef<number[]>([]);
   const prevCoinsRef = useRef<number>(coins);
   const prevLevelRef = useRef<number>(level);
   const prevHpRef = useRef<number>(hp);
@@ -157,18 +147,6 @@ const HUDComponent: React.FC<HUDProps> = ({
     };
   }, []);
 
-  const handleDebugHotspotTap = () => {
-    const now = Date.now();
-    const recent = debugTapTimestampsRef.current.filter((t) => now - t < 2500);
-    recent.push(now);
-    if (recent.length >= 5) {
-      debugTapTimestampsRef.current = [];
-      setShowDebug((prev) => !prev);
-    } else {
-      debugTapTimestampsRef.current = recent;
-    }
-  };
-
   const hpRatio = hp / Math.max(1, maxHp);
   const isLowHp = hp > 0 && hpRatio < 0.3;
   const xpPercent = Math.max(0, Math.min(100, (xp / Math.max(1, nextXp)) * 100));
@@ -194,14 +172,6 @@ const HUDComponent: React.FC<HUDProps> = ({
     <div className="absolute inset-0 pointer-events-none select-none z-20 flex flex-col justify-between overflow-hidden">
       {/* Virtual Joystick for touch */}
       <VirtualJoystick />
-
-      {/* Hidden top-left debug hotspot (tap 5 times to toggle debug overlay) */}
-      <button
-        type="button"
-        onClick={handleDebugHotspotTap}
-        aria-label="Toggle debug overlay"
-        className="fixed top-0 left-0 w-16 h-16 z-40 pointer-events-auto bg-transparent opacity-0 cursor-default"
-      />
 
       {/* Visceral screen-edge blood splatter flash when taking damage */}
       <BloodSplatterOverlay hit={splatterHit} />
@@ -269,21 +239,21 @@ const HUDComponent: React.FC<HUDProps> = ({
         />
       )}
 
-      {/* Thin Forged-Iron XP Bar across the top edge with cyan light fill */}
+      {/* Forged-Iron XP Conduit across the top edge with subdued soul-steel fill */}
       <div
-        className="fixed top-0 left-0 right-0 z-30 h-[7px] pointer-events-none"
+        className="fixed top-0 left-0 right-0 z-30 h-[8px] pointer-events-none"
         style={{
-          background: 'linear-gradient(180deg, #0d0e11 0%, #1a1c20 100%)',
-          borderBottom: '1.5px solid #3a3f47',
-          boxShadow: 'inset 0 1px 0 rgba(85, 93, 105, 0.45), 0 2px 6px rgba(0, 0, 0, 0.7)',
+          background: 'linear-gradient(180deg, #0b0c0f 0%, #181a1f 100%)',
+          borderBottom: '1.5px solid #454c59',
+          boxShadow: 'inset 0 1px 0 rgba(120, 128, 142, 0.35), 0 2px 6px rgba(0, 0, 0, 0.85)',
         }}
       >
         <div
           className="h-full transition-all duration-150 ease-out"
           style={{
             width: `${xpPercent}%`,
-            background: 'linear-gradient(90deg, #2fb8d9 0%, #5de4ff 78%, #b8f5ff 100%)',
-            boxShadow: '0 0 12px rgba(93, 228, 255, 0.72)',
+            background: 'linear-gradient(180deg, #6ba6bd 0%, #3d768c 55%, #234757 100%)',
+            boxShadow: 'inset 0 1px 0 rgba(210, 236, 245, 0.35)',
           }}
         />
       </div>
@@ -328,79 +298,13 @@ const HUDComponent: React.FC<HUDProps> = ({
               <BloodHpBar hp={hp} maxHp={maxHp} />
             </ForgedIronFrame>
 
-            {/* Compact HUD Tab Switcher: Status / Performance */}
-            <div
-              role="tablist"
-              aria-label="HUD Panels"
-              className="pointer-events-auto inline-flex items-center self-start rounded-[8px] border border-[#3a3f47] bg-[#121418]/92 p-0.5 shadow-[0_6px_16px_rgba(0,0,0,0.65)]"
-            >
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeHudTab === 'status'}
-                onPointerDown={() => haptics.tap('light')}
-                onClick={() => setActiveHudTab('status')}
-                className={`px-2 sm:px-2.5 py-1 rounded-[6px] text-[9px] sm:text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
-                  activeHudTab === 'status'
-                    ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
-                    : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
-                }`}
-              >
-                <Shield className="w-3 h-3 text-[#e5303a] shrink-0" />
-                <span>Status</span>
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={activeHudTab === 'performance'}
-                onPointerDown={() => haptics.tap('light')}
-                onClick={() => setActiveHudTab('performance')}
-                className={`px-2 sm:px-2.5 py-1 rounded-[6px] text-[9px] sm:text-[10px] font-display font-bold tracking-wider uppercase flex items-center gap-1 transition-colors cursor-pointer whitespace-nowrap ${
-                  activeHudTab === 'performance'
-                    ? 'bg-[#2a1216] text-[#d8c9a8] border border-[#b3121a]/80 shadow-[0_0_8px_rgba(229,48,58,0.28)]'
-                    : 'text-[#8e8168] hover:text-[#d8c9a8] border border-transparent'
-                }`}
-              >
-                <Activity className="w-3 h-3 text-[#5de4ff] shrink-0" />
-                <span>DPS</span>
-              </button>
-            </div>
-
-            {activeHudTab === 'performance' && (
-              <ForgedIronFrame
-                seed="hud-performance-panel"
-                dripCount={2}
-                maxDripLength={12}
-                borderColor="#3a3f47"
-                className="pointer-events-auto w-[min(284px,calc(100vw-24px))]"
-                contentClassName="px-3 py-2.5 flex flex-col gap-1.5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-display text-[11px] font-bold tracking-wider uppercase text-[#d8c9a8] flex items-center gap-1.5">
-                    <Activity className="w-3.5 h-3.5 text-[#e5303a]" />
-                    Run DPS Curve
-                  </span>
-                  <span className="text-[10px] font-mono-numbers text-[#8e8168]">
-                    {debugStats.killsPerMin} kills/m
-                  </span>
-                </div>
-                <PerformanceChart
-                  samples={dpsHistory}
-                  currentDps={debugStats.playerDps}
-                  width={256}
-                  height={124}
-                />
-              </ForgedIronFrame>
-            )}
-
             {/* Kill Combo, Pressure & Light Status indicators */}
-            {activeHudTab === 'status' &&
-              (combo > 1 ||
-                isUnderPressure ||
-                lightShardRemainingSec > 0 ||
-                redShardRemainingSec > 0 ||
-                darknessFallsRemainingSec > 0 ||
-                bloodFogRemainingSec > 0) && (
+            {(combo > 1 ||
+              isUnderPressure ||
+              lightShardRemainingSec > 0 ||
+              redShardRemainingSec > 0 ||
+              darknessFallsRemainingSec > 0 ||
+              bloodFogRemainingSec > 0) && (
               <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-[10px] sm:text-[11px] max-w-[min(256px,calc(100vw-24px))]">
                 {combo > 1 && (
                   <ForgedIronFrame
@@ -495,7 +399,7 @@ const HUDComponent: React.FC<HUDProps> = ({
             )}
 
             {/* Active Dynamic Challenge Pact Tracker */}
-            {activeHudTab === 'status' && activeChallenge && (
+            {activeChallenge && (
               <ForgedIronFrame
                 seed={`hud-challenge-${activeChallenge.id}`}
                 dripCount={2}
@@ -555,40 +459,6 @@ const HUDComponent: React.FC<HUDProps> = ({
               </ForgedIronFrame>
             )}
 
-            {/* Hidden Debug Overlay (toggled via 5 taps in top-left corner) */}
-            {showDebug && (
-              <ForgedIronFrame
-                seed="hud-debug-panel"
-                dripCount={2}
-                maxDripLength={12}
-                className="max-w-[208px]"
-                contentClassName="px-3 py-2 text-[11px] font-mono-numbers text-[#d8c9a8] flex flex-col gap-0.5"
-              >
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[#e5303a] mb-0.5">
-                  Debug Telemetry
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9c8e72]">FPS</span>
-                  <span>{debugStats.fps}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9c8e72]">Enemies</span>
-                  <span>{debugStats.enemyCount}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9c8e72]">Kills/min</span>
-                  <span>{debugStats.killsPerMin}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9c8e72]">Player DPS</span>
-                  <span>{debugStats.playerDps}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-[#9c8e72]">Minute</span>
-                  <span>{debugStats.currentMinute}</span>
-                </div>
-              </ForgedIronFrame>
-            )}
           </div>
 
           {/* Top-Center: Centered Forged-Iron Run Timer */}
@@ -708,22 +578,24 @@ const HUDComponent: React.FC<HUDProps> = ({
             }
           }}
           disabled={dashCharges <= 0}
-          aria-label="Dash (Space or Shift)"
-          className={`pointer-events-auto min-h-[56px] min-w-[106px] px-3.5 py-2 rounded-[10px] border flex items-center justify-between gap-2.5 transition-all cursor-pointer active:scale-95 ${
+          aria-label="Dash"
+          className={`pointer-events-auto min-h-[56px] min-w-[106px] px-3.5 py-2 rounded-[9px] border-2 flex items-center justify-between gap-2.5 transition-all cursor-pointer active:scale-95 ${
             dashCharges > 0
-              ? 'bg-[#151a20]/90 border-[#5de4ff]/70 text-[#e8dcc2] shadow-[0_0_14px_rgba(93,228,255,0.22)] hover:border-[#5de4ff]'
-              : 'bg-[#121417]/80 border-[#3a3f47] text-[#7c7361] cursor-not-allowed'
+              ? 'rusted-iron-plate border-[#6a7382] text-[#e8dcc2] hover:border-[#8f2424]'
+              : 'bg-[#101215]/88 border-[#323740] text-[#7c7361] cursor-not-allowed'
           }`}
         >
           <div className="flex items-center gap-2">
             <Wind
-              className={`w-4 h-4 ${dashCharges > 0 ? 'text-[#5de4ff]' : 'text-[#5a606b]'}`}
+              className={`w-4 h-4 ${dashCharges > 0 ? 'text-[#7db9cf]' : 'text-[#5a606b]'}`}
             />
             <div className="flex flex-col items-start leading-tight">
               <span className="font-display text-[11px] font-bold tracking-wider uppercase">
                 Dash
               </span>
-              <span className="text-[9px] text-[#9c8e72] font-mono-numbers">Space</span>
+              <span className="text-[9px] text-[#9c8e72] font-mono-numbers">
+                {dashCharges > 0 ? 'Ready' : 'Recharge'}
+              </span>
             </div>
           </div>
 
@@ -736,17 +608,17 @@ const HUDComponent: React.FC<HUDProps> = ({
                     key={idx}
                     className={`w-2.5 h-2.5 rounded-full border transition-all ${
                       ready
-                        ? 'bg-[#5de4ff] border-[#b8f5ff] shadow-[0_0_6px_rgba(93,228,255,0.85)]'
-                        : 'bg-[#1c2026] border-[#3a3f47]'
+                        ? 'bg-[#6aaac2] border-[#b7dce8]'
+                        : 'bg-[#1a1d22] border-[#3a3f47]'
                     }`}
                   />
                 );
               })}
             </div>
             {dashCharges < maxDashCharges && (
-              <div className="w-8 h-1 rounded-full bg-[#1f2329] overflow-hidden">
+              <div className="w-8 h-1 rounded-full bg-[#17191e] border border-[#2f343d] overflow-hidden">
                 <div
-                  className="h-full bg-[#5de4ff]/80 transition-all duration-75"
+                  className="h-full bg-[#5a96ad] transition-all duration-75"
                   style={{ width: `${Math.round(dashCooldownProgress * 100)}%` }}
                 />
               </div>

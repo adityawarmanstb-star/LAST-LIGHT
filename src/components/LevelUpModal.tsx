@@ -212,7 +212,7 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                       +{challengeOffer.rewardCoins} Coins · {challengeOffer.rewardBuffLabel}
                     </span>
                   </div>
-                  <div className="text-sm font-display font-bold text-[#d8c9a8] truncate">
+                  <div className="text-sm font-display font-bold text-[#d8c9a8]">
                     {challengeOffer.title}
                   </div>
                   <p className="text-xs text-[#b0a287] leading-snug">
@@ -235,7 +235,7 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                 >
                   {acceptChallenge && <Check className="w-4 h-4 text-[#f2a93b]" />}
                   <span className={acceptChallenge ? 'text-[#f2a93b]' : 'text-[#d8c9a8]'}>
-                    {acceptChallenge ? 'Pact Accepted' : 'Accept Pact [C]'}
+                    {acceptChallenge ? 'Pact Accepted' : 'Accept Pact'}
                   </span>
                 </IronButton>
               </div>
@@ -310,12 +310,11 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                     </p>
                   </div>
 
-                  {/* Quiet Footer Hotkey */}
-                  <div className="w-full pt-3 mt-4 border-t border-[#3a3f47]/70 flex items-center justify-between text-xs text-[#8e8168] group-hover:text-[#e5303a] transition-colors">
-                    <span className="font-medium">
-                      {acceptChallenge ? 'Select + Accept Pact' : 'Select'}
+                  {/* Tap Footer */}
+                  <div className="w-full pt-3 mt-4 border-t border-[#3a3f47]/70 flex items-center justify-center text-xs text-[#8e8168] group-hover:text-[#e5303a] transition-colors">
+                    <span className="font-display font-bold tracking-wider uppercase">
+                      {acceptChallenge ? 'Tap to Select + Pact' : 'Tap to Select'}
                     </span>
-                    <span className="font-mono-numbers font-semibold">[{index + 1}]</span>
                   </div>
                 </ForgedIronFrame>
               </button>

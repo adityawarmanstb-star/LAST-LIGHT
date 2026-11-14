@@ -291,11 +291,11 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
               }}
               className={`min-h-[44px] px-3.5 sm:px-4 rounded-[9px] border text-xs sm:text-sm font-display font-bold tracking-wider uppercase flex items-center gap-2 transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                 activeTab === 'relics'
-                  ? 'bg-[#172129] border-[#5de4ff] text-[#e8dcc2]'
-                  : 'bg-[#15181d] border-[#5de4ff]/45 text-[#d8c9a8] hover:border-[#5de4ff]'
+                  ? 'bg-[#281216] border-[#a8242e] text-[#e8dcc2]'
+                  : 'bg-[#15181d] border-[#454c57] text-[#d8c9a8] hover:border-[#8c322b]'
               }`}
             >
-              <Gem className="w-4 h-4 text-[#5de4ff]" />
+              <Gem className="w-4 h-4 text-[#c7566b]" />
               <span>Relics</span>
               <span className="font-mono-numbers text-[11px] text-[#9c8e72]">
                 {unlockedRelics.length}/{RELICS.length}
@@ -305,10 +305,10 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
 
           <div className="flex items-center gap-3.5 shrink-0">
             <div
-              className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#d8b4fe]"
+              className="flex items-center gap-1.5 text-sm font-mono-numbers font-bold text-[#e3c3c9]"
               title="Relic Seals from Daily Missions"
             >
-              <KeyRound className="w-4 h-4 text-[#c084fc]" />
+              <KeyRound className="w-4 h-4 text-[#c7566b]" />
               <span>{relicSeals}</span>
               <span className="text-[11px] font-sans font-normal text-[#8e8168] hidden sm:inline">
                 Seals
@@ -365,9 +365,9 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
                             className={`w-4 h-1.5 rounded-full transition-colors ${
                               idx < u.currentRank
                                 ? u.icon === 'sparkles'
-                                  ? 'bg-[#5de4ff] shadow-[0_0_6px_rgba(93,228,255,0.65)]'
-                                  : 'bg-[#b3121a] shadow-[0_0_6px_rgba(229,48,58,0.6)]'
-                                : 'bg-[#2a2d33]'
+                                  ? 'bg-[#b5873a] border border-[#d6b267]/50'
+                                  : 'bg-[#9c151c] border border-[#d13b43]/50'
+                                : 'bg-[#23262c] border border-[#32363f]'
                             }`}
                           />
                         ))}
@@ -502,14 +502,14 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
                         onClick={handleUnlockRelicSlot}
                         className={`min-h-[68px] p-2.5 rounded-[10px] border text-left flex items-center gap-2.5 transition-all ${
                           canUnlockNextSlot
-                            ? 'bg-[#1a1326] border-[#c084fc] hover:border-[#5de4ff] cursor-pointer shadow-[0_0_14px_rgba(192,132,252,0.28)] active:scale-[0.98]'
+                            ? 'bg-[#2a1115] border-[#a8242e] hover:border-[#cfa15c] cursor-pointer active:scale-[0.98]'
                             : 'bg-[#0e1014] border-[#2a2e36] opacity-80 cursor-not-allowed'
                         }`}
                       >
                         <div
                           className={`w-9 h-9 rounded-[8px] border flex items-center justify-center shrink-0 ${
                             canUnlockNextSlot
-                              ? 'bg-[#241838] border-[#c084fc] text-[#d8b4fe]'
+                              ? 'bg-[#3d1117] border-[#b8323c] text-[#f0cad9]'
                               : 'bg-[#121418] border-[#2f343d] text-[#6a6253]'
                           }`}
                         >
@@ -525,7 +525,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
                           </div>
                           <div
                             className={`text-[10px] font-mono-numbers mt-0.5 leading-tight ${
-                              canUnlockNextSlot ? 'text-[#5de4ff] font-semibold' : 'text-[#c084fc]'
+                              canUnlockNextSlot ? 'text-[#f2a93b] font-semibold' : 'text-[#b56778]'
                             }`}
                           >
                             {Math.min(relicSeals, nextSlotInfo.costSeals)}/{nextSlotInfo.costSeals} Seals

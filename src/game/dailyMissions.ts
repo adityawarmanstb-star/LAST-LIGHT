@@ -344,6 +344,51 @@ class DailyMissionsManager {
     return this.state.missions.filter((m) => m.completed).length;
   }
 
+  public isDailyChestClaimed(): boolean {
+    const today = getTodayDateKey();
+    return saveDataStore.read().dailyChestClaimedDateKey === today;
+  }
+
+  public canClaimDailyChest(): boolean {
+    return this.getCompletedCount() >= 3 && !this.isDailyChestClaimed();
+  }
+
+  public claimDailyChest(): {
+    success: boolean;
+    rewardCoins: number;
+    rewardSeals: number;
+    newCoins: number;
+    newSeals: number;
+  } {
+    const today = getTodayDateKey();
+    if (!this.canClaimDailyChest()) {
+      return {
+        success: false,
+        rewardCoins: 0,
+        rewardSeals: 0,
+        newCoins: getSavedCoins(),
+        newSeals: getRelicSeals(),
+      };
+    }
+
+    const rewardCoins = 120;
+    const rewardSeals = 2;
+    const newCoins = addCoins(rewardCoins);
+    const newSeals = addRelicSeals(rewardSeals);
+    saveDataStore.update((draft) => {
+      draft.dailyChestClaimedDateKey = today;
+    });
+    this.notifySubscribers();
+
+    return {
+      success: true,
+      rewardCoins,
+      rewardSeals,
+      newCoins,
+      newSeals,
+    };
+  }
+
   public subscribe(cb: MissionsSubscriber): () => void {
     this.subscribers.push(cb);
     return () => {
