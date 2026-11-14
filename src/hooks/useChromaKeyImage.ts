@@ -10,6 +10,9 @@ export const UI_ASSETS = {
   iconHome: './assets/ui/icon_home.png',
   iconBestiary: './assets/ui/icon_bestiary.png',
   iconAchievements: './assets/ui/icon_achievements.png',
+  gameTitleLogo: './assets/ui/game_title_logo.png',
+  loadingSplash: './assets/ui/loading_splash.png',
+  appIcon: './assets/ui/app_icon.png',
 } as const;
 
 const resolvedDataUrlCache = new Map<string, string>();
@@ -164,6 +167,7 @@ export function preloadAllChromaKeyUiAssets(): void {
     UI_ASSETS.iconHome,
     UI_ASSETS.iconBestiary,
     UI_ASSETS.iconAchievements,
+    UI_ASSETS.gameTitleLogo,
   ];
   chromaSources.forEach((asset) => {
     processChromaKeyImage(asset).catch(() => {

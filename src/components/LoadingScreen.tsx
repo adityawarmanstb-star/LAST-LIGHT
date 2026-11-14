@@ -1,5 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { UI_ASSETS, preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
+import {
+  UI_ASSETS,
+  preloadAllChromaKeyUiAssets,
+  useChromaKeyImage,
+} from '../hooks/useChromaKeyImage';
 import { IronCard } from './IronCard';
 
 interface LoadingScreenProps {
@@ -22,15 +26,17 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   visible,
   progress,
   phase,
-  mode,
   onTransitionEnd,
 }) => {
   const [rendered, setRendered] = useState(visible);
   const [fadedIn, setFadedIn] = useState(visible);
   const [displayProgress, setDisplayProgress] = useState(0);
-  const [bgError, setBgError] = useState(false);
   const [tipIndex, setTipIndex] = useState(() =>
     Math.floor(Math.random() * SURVIVAL_TIPS.length)
+  );
+
+  const { processedSrc: titleLogoSrc, hasError: titleLogoError } = useChromaKeyImage(
+    UI_ASSETS.gameTitleLogo
   );
 
   useEffect(() => {
@@ -94,80 +100,62 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       role="status"
       aria-live="polite"
       aria-label={`Loading ${pctRounded}%`}
-      className={`fixed inset-0 z-[100] flex flex-col items-center justify-center safe-area-pad select-none bg-[#080a0d] transition-all duration-500 ease-out ${
+      className={`fixed inset-0 h-[100dvh] z-[100] flex flex-col justify-between items-center select-none bg-[#06070a] transition-all duration-500 ease-out overflow-hidden ${
         fadedIn ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-[1.02] pointer-events-none'
       }`}
+      style={{
+        backgroundImage: `url(${UI_ASSETS.loadingSplash})`,
+        backgroundSize: 'cover',
+        backgroundPosition: 'center top',
+        backgroundRepeat: 'no-repeat',
+      }}
     >
-      {/* bg_dungeon.png Backdrop + Moody Dark Radial Vignette */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        {!bgError && (
-          <img
-            src={UI_ASSETS.bgDungeon}
-            alt=""
-            referrerPolicy="no-referrer"
-            onError={() => setBgError(true)}
-            className="w-full h-full object-cover object-center opacity-80 brightness-90"
-          />
-        )}
-        <div
-          className="absolute inset-0"
-          style={{
-            background:
-              'radial-gradient(circle at 50% 42%, rgba(0, 0, 0, 0.38) 0%, rgba(0, 0, 0, 0.65) 55%, rgba(0, 0, 0, 0.88) 100%)',
-          }}
-        />
-      </div>
+      {/* Subtle lower-half vignette scrim so upper Dark Warden artwork remains unobstructed */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(6,7,10,0.08) 0%, rgba(6,7,10,0) 38%, rgba(5,6,9,0.72) 58%, rgba(4,5,8,0.95) 82%, rgba(4,5,8,0.98) 100%)',
+        }}
+      />
 
-      {/* Center Emblem + Brand + Progress */}
-      <div className="relative z-10 flex flex-col items-center w-full max-w-sm px-5 text-center">
-        {/* Enlarged 130x130 Circular Dark Warden Emblem with Pulsing Cyan Lantern Glow */}
-        <div
-          className="relative w-[130px] h-[130px] mb-5 flex items-center justify-center"
-          style={{
-            filter: 'drop-shadow(0 0 24px rgba(34, 211, 238, 0.5))',
-          }}
-        >
-          <div
-            aria-hidden="true"
-            className="absolute -inset-4 rounded-full blur-2xl hero-lantern-breathe"
+      {/* Upper Spacer: keeps Dark Warden character illustration completely unobstructed */}
+      <div className="relative z-10 flex-1 min-h-[38dvh] w-full pointer-events-none" aria-hidden="true" />
+
+      {/* Lower-Middle Logo, Subtitle & panel_iron_card.png Progress Bar */}
+      <div className="relative z-10 w-full max-w-[440px] px-5 flex flex-col items-center text-center">
+        {!titleLogoError ? (
+          <img
+            src={titleLogoSrc ?? UI_ASSETS.gameTitleLogo}
+            alt="LAST LIGHT"
+            referrerPolicy="no-referrer"
+            className={`w-[82%] max-w-[320px] h-auto object-contain select-none transition-opacity duration-150 ${
+              titleLogoSrc ? 'opacity-100' : 'opacity-0'
+            }`}
             style={{
-              background:
-                'radial-gradient(circle, rgba(34, 211, 238, 0.42) 0%, rgba(93, 228, 255, 0.14) 55%, transparent 78%)',
+              filter:
+                'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.98)) drop-shadow(0 0 14px rgba(242, 169, 59, 0.36)) drop-shadow(0 0 18px rgba(179, 18, 26, 0.45))',
             }}
           />
-          <div
-            aria-hidden="true"
-            className="absolute -inset-2 rounded-full border-2 border-[#596475] shadow-[inset_0_1px_0_rgba(200,215,235,0.35),0_0_20px_rgba(0,0,0,0.92)]"
-          />
-          <div
-            aria-hidden="true"
-            className="absolute -inset-3.5 rounded-full border border-dashed border-[#22d3ee]/55 animate-[spin_24s_linear_infinite]"
-          />
-          <img
-            src="./app-icon.webp"
-            alt="Last Light — Dark Warden"
-            referrerPolicy="no-referrer"
-            className="relative w-[130px] h-[130px] rounded-full object-cover shadow-[0_12px_34px_rgba(0,0,0,0.95)] ring-2 ring-[#3c4654]"
-          />
-        </div>
-
-        {/* Title */}
-        <h1
-          className="font-display font-black tracking-[0.18em] text-3xl sm:text-4xl leading-none uppercase mb-1.5"
-          style={{
-            backgroundImage:
-              'linear-gradient(180deg, #fff1c7 0%, #e6aa45 50%, #9b5d14 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            filter:
-              'drop-shadow(0 3px 0 #170805) drop-shadow(0 6px 14px rgba(0, 0, 0, 0.96))',
-          }}
-        >
-          LAST LIGHT
-        </h1>
+        ) : (
+          <h1
+            className="font-display font-black tracking-[0.16em] text-3xl sm:text-4xl leading-none uppercase"
+            style={{
+              backgroundImage:
+                'linear-gradient(180deg, #fff1c7 0%, #e6aa45 50%, #9b5d14 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              filter:
+                'drop-shadow(0 3px 0 #170805) drop-shadow(0 6px 14px rgba(0, 0, 0, 0.96))',
+            }}
+          >
+            LAST LIGHT
+          </h1>
+        )}
 
         <p
-          className="font-display font-extrabold text-xs tracking-[0.26em] uppercase mb-6"
+          className="mt-1.5 mb-5 font-display font-extrabold text-[11px] tracking-[0.28em] uppercase"
           style={{
             backgroundImage:
               'linear-gradient(180deg, #f59a9e 0%, #d4202a 55%, #73080e 100%)',
@@ -176,25 +164,25 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             filter: 'drop-shadow(0 2px 3px rgba(0, 0, 0, 0.98))',
           }}
         >
-          {mode === 'boot' ? 'AWAKENING THE LANTERN' : 'ENTERING THE ASHFEN'}
+          ENTERING THE ASHFEN
         </p>
 
-        {/* Progress Header + panel_iron_card.png Progress Bar */}
-        <div className="w-[82vw] max-w-[340px] flex flex-col items-center">
-          <div className="w-full flex items-center justify-between gap-2 mb-2 px-1">
-            <span className="font-display text-xs font-bold text-[#e8dcc2] tracking-wide text-left">
+        {/* Progress Bar directly below Title Logo framed by panel_iron_card.png */}
+        <div className="w-[84%] max-w-[340px] flex flex-col items-center">
+          <div className="w-full flex items-center justify-between gap-2 mb-1.5 px-1">
+            <span className="font-display text-[11px] font-bold text-[#e8dcc2] tracking-wide truncate text-left">
               {phase}
             </span>
-            <span className="font-display text-xs font-bold text-[#f2c464] shrink-0 tabular-nums">
+            <span className="font-display text-xs font-extrabold text-[#f2c464] shrink-0 tabular-nums">
               {pctRounded}%
             </span>
           </div>
 
           <IronCard
-            className="w-full h-[36px]"
-            contentClassName="h-full px-3 flex items-center"
+            className="w-full h-[34px]"
+            contentClassName="h-full px-2.5 flex items-center"
           >
-            <div className="w-full h-3 rounded-[4px] bg-[#08090c] border border-[#3a3f47] overflow-hidden p-[1px]">
+            <div className="w-full h-[11px] rounded-[4px] bg-[#08090c] border border-[#3a3f47] overflow-hidden p-[1px]">
               <div
                 className="h-full rounded-[3px] transition-[width] duration-150 ease-out"
                 style={{
@@ -208,13 +196,18 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             </div>
           </IronCard>
         </div>
+      </div>
 
-        {/* Atmospheric Survival Tip in Rajdhani */}
-        <div className="mt-5 min-h-[40px] px-2 flex items-center justify-center">
-          <p className="font-body text-sm font-medium text-[#cbbba0] leading-relaxed max-w-xs">
-            “{SURVIVAL_TIPS[tipIndex]}”
-          </p>
-        </div>
+      {/* Bottom Survival Tip in Rajdhani */}
+      <div
+        className="relative z-10 w-full max-w-[400px] px-6 pt-4 text-center flex items-center justify-center"
+        style={{
+          paddingBottom: 'max(22px, env(safe-area-inset-bottom))',
+        }}
+      >
+        <p className="font-body text-[13px] font-medium text-[#cbbba0] leading-snug">
+          “{SURVIVAL_TIPS[tipIndex]}”
+        </p>
       </div>
     </div>
   );

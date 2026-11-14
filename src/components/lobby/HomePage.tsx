@@ -55,6 +55,9 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
   const [equipPopSeq, setEquipPopSeq] = useState<number>(0);
   const prevEquippedIdsRef = useRef<RelicId[]>(getEquippedRelicIds());
   const { processedSrc: playBtnSrc, hasError: playBtnError } = useChromaKeyImage(UI_ASSETS.btnPlay);
+  const { processedSrc: titleLogoSrc, hasError: titleLogoError } = useChromaKeyImage(
+    UI_ASSETS.gameTitleLogo
+  );
 
   useEffect(() => {
     return subscribeRelics(
@@ -78,30 +81,46 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
   const canUnlockNewSlot = Boolean(nextSlotInfo && relicSeals >= nextSlotInfo.costSeals);
 
   return (
-    <div className="w-full flex-1 min-h-0 flex flex-col items-center justify-end sm:justify-center gap-2.5 sm:gap-3.5 px-3.5 pb-2 pt-1 overflow-y-auto">
-      {/* Epic Embossed Gold & Blood Title */}
-      <div className="relative flex flex-col items-center text-center shrink-0">
+    <div className="w-full flex-1 min-h-0 flex flex-col items-center justify-evenly sm:justify-center gap-2 sm:gap-3 px-3.5 pb-2 pt-1 overflow-y-auto">
+      {/* Embossed Metallic Gold-and-Iron LAST LIGHT Title Graphic */}
+      <div className="relative w-full flex flex-col items-center text-center shrink-0">
         <div
-          className="absolute -inset-x-8 -inset-y-2 rounded-full blur-2xl opacity-55 pointer-events-none"
+          className="absolute -inset-x-4 -inset-y-2 rounded-full blur-2xl opacity-55 pointer-events-none"
           style={{
             background:
-              'radial-gradient(ellipse at center, rgba(138, 16, 22, 0.38) 0%, rgba(74, 18, 12, 0.16) 52%, transparent 78%)',
+              'radial-gradient(ellipse at center, rgba(168, 22, 26, 0.4) 0%, rgba(114, 52, 16, 0.2) 52%, transparent 78%)',
           }}
           aria-hidden="true"
         />
-        <h1
-          className="relative font-display font-black tracking-[0.12em] text-[clamp(2.1rem,8.8vw,3rem)] leading-none whitespace-nowrap select-none"
-          style={{
-            backgroundImage:
-              'linear-gradient(180deg, #f9e6b4 0%, #cf9238 40%, #a61d24 74%, #4a060a 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            filter:
-              'drop-shadow(0 3px 0 #170505) drop-shadow(0 6px 14px rgba(0, 0, 0, 0.96))',
-          }}
-        >
-          LAST LIGHT
-        </h1>
+
+        {!titleLogoError ? (
+          <img
+            src={titleLogoSrc ?? UI_ASSETS.gameTitleLogo}
+            alt="LAST LIGHT"
+            referrerPolicy="no-referrer"
+            className={`relative w-[82%] max-w-[320px] h-auto object-contain select-none transition-opacity duration-150 ${
+              titleLogoSrc ? 'opacity-100' : 'opacity-0'
+            }`}
+            style={{
+              filter:
+                'drop-shadow(0 4px 10px rgba(0, 0, 0, 0.96)) drop-shadow(0 0 14px rgba(242, 169, 59, 0.36)) drop-shadow(0 0 18px rgba(179, 18, 26, 0.45))',
+            }}
+          />
+        ) : (
+          <h1
+            className="relative font-display font-black tracking-[0.12em] text-[clamp(2.1rem,8.8vw,3rem)] leading-none whitespace-nowrap select-none"
+            style={{
+              backgroundImage:
+                'linear-gradient(180deg, #f9e6b4 0%, #cf9238 40%, #a61d24 74%, #4a060a 100%)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              filter:
+                'drop-shadow(0 3px 0 #170505) drop-shadow(0 6px 14px rgba(0, 0, 0, 0.96))',
+            }}
+          >
+            LAST LIGHT
+          </h1>
+        )}
 
         <div className="mt-1 flex items-center justify-center gap-2.5">
           <span className="h-[1.5px] w-7 sm:w-10 bg-gradient-to-r from-transparent via-[#523026] to-[#8f1219]" />
