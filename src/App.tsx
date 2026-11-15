@@ -15,6 +15,7 @@ import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
 import { PauseModal } from './components/PauseModal';
 import { LoadingScreen } from './components/LoadingScreen';
+import { DarkFantasyTouchFx } from './components/DarkFantasyTouchFx';
 import { gameManager } from './game/GameManager';
 import { createPhaserGame } from './game/phaserConfig';
 import { soundManager } from './game/audio';
@@ -659,6 +660,9 @@ export default function App() {
       {/* Global Non-Blocking Daily Mission & Achievement Toasts */}
       <MissionCompleteToast />
       <AchievementToast />
+
+      {/* Dark-Fantasy Touch Spark & SFX Layer for Beranda Buttons */}
+      <DarkFantasyTouchFx active={bootOverlayDone && gameState === 'TITLE'} />
 
       {/* Smooth Transition Loading Screen (App Boot + Arena Preload) */}
       <LoadingScreen

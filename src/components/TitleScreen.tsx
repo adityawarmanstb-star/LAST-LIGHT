@@ -319,7 +319,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               asButton
               onClick={() => {
                 haptics.tap('light');
+                const wasMuted = isMuted;
                 onToggleMute();
+                if (wasMuted) {
+                  window.setTimeout(() => soundManager.playUiClick(), 0);
+                }
               }}
               highlight={isMuted ? 'blood' : 'none'}
               ariaLabel={isMuted ? 'Unmute Sound' : 'Mute Sound'}

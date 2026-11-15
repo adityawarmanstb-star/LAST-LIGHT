@@ -120,6 +120,8 @@ class AudioManager {
   private lastSfxTimes: Partial<Record<SfxKey, number>> = {};
   private readonly THROTTLE_MS = 60;
   private lastDeathKnellMs: number = 0;
+  private lastUiClickMs: number = 0;
+  private uiNoiseBuffer: AudioBuffer | null = null;
 
   // Music Track State (1s crossfade between tracks, loop-ready .ogg)
   private currentTrackKey: MusicTrackKey | null = null;
@@ -647,7 +649,205 @@ class AudioManager {
   public playRevival() {
     this.playSfx('level_up', 1.0);
   }
-  public playUiClick() {}
+  private getUiNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (this.uiNoiseBuffer && this.uiNoiseBuffer.sampleRate === ctx.sampleRate) {
+      return this.uiNoiseBuffer;
+    }
+    const len = Math.max(1, Math.floor(ctx.sampleRate * 0.04));
+    const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
+    const ch = buffer.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const env = Math.exp(-i / (ctx.sampleRate * 0.008));
+      ch[i] = (Math.random() * 2 - 1) * env;
+    }
+    this.uiNoiseBuffer = buffer;
+    return buffer;
+  }
+
+  /**
+   * Dark-fantasy forged-iron & rune stone latch click for Beranda & UI buttons.
+   */
+  public playUiClick() {
+    if (this.isMuted) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastUiClickMs < 48) return;
+    this.lastUiClickMs = nowMs;
+
+    this.initCtx(true);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx && this.ctx.state === 'running' && !this.isMuted) {
+            this.triggerUiClickNodes();
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+
+    this.triggerUiClickNodes();
+  }
+
+  private triggerUiClickNodes() {
+    if (!this.ctx || !this.sfxGain) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const detune = 0.96 + Math.random() * 0.08;
+
+    try {
+      // 1. Crisp metallic iron latch transient
+      const noiseSrc = ctx.createBufferSource();
+      noiseSrc.buffer = this.getUiNoiseBuffer(ctx);
+
+      const bandpass = ctx.createBiquadFilter();
+      bandpass.type = 'bandpass';
+      bandpass.frequency.setValueAtTime(1650 * detune, now);
+      bandpass.Q.setValueAtTime(2.6, now);
+
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.24, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.032);
+
+      noiseSrc.connect(bandpass);
+      bandpass.connect(noiseGain);
+      noiseGain.connect(this.sfxGain);
+      noiseSrc.start(now);
+      noiseSrc.stop(now + 0.04);
+
+      // 2. Heavy dark-iron body thud
+      const bodyOsc = ctx.createOscillator();
+      bodyOsc.type = 'triangle';
+      bodyOsc.frequency.setValueAtTime(245 * detune, now);
+      bodyOsc.frequency.exponentialRampToValueAtTime(86 * detune, now + 0.065);
+
+      const bodyGain = ctx.createGain();
+      bodyGain.gain.setValueAtTime(0.001, now);
+      bodyGain.gain.linearRampToValueAtTime(0.26, now + 0.004);
+      bodyGain.gain.exponentialRampToValueAtTime(0.001, now + 0.072);
+
+      bodyOsc.connect(bodyGain);
+      bodyGain.connect(this.sfxGain);
+      bodyOsc.start(now);
+      bodyOsc.stop(now + 0.08);
+
+      // 3. Subtle cold steel rune shimmer
+      const pingOsc = ctx.createOscillator();
+      pingOsc.type = 'sine';
+      pingOsc.frequency.setValueAtTime(860 * detune, now);
+      pingOsc.frequency.exponentialRampToValueAtTime(540 * detune, now + 0.055);
+
+      const pingGain = ctx.createGain();
+      pingGain.gain.setValueAtTime(0.075, now);
+      pingGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.06);
+
+      pingOsc.connect(pingGain);
+      pingGain.connect(this.sfxGain);
+      pingOsc.start(now);
+      pingOsc.stop(now + 0.068);
+    } catch {
+      // fail silently
+    }
+  }
+
+  /**
+   * Deep iron-gate & ember chime SFX when pressing the main PLAY button on Beranda.
+   */
+  public playUiStartGame() {
+    if (this.isMuted) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastUiClickMs < 48) return;
+    this.lastUiClickMs = nowMs;
+
+    this.initCtx(true);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx && this.ctx.state === 'running' && !this.isMuted) {
+            this.triggerUiStartNodes();
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+
+    this.triggerUiStartNodes();
+  }
+
+  private triggerUiStartNodes() {
+    if (!this.ctx || !this.sfxGain) return;
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+
+    try {
+      // 1. Iron gate heavy lock transient
+      const noiseSrc = ctx.createBufferSource();
+      noiseSrc.buffer = this.getUiNoiseBuffer(ctx);
+
+      const bandpass = ctx.createBiquadFilter();
+      bandpass.type = 'bandpass';
+      bandpass.frequency.setValueAtTime(1180, now);
+      bandpass.Q.setValueAtTime(1.8, now);
+
+      const noiseGain = ctx.createGain();
+      noiseGain.gain.setValueAtTime(0.32, now);
+      noiseGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+
+      noiseSrc.connect(bandpass);
+      bandpass.connect(noiseGain);
+      noiseGain.connect(this.sfxGain);
+      noiseSrc.start(now);
+      noiseSrc.stop(now + 0.045);
+
+      // 2. Deep anvil / dungeon gate impact
+      const impactOsc = ctx.createOscillator();
+      impactOsc.type = 'triangle';
+      impactOsc.frequency.setValueAtTime(155, now);
+      impactOsc.frequency.exponentialRampToValueAtTime(48, now + 0.22);
+
+      const impactGain = ctx.createGain();
+      impactGain.gain.setValueAtTime(0.001, now);
+      impactGain.gain.linearRampToValueAtTime(0.42, now + 0.008);
+      impactGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+      impactOsc.connect(impactGain);
+      impactGain.connect(this.sfxGain);
+      impactOsc.start(now);
+      impactOsc.stop(now + 0.26);
+
+      // 3. Dark bronze fifth chord (D3 + A3 + subtle D4 shimmer)
+      const notes = [
+        { freq: 146.83, peak: 0.16, dur: 0.34 },
+        { freq: 220.0, peak: 0.12, dur: 0.3 },
+        { freq: 293.66, peak: 0.075, dur: 0.26 },
+      ];
+      for (const n of notes) {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(n.freq, now);
+        osc.frequency.exponentialRampToValueAtTime(n.freq * 0.992, now + n.dur);
+
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(0.001, now);
+        g.gain.linearRampToValueAtTime(n.peak, now + 0.012);
+        g.gain.exponentialRampToValueAtTime(0.0008, now + n.dur);
+
+        osc.connect(g);
+        g.connect(this.sfxGain);
+        osc.start(now);
+        osc.stop(now + n.dur + 0.03);
+      }
+    } catch {
+      // fail silently
+    }
+  }
 
   /**
    * Plays a unique, haunting synthesized 'Death Knell' funeral bell + dark void tail
