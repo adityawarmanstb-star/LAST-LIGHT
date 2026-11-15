@@ -1,7 +1,6 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   UI_ASSETS,
-  preloadAllChromaKeyUiAssets,
   preloadCriticalLoadingLogo,
   useChromaKeyImage,
 } from '../hooks/useChromaKeyImage';
@@ -214,6 +213,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   visible,
   progress,
   phase,
+  mode,
   onTransitionEnd,
 }) => {
   const [rendered, setRendered] = useState(visible);
@@ -229,16 +229,18 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     UI_ASSETS.gameTitleLogo
   );
 
-  // Do not reveal the loading overlay until splash, title logo, and forged bar are ALL decoded
+  // Do not reveal the loading logo/bar until splash, title logo, and forged bar are ALL decoded
   // so every element fades in together cleanly with zero late logo pop-in.
   const visualsReady =
     (splashReady && barAssetsReady && (titleLogoSrc !== null || titleLogoError)) ||
     (preloadFailsafeElapsed && (titleLogoSrc !== null || titleLogoError || barAssetsReady));
 
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const visibleRef = useRef(visible);
   const progressRef = useRef(progress);
+  const modeRef = useRef(mode);
   const visualsReadyRef = useRef(visualsReady);
   const onTransitionEndRef = useRef(onTransitionEnd);
   const lastPctRef = useRef(-1);
@@ -247,6 +249,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 
   visibleRef.current = visible;
   progressRef.current = progress;
+  modeRef.current = mode;
   visualsReadyRef.current = visualsReady;
   onTransitionEndRef.current = onTransitionEnd;
 
@@ -265,16 +268,17 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       setPreloadFailsafeElapsed(true);
     }, VISUAL_PRELOAD_FAILSAFE_MS);
 
-    // Warm remaining lobby UI assets sequentially after critical logo & bar load
-    preloadAllChromaKeyUiAssets();
-
     return () => window.clearTimeout(timer);
   }, [splashReady, barAssetsReady]);
 
-  // Keep root opacity initialized to 0 before first paint when mounted/re-opened
+  // In boot mode, root MUST stay opaque (1) from frame 0 so Beranda never flashes underneath.
+  // Only arena-entry transitions fade the overlay in from 0 -> 1.
   useLayoutEffect(() => {
     if (rendered && rootRef.current && lastPctRef.current <= 0) {
-      rootRef.current.style.opacity = '0';
+      rootRef.current.style.opacity = modeRef.current === 'boot' ? '1' : '0';
+    }
+    if (rendered && contentRef.current && lastPctRef.current <= 0) {
+      contentRef.current.style.opacity = visualsReadyRef.current ? '1' : '0';
     }
   }, [rendered]);
 
@@ -286,7 +290,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       setPctRounded(0);
       setRendered(true);
       if (rootRef.current) {
-        rootRef.current.style.opacity = '0';
+        rootRef.current.style.opacity = modeRef.current === 'boot' ? '1' : '0';
+      }
+      if (contentRef.current) {
+        contentRef.current.style.opacity = visualsReadyRef.current ? '1' : '0';
       }
     } else if (visible && !rendered) {
       sessionIdRef.current += 1;
@@ -385,7 +392,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     let rafId = 0;
 
     if (rootRef.current) {
-      rootRef.current.style.opacity = '0';
+      rootRef.current.style.opacity = modeRef.current === 'boot' ? '1' : '0';
+    }
+    if (contentRef.current) {
+      contentRef.current.style.opacity = visualsReadyRef.current ? '1' : '0';
     }
 
     const tick = (nowMs: number) => {
@@ -406,14 +416,21 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           pool[i].active = false;
         }
         if (rootRef.current) {
-          rootRef.current.style.opacity = '0';
+          rootRef.current.style.opacity = modeRef.current === 'boot' ? '1' : '0';
+        }
+        if (contentRef.current) {
+          contentRef.current.style.opacity = visualsReadyRef.current ? '1' : '0';
         }
       }
 
-      // Hold the 4-second clock & curtain invisible until splash, logo, and bar are decoded
+      // Hold the 4-second clock & foreground logo/bar until splash, logo, and bar are decoded
+      // In boot mode keep the outer backdrop opaque (opacity 1) so Beranda can never appear first
       if (!visualsReadyRef.current) {
         if (rootRef.current) {
-          rootRef.current.style.opacity = '0';
+          rootRef.current.style.opacity = modeRef.current === 'boot' ? '1' : '0';
+        }
+        if (contentRef.current) {
+          contentRef.current.style.opacity = '0';
         }
         rafId = requestAnimationFrame(tick);
         return;
@@ -437,9 +454,14 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       }
 
       // Smooth fade-in across the first 260ms once all visuals are decoded
-      if (completionState !== 'fading' && rootRef.current) {
+      if (completionState !== 'fading') {
         const fadeInAlpha = Math.min(1, elapsedMs / FADE_IN_MS);
-        rootRef.current.style.opacity = String(fadeInAlpha);
+        if (rootRef.current) {
+          rootRef.current.style.opacity = modeRef.current === 'boot' ? '1' : String(fadeInAlpha);
+        }
+        if (contentRef.current) {
+          contentRef.current.style.opacity = String(fadeInAlpha);
+        }
       }
 
       // 1. Smoothly tween displayed progress toward real loader progress across 3.5s (+0.5s flash/fade = 4.0s)
@@ -681,7 +703,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       <div className="relative z-10 flex-1 min-h-[36dvh] w-full pointer-events-none" aria-hidden="true" />
 
       {/* Lower-Middle Logo, Subtitle & Animated Forged Runic Progress Bar */}
-      <div className="relative z-10 w-full max-w-[460px] px-4 flex flex-col items-center text-center">
+      <div
+        ref={contentRef}
+        className="relative z-10 w-full max-w-[460px] px-4 flex flex-col items-center text-center"
+        style={{ willChange: 'opacity' }}
+      >
         {titleLogoSrc && !titleLogoError ? (
           <img
             src={titleLogoSrc}

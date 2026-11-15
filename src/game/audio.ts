@@ -415,8 +415,9 @@ class AudioManager {
   // -------------------------------------------------------------
   // Preload All Attached Audio Files (Silent on Missing)
   // -------------------------------------------------------------
+  private preloadPromise: Promise<void> | null = null;
+
   private async decodeUrl(url: string): Promise<AudioBuffer | null> {
-    if (!this.ctx) return null;
     try {
       const resp = await fetch(url);
       if (!resp.ok) return null;
@@ -428,35 +429,70 @@ class AudioManager {
     }
   }
 
-  private async preloadAllAudio() {
+  private async preloadAllAudio(onItemDone?: () => void): Promise<void> {
     // Load Music (.ogg)
     const musicKeys = Object.keys(MUSIC_ASSETS) as MusicTrackKey[];
     const musicPromises = musicKeys.map(async (key) => {
-      if (this.musicBuffers[key]) return;
-      const buffer = await this.decodeUrl(MUSIC_ASSETS[key].url);
-      if (buffer) {
-        this.musicBuffers[key] = buffer;
-        if (this.queuedTrackKey === key && this.ctx && this.ctx.state === 'running' && !this.isPaused) {
-          this.queuedTrackKey = null;
-          this.playTrack(key, true);
+      try {
+        if (!this.musicBuffers[key]) {
+          const buffer = await this.decodeUrl(MUSIC_ASSETS[key].url);
+          if (buffer) {
+            this.musicBuffers[key] = buffer;
+            if (
+              this.queuedTrackKey === key &&
+              this.ctx &&
+              this.ctx.state === 'running' &&
+              !this.isPaused
+            ) {
+              this.queuedTrackKey = null;
+              this.playTrack(key, true);
+            }
+          }
         }
+      } finally {
+        onItemDone?.();
       }
     });
 
     // Load SFX (.ogg with .mp3 fallback)
     const sfxKeys = Object.keys(SFX_ASSETS) as SfxKey[];
     const sfxPromises = sfxKeys.map(async (key) => {
-      if (this.sfxBuffers[key]) return;
-      for (const url of SFX_ASSETS[key]) {
-        const buffer = await this.decodeUrl(url);
-        if (buffer) {
-          this.sfxBuffers[key] = buffer;
-          break;
+      try {
+        if (!this.sfxBuffers[key]) {
+          for (const url of SFX_ASSETS[key]) {
+            const buffer = await this.decodeUrl(url);
+            if (buffer) {
+              this.sfxBuffers[key] = buffer;
+              break;
+            }
+          }
         }
+      } finally {
+        onItemDone?.();
       }
     });
 
     await Promise.allSettled([...musicPromises, ...sfxPromises]);
+  }
+
+  public getPreloadAssetCount(): number {
+    return Object.keys(MUSIC_ASSETS).length + Object.keys(SFX_ASSETS).length;
+  }
+
+  public preloadAll(onItemDone?: () => void): Promise<void> {
+    if (typeof window === 'undefined') return Promise.resolve();
+    this.initCtx(false);
+    if (this.preloadPromise) {
+      return this.preloadPromise.then(() => {
+        if (onItemDone) {
+          const total = this.getPreloadAssetCount();
+          for (let i = 0; i < total; i++) onItemDone();
+        }
+      });
+    }
+    this.preloadStarted = true;
+    this.preloadPromise = this.preloadAllAudio(onItemDone);
+    return this.preloadPromise;
   }
 
   // -------------------------------------------------------------

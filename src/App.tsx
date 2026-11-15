@@ -20,6 +20,7 @@ import { createPhaserGame } from './game/phaserConfig';
 import { soundManager } from './game/audio';
 import { saveDataStore } from './game/saveData';
 import { getActiveRelicSynergies } from './game/relics';
+import { preloadAllGameAssets } from './game/assetPreloader';
 import {
   ActiveDynamicChallenge,
   BossInfo,
@@ -36,6 +37,8 @@ import { initCapacitorMobile } from './mobile/capacitorBridge';
 
 export default function App() {
   const [gameState, setGameState] = useState<'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('TITLE');
+  const [bootReady, setBootReady] = useState(false);
+  const [bootOverlayDone, setBootOverlayDone] = useState(false);
   const [lobbyTab, setLobbyTab] = useState<LobbyTabId>('home');
   const [lobbyShopSubTab, setLobbyShopSubTab] = useState<ShopSubTab>('market');
   const [showSettings, setShowSettings] = useState(false);
@@ -86,7 +89,7 @@ export default function App() {
     mode: 'boot' | 'arena';
   }>({
     visible: true,
-    progress: 18,
+    progress: 0,
     phase: 'Kindling the First Flame…',
     mode: 'boot',
   });
@@ -194,63 +197,42 @@ export default function App() {
     };
   }, []);
 
-  // Smooth initial app boot entrance until fonts & shell hydrate
+  // Preload ALL fonts, UI images, chroma icons, atlases, arena/bestiary sprites & audio during boot LoadingScreen
   useEffect(() => {
     let cancelled = false;
-    let fontsDelayTimer: number | null = null;
 
-    const t1 = window.setTimeout(() => {
-      if (!cancelled) {
-        setLoadingOverlay((prev) =>
-          prev.mode === 'boot' && prev.visible
-            ? { ...prev, progress: 42, phase: 'Forging Obsidian Sanctuary…' }
-            : prev
-        );
-      }
-    }, 850);
-
-    const t2 = window.setTimeout(() => {
-      if (!cancelled) {
-        setLoadingOverlay((prev) =>
-          prev.mode === 'boot' && prev.visible
-            ? { ...prev, progress: 76, phase: 'Awakening the Dark Warden…' }
-            : prev
-        );
-      }
-    }, 1850);
-
-    const finalizeBoot = () => {
+    preloadAllGameAssets((pct, phase) => {
       if (cancelled) return;
+      setLoadingOverlay((prev) =>
+        prev.mode === 'boot' && prev.visible
+          ? {
+              ...prev,
+              progress: Math.max(prev.progress, pct),
+              phase,
+            }
+          : prev
+      );
+    }).then(() => {
+      if (cancelled) return;
+      setBootReady(true);
       setLoadingOverlay((prev) =>
         prev.mode === 'boot'
           ? { ...prev, progress: 100, phase: 'Lantern Lit…', visible: false }
           : prev
       );
-    };
-
-    const maxWait = window.setTimeout(finalizeBoot, 2600);
-    const fontsReady = document.fonts?.ready ?? Promise.resolve();
-    fontsReady.then(() => {
-      if (!cancelled) {
-        fontsDelayTimer = window.setTimeout(finalizeBoot, 2200);
-      }
     });
 
     return () => {
       cancelled = true;
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-      window.clearTimeout(maxWait);
-      if (fontsDelayTimer !== null) window.clearTimeout(fontsDelayTimer);
     };
   }, []);
 
-  // Play menu music on title screen
+  // Play menu music on title screen once boot assets are ready
   useEffect(() => {
-    if (gameState === 'TITLE') {
+    if (bootReady && gameState === 'TITLE') {
       soundManager.playMenu();
     }
-  }, [gameState]);
+  }, [bootReady, gameState]);
 
   // Handle keyboard (P / Esc) for Pause (works even when level-up card modal is open)
   useEffect(() => {
@@ -559,11 +541,11 @@ export default function App() {
       {/* Phaser Canvas Container */}
       <div id="phaser-container" ref={containerRef} className="absolute inset-0 z-10" />
 
-      {/* Screen: Full-Screen Multi-Page Lobby */}
-      {gameState === 'TITLE' && (
+      {/* Screen: Full-Screen Multi-Page Lobby (mounted only after full boot preload completes) */}
+      {bootReady && gameState === 'TITLE' && (
         <TitleScreen
           isMuted={isMuted}
-          isModalOpen={showSettings || showHowToPlay}
+          isModalOpen={showSettings || (bootOverlayDone && showHowToPlay)}
           initialTab={lobbyTab}
           initialShopSubTab={lobbyShopSubTab}
           onTabChange={(tab, sub) => {
@@ -646,7 +628,7 @@ export default function App() {
 
       {/* Modal: How to Play (First Launch & Settings Guide) */}
       <HowToPlayModal
-        isOpen={showHowToPlay}
+        isOpen={bootOverlayDone && showHowToPlay}
         isFirstLaunch={isFirstLaunchGuide}
         onClose={handleCloseHowToPlay}
       />
@@ -685,6 +667,7 @@ export default function App() {
         phase={loadingOverlay.phase}
         mode={loadingOverlay.mode}
         onTransitionEnd={() => {
+          setBootOverlayDone(true);
           const scene = gameManager.activeScene as MainScene | null;
           if (scene && scene.sys?.isActive()) {
             scene.setWaitingForLoading(false);

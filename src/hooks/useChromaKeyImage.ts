@@ -40,7 +40,7 @@ export const UI_ASSETS = {
 
 const resolvedDataUrlCache = new Map<string, string>();
 const inFlightCache = new Map<string, Promise<string>>();
-let lobbyPreloadStarted = false;
+let lobbyPreloadPromise: Promise<void> | null = null;
 
 const MAX_PROCESSED_DIMENSION = 1024;
 
@@ -250,50 +250,75 @@ export function preloadCriticalLoadingLogo(): Promise<string | null> {
   return processChromaKeyImage(UI_ASSETS.gameTitleLogo, 'high').catch(() => null);
 }
 
-export function preloadAllChromaKeyUiAssets(): void {
-  if (lobbyPreloadStarted) return;
-  lobbyPreloadStarted = true;
+const SECONDARY_CHROMA_ASSETS: readonly string[] = [
+  UI_ASSETS.btnPlay,
+  UI_ASSETS.panelIronCard,
+  UI_ASSETS.navBarBg,
+  UI_ASSETS.iconHome,
+  UI_ASSETS.iconMissions,
+  UI_ASSETS.iconBestiary,
+  UI_ASSETS.iconShop,
+  UI_ASSETS.iconAchievements,
+  UI_ASSETS.relicBloodChalice,
+  UI_ASSETS.relicSunforgedLens,
+  UI_ASSETS.relicIronSpurs,
+  UI_ASSETS.relicExecutionerSeal,
+  UI_ASSETS.synergySolarIgnition,
+  UI_ASSETS.synergyEyeOfTheStorm,
+  UI_ASSETS.weaponBolt,
+  UI_ASSETS.weaponBlades,
+  UI_ASSETS.weaponRing,
+  UI_ASSETS.weaponSpark,
+  UI_ASSETS.weaponShotgun,
+  UI_ASSETS.statVitality,
+  UI_ASSETS.statSpeed,
+  UI_ASSETS.statMight,
+  UI_ASSETS.statMagnet,
+  UI_ASSETS.statCooldown,
+  UI_ASSETS.statCrit,
+  UI_ASSETS.skillLightBurst,
+  UI_ASSETS.dealBloodSeal,
+  UI_ASSETS.dealAshHoard,
+  UI_ASSETS.dealWardenTribute,
+  UI_ASSETS.upgradeLantern,
+  UI_ASSETS.upgradeVitality,
+];
 
-  const secondarySources = [
-    UI_ASSETS.btnPlay,
-    UI_ASSETS.panelIronCard,
-    UI_ASSETS.navBarBg,
-    UI_ASSETS.iconHome,
-    UI_ASSETS.iconMissions,
-    UI_ASSETS.iconBestiary,
-    UI_ASSETS.iconShop,
-    UI_ASSETS.iconAchievements,
-    UI_ASSETS.relicBloodChalice,
-    UI_ASSETS.relicSunforgedLens,
-    UI_ASSETS.relicIronSpurs,
-    UI_ASSETS.relicExecutionerSeal,
-    UI_ASSETS.synergySolarIgnition,
-    UI_ASSETS.synergyEyeOfTheStorm,
-    UI_ASSETS.weaponBolt,
-    UI_ASSETS.weaponBlades,
-    UI_ASSETS.weaponRing,
-    UI_ASSETS.weaponSpark,
-    UI_ASSETS.weaponShotgun,
-    UI_ASSETS.statVitality,
-    UI_ASSETS.statSpeed,
-    UI_ASSETS.statMight,
-    UI_ASSETS.statMagnet,
-    UI_ASSETS.statCooldown,
-    UI_ASSETS.statCrit,
-    UI_ASSETS.skillLightBurst,
-    UI_ASSETS.dealBloodSeal,
-    UI_ASSETS.dealAshHoard,
-    UI_ASSETS.dealWardenTribute,
-    UI_ASSETS.upgradeLantern,
-    UI_ASSETS.upgradeVitality,
-  ];
+export function getChromaKeyPreloadCount(): number {
+  return 1 + SECONDARY_CHROMA_ASSETS.length;
+}
 
-  void preloadCriticalLoadingLogo().then(async () => {
-    for (const asset of secondarySources) {
-      await new Promise<void>((r) => window.setTimeout(r, 30));
-      await processChromaKeyImage(asset, 'low').catch(() => {});
-    }
-  });
+export function preloadAllChromaKeyUiAssets(onItemDone?: () => void): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (lobbyPreloadPromise) {
+    return lobbyPreloadPromise.then(() => {
+      if (onItemDone) {
+        const total = getChromaKeyPreloadCount();
+        for (let i = 0; i < total; i++) onItemDone();
+      }
+    });
+  }
+
+  lobbyPreloadPromise = preloadCriticalLoadingLogo()
+    .finally(() => {
+      onItemDone?.();
+    })
+    .then(async () => {
+      const queue = [...SECONDARY_CHROMA_ASSETS];
+      const concurrency = 4;
+      const runWorker = async () => {
+        while (queue.length > 0) {
+          const asset = queue.shift();
+          if (!asset) break;
+          await processChromaKeyImage(asset, 'low').catch(() => {});
+          onItemDone?.();
+          await new Promise<void>((r) => window.setTimeout(r, 4));
+        }
+      };
+      await Promise.all(Array.from({ length: concurrency }, () => runWorker()));
+    });
+
+  return lobbyPreloadPromise;
 }
 
 // Kick off title logo chroma-key processing as soon as module loads

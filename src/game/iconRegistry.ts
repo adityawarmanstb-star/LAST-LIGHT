@@ -330,22 +330,43 @@ for (const [alias, targetId] of Object.entries(ID_ALIASES)) {
 
 const loggedMissingIds = new Set<string>();
 const preloadedImages = new Map<Exclude<IconAtlasId, 'standalone_chroma'>, HTMLImageElement>();
-let atlasesPreloaded = false;
+let atlasesPreloadPromise: Promise<void> | null = null;
 
-export function preloadIconAtlases(): void {
-  if (atlasesPreloaded || typeof window === 'undefined') return;
-  atlasesPreloaded = true;
+export function preloadIconAtlases(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (atlasesPreloadPromise) return atlasesPreloadPromise;
 
-  (Object.keys(ICON_ATLAS_URLS) as Exclude<IconAtlasId, 'standalone_chroma'>[]).forEach((atlasId) => {
-    const img = new Image();
-    img.decoding = 'async';
-    img.src = ICON_ATLAS_URLS[atlasId];
-    preloadedImages.set(atlasId, img);
-  });
+  const atlasKeys = Object.keys(ICON_ATLAS_URLS) as Exclude<IconAtlasId, 'standalone_chroma'>[];
+  const imagePromises = atlasKeys.map(
+    (atlasId) =>
+      new Promise<void>((resolve) => {
+        const img = new Image();
+        img.decoding = 'async';
+        img.onload = () => {
+          if (typeof img.decode === 'function') {
+            img.decode().catch(() => {}).finally(() => resolve());
+          } else {
+            resolve();
+          }
+        };
+        img.onerror = () => resolve();
+        img.src = ICON_ATLAS_URLS[atlasId];
+        preloadedImages.set(atlasId, img);
+      })
+  );
+
+  const jsonPromises = Object.values(ICON_ATLAS_JSON_URLS).map((url) =>
+    fetch(url)
+      .then(() => undefined)
+      .catch(() => undefined)
+  );
+
+  atlasesPreloadPromise = Promise.all([...imagePromises, ...jsonPromises]).then(() => undefined);
+  return atlasesPreloadPromise;
 }
 
 if (typeof window !== 'undefined') {
-  preloadIconAtlases();
+  void preloadIconAtlases();
 }
 
 export function getRarityFrameId(rarity: IconRarity): RarityFrameId {
