@@ -3,8 +3,10 @@ import {
   BestiaryKillsMap,
   DailyMissionsState,
   DailyStreakState,
+  GameDifficultyId,
   RelicId,
 } from './types';
+import { sanitizeDifficultyId } from './difficulty';
 
 const VALID_RELIC_IDS: RelicId[] = [
   'lodestone_heart',
@@ -50,6 +52,7 @@ export interface SaveDataV1 {
   dailyChestClaimedDateKey: string | null;
   dailyDealsClaimed: { dateKey: string; boughtIds: string[] } | null;
   achievements: AchievementsProgressState;
+  difficulty: GameDifficultyId;
 }
 
 const DEFAULT_SETTINGS: SaveSettingsData = {
@@ -100,6 +103,7 @@ function createDefaultSaveData(): SaveDataV1 {
       unlockedIds: [],
       claimedIds: [],
     },
+    difficulty: 'hacker',
   };
 }
 
@@ -394,6 +398,7 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
           }
         : null,
     achievements: sanitizeAchievements(obj.achievements, bestiaryKills),
+    difficulty: sanitizeDifficultyId(obj.difficulty),
   };
 }
 
@@ -531,6 +536,7 @@ class SaveDataStore {
         unlockedIds: [...this.cache.achievements.unlockedIds],
         claimedIds: [...this.cache.achievements.claimedIds],
       },
+      difficulty: this.cache.difficulty,
     };
   }
 

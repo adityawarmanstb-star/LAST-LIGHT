@@ -1,4 +1,8 @@
-export type IconAtlasId = 'icons_atlas' | 'ui_extra_atlas' | 'standalone_chroma';
+export type IconAtlasId =
+  | 'icons_atlas'
+  | 'ui_extra_atlas'
+  | 'standalone_chroma'
+  | 'standalone_direct';
 
 export type IconRarity = 'common' | 'rare' | 'epic' | 'legendary';
 
@@ -34,17 +38,19 @@ export interface ResolvedIconSpec {
   assetUrl?: string;
 }
 
-export const ICON_ATLAS_URLS: Record<Exclude<IconAtlasId, 'standalone_chroma'>, string> = {
+type SpriteAtlasId = 'icons_atlas' | 'ui_extra_atlas';
+
+export const ICON_ATLAS_URLS: Record<SpriteAtlasId, string> = {
   icons_atlas: './assets/aistudio/icons_atlas_4e461ffb.webp',
   ui_extra_atlas: './assets/aistudio/ui_extra_atlas_121c397f.webp',
 };
 
-export const ICON_ATLAS_JSON_URLS: Record<Exclude<IconAtlasId, 'standalone_chroma'>, string> = {
+export const ICON_ATLAS_JSON_URLS: Record<SpriteAtlasId, string> = {
   icons_atlas: './assets/aistudio/icons_atlas_d98a4dc4.json',
   ui_extra_atlas: './assets/aistudio/ui_extra_atlas_14c86c31.json',
 };
 
-const ATLAS_DIMENSIONS: Record<Exclude<IconAtlasId, 'standalone_chroma'>, { w: number; h: number }> = {
+const ATLAS_DIMENSIONS: Record<SpriteAtlasId, { w: number; h: number }> = {
   icons_atlas: { w: 1152, h: 1152 },
   ui_extra_atlas: { w: 1152, h: 544 },
 };
@@ -197,6 +203,138 @@ export const ICON_MAP: Record<string, IconMapEntry> = {
     atlas: 'standalone_chroma',
     assetUrl: './assets/aistudio/vitality_0e6c8215.webp',
   },
+  might: {
+    display: 'Lantern Flare',
+    category: 'shop',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561516_caac768d.png',
+  },
+  swiftness: {
+    display: 'Zephyr Steps',
+    category: 'shop',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561517_b1af7bbb.png',
+  },
+  magnet: {
+    display: 'Soul Attractor',
+    category: 'shop',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561518_8c0ee6ac.png',
+  },
+  cooldown: {
+    display: 'Rapid Incantation',
+    category: 'shop',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561520_7a4de8b0.png',
+  },
+  revive: {
+    display: 'Undying Ember',
+    category: 'shop',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561523_e1799dc8.png',
+  },
+  ui_skull: {
+    display: 'Warden Skull',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561526_599bfa37.png',
+  },
+  ui_check: {
+    display: 'Completed',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561527_f5d9ce6f.png',
+  },
+  ui_play: {
+    display: 'Play',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561528_0453ddd4.png',
+  },
+  ui_restart: {
+    display: 'Restart',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561529_0fa5579e.png',
+  },
+  ui_heart: {
+    display: 'Health',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561530_ce46ab6a.png',
+  },
+  ui_clock: {
+    display: 'Survival Timer',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561532_980e3a0e.png',
+  },
+  ui_crown: {
+    display: 'Boss Crown',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561533_a87cac33.png',
+  },
+  ui_sparkles: {
+    display: 'Milestones',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561534_d8a6c269.png',
+  },
+  ui_scroll: {
+    display: 'Daily Missions',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561535_7f57d995.png',
+  },
+  ui_swords: {
+    display: 'Combat Slay',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561536_de0bf80d.png',
+  },
+  ui_warning: {
+    display: 'Warning',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561537_da206f1f.png',
+  },
+  ui_flame: {
+    display: 'Enraged Flame',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561538_f069f9fe.png',
+  },
+  ui_shield: {
+    display: 'Pact Shield',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561539_72604844.png',
+  },
+  ui_trophy: {
+    display: 'Trophy',
+    category: 'ui',
+    atlas: 'standalone_direct',
+    assetUrl: './assets/aistudio/1000561540_c9af37f7.png',
+  },
+  difficulty_baby: {
+    display: 'Baby Difficulty',
+    category: 'ui',
+    atlas: 'standalone_chroma',
+    assetUrl: './assets/aistudio/baby_2a82300e.png',
+  },
+  difficulty_pro: {
+    display: 'Pro Difficulty',
+    category: 'ui',
+    atlas: 'standalone_chroma',
+    assetUrl: './assets/aistudio/pro_61caf01c.png',
+  },
+  difficulty_hacker: {
+    display: 'Hacker Difficulty',
+    category: 'ui',
+    atlas: 'standalone_chroma',
+    assetUrl: './assets/aistudio/hacker_98e53967.png',
+  },
   ui_settings: { display: 'Settings', category: 'ui', atlas: 'icons_atlas' },
   ui_sound_on: { display: 'Sound on', category: 'ui', atlas: 'icons_atlas' },
   ui_sound_off: { display: 'Sound off (muted)', category: 'ui', atlas: 'icons_atlas' },
@@ -237,7 +375,7 @@ export const ICON_MAP: Record<string, IconMapEntry> = {
   },
 };
 
-const ATLAS_FRAMES: Record<Exclude<IconAtlasId, 'standalone_chroma'>, Record<string, IconFrameRect>> = {
+const ATLAS_FRAMES: Record<SpriteAtlasId, Record<string, IconFrameRect>> = {
   icons_atlas: {
     umbral_pact: { x: 0, y: 0, w: 192, h: 192 },
     lodestone_heart: { x: 192, y: 0, w: 192, h: 192 },
@@ -302,18 +440,8 @@ const ID_ALIASES: Record<string, string> = {
   'supernova charge': 'spark',
   'solar barrage': 'shotgun',
   'quick cocking': 'shotgun',
-  'lantern flare': 'stat_might',
-  might: 'stat_might',
-  'zephyr steps': 'stat_speed',
-  swiftness: 'stat_speed',
-  'soul attractor': 'stat_magnet',
-  magnet: 'stat_magnet',
-  'rapid incantation': 'stat_cooldown',
-  cooldown: 'stat_cooldown',
   'soul hunter': 'cursed_coin',
   greed: 'cursed_coin',
-  'undying ember': 'shield_ward',
-  revive: 'shield_ward',
 };
 
 const DISPLAY_NAME_TO_ID = new Map<string, string>();
@@ -329,16 +457,25 @@ for (const [alias, targetId] of Object.entries(ID_ALIASES)) {
 }
 
 const loggedMissingIds = new Set<string>();
-const preloadedImages = new Map<Exclude<IconAtlasId, 'standalone_chroma'>, HTMLImageElement>();
+const preloadedImages = new Map<string, HTMLImageElement>();
 let atlasesPreloadPromise: Promise<void> | null = null;
 
 export function preloadIconAtlases(): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
   if (atlasesPreloadPromise) return atlasesPreloadPromise;
 
-  const atlasKeys = Object.keys(ICON_ATLAS_URLS) as Exclude<IconAtlasId, 'standalone_chroma'>[];
-  const imagePromises = atlasKeys.map(
-    (atlasId) =>
+  const atlasKeys = Object.keys(ICON_ATLAS_URLS) as SpriteAtlasId[];
+  const directAssets = Object.values(ICON_MAP)
+    .filter((entry) => entry.atlas === 'standalone_direct' && entry.assetUrl)
+    .map((entry) => entry.assetUrl as string);
+
+  const urlsToPreload: Array<{ key: string; url: string }> = [
+    ...atlasKeys.map((atlasId) => ({ key: atlasId, url: ICON_ATLAS_URLS[atlasId] })),
+    ...directAssets.map((url) => ({ key: url, url })),
+  ];
+
+  const imagePromises = urlsToPreload.map(
+    ({ key, url }) =>
       new Promise<void>((resolve) => {
         const img = new Image();
         img.decoding = 'async';
@@ -350,8 +487,8 @@ export function preloadIconAtlases(): Promise<void> {
           }
         };
         img.onerror = () => resolve();
-        img.src = ICON_ATLAS_URLS[atlasId];
-        preloadedImages.set(atlasId, img);
+        img.src = url;
+        preloadedImages.set(key, img);
       })
   );
 
@@ -407,7 +544,7 @@ export function resolveIconSpec(idOrDisplayName: string): ResolvedIconSpec | nul
     return null;
   }
 
-  if (entry.atlas === 'standalone_chroma' && entry.assetUrl) {
+  if ((entry.atlas === 'standalone_chroma' || entry.atlas === 'standalone_direct') && entry.assetUrl) {
     return {
       id: matchedId,
       display: entry.display,
@@ -421,7 +558,7 @@ export function resolveIconSpec(idOrDisplayName: string): ResolvedIconSpec | nul
     };
   }
 
-  if (entry.atlas === 'standalone_chroma') {
+  if (entry.atlas === 'standalone_chroma' || entry.atlas === 'standalone_direct') {
     return null;
   }
 

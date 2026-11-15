@@ -32,6 +32,7 @@ import {
   UpgradeOption,
   WeaponState,
 } from '../types';
+import { DIFFICULTY_PRESETS, DifficultyPreset } from '../difficulty';
 import {
   createActiveDynamicChallenge,
   formatChallengeProgressText,
@@ -141,15 +142,13 @@ export const BOSS_RECOMMENDED_LEVEL = 60;
 // HORDE FRENZY & BLOOD FOG EVENT CONSTANTS
 // =========================================================================
 export const HORDE_FRENZY = {
-  durationMs: 30000,               // Blood Fog lasts 30 seconds
-  cooldownMs: 35000,               // 35s cooldown after Blood Fog ends
-  killSurgeWindowMs: 12000,        // Rolling 12s window for rapid kill surge detection
-  killSurgeThreshold: 22,          // 22 kills inside 12s triggers Horde Frenzy
-  killMilestoneStep: 100,          // Also triggers every 100 total kills if off cooldown
-  enemySpeedMultiplier: 1.35,      // +35% enemy movement speed during Blood Fog
-  spawnDensityMultiplier: 1.65,    // +65% target on-screen enemy density
-  maxActiveEnemiesOverride: 160,   // Raised enemy cap during Blood Fog
-  spawnIntervalScale: 0.52,        // Nearly 2x faster spawn cadence during Blood Fog
+  levelInterval: 10,               // Blood Fog triggers every 10 levels (Lv.10, 20, 30...)
+  baseDurationMs: 30000,           // Base Blood Fog duration (30s, +3s per wave up to 45s)
+  maxDurationMs: 45000,
+  enemySpeedMultiplier: 1.35,      // Fallback base speed boost
+  spawnDensityMultiplier: 1.65,    // Fallback base density boost
+  maxActiveEnemiesOverride: 165,   // Raised enemy cap during Blood Fog
+  spawnIntervalScale: 0.52,        // Base faster spawn cadence during Blood Fog
 } as const;
 
 // =========================================================================
@@ -478,6 +477,9 @@ interface ProjectileData {
   isEnemy: boolean;
   life: number;
   maxLife: number;
+  originX?: number;
+  originY?: number;
+  maxRangeSq?: number;
 }
 
 interface TelegraphEntry {
@@ -638,13 +640,18 @@ export class MainScene extends Phaser.Scene {
   private hasNightEyes: boolean = false;
   private lightShardTimerMs: number = 0;
   private darknessFallsTimerMs: number = 0;
+  private visualLightMult: number = 1;
+  private visualStandFactor: number = 1 + LIGHT.player.standingBonusRatio;
+  private prevTargetLightMult: number = 1;
+  private lanternSurgeBoost: number = 0;
 
-  // Horde Frenzy / Blood Fog State
+  // Horde Frenzy / Blood Fog State (triggers every 10 levels & escalates each wave)
+  private difficultyPreset: DifficultyPreset = DIFFICULTY_PRESETS.hacker;
   private bloodFogTimerMs: number = 0;
-  private bloodFogCooldownMs: number = 0;
   private bloodFogBannerTimerMs: number = 0;
-  private recentKillTimesMs: number[] = [];
-  private nextFrenzyKillMilestone: number = HORDE_FRENZY.killMilestoneStep;
+  private bloodFogTier: number = 0;
+  private lastTriggeredBloodFogTier: number = 0;
+  private pendingBloodFogTier: number = 0;
   private lastEliteVariantSpawnMs: number = 0;
 
   // Red Shard & Dynamic Challenges State
@@ -734,11 +741,16 @@ export class MainScene extends Phaser.Scene {
     this.hasNightEyes = false;
     this.lightShardTimerMs = 0;
     this.darknessFallsTimerMs = 0;
+    this.visualLightMult = 1;
+    this.visualStandFactor = 1 + LIGHT.player.standingBonusRatio;
+    this.prevTargetLightMult = 1;
+    this.lanternSurgeBoost = 0;
+    this.difficultyPreset = gameManager.getDifficultyConfig();
     this.bloodFogTimerMs = 0;
-    this.bloodFogCooldownMs = 0;
     this.bloodFogBannerTimerMs = 0;
-    this.recentKillTimesMs = [];
-    this.nextFrenzyKillMilestone = HORDE_FRENZY.killMilestoneStep;
+    this.bloodFogTier = 0;
+    this.lastTriggeredBloodFogTier = 0;
+    this.pendingBloodFogTier = 0;
     this.lastEliteVariantSpawnMs = 0;
     this.redShardsPickedCount = 0;
     this.redShardTimerMs = 0;
@@ -1225,12 +1237,19 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    // Sync initial visual lantern aura scale with equipped shop upgrades & relics
+    const initLightMult = this.getLightRadiusMultiplier();
+    this.visualLightMult = initLightMult;
+    this.prevTargetLightMult = initLightMult;
+    this.visualStandFactor = this.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1;
+
     // 7. Light Vignette / Lantern Glow Layer & Dynamic Weather/Time-of-Day Atmosphere Overlay
     const zeroOffset = getScrollZeroOffset(this.cameras.main);
     this.lanternGlowSprite = this.add
       .image(width / 2 + zeroOffset.x, height / 2 + zeroOffset.y, 'light_cyan_glow')
       .setDepth(15)
       .setScrollFactor(0)
+      .setScale(2.1875 * initLightMult)
       .setBlendMode(Phaser.BlendModes.ADD);
     this.lanternGlowSprite.disableInteractive();
 
@@ -1912,15 +1931,24 @@ export class MainScene extends Phaser.Scene {
 
   private triggerChainLightning(source: Phaser.Physics.Arcade.Sprite, chainDamage: number) {
     if (!source || !source.scene || !this.sys?.isActive() || !this.enemiesGroup) return;
+    const lanternRadius = this.getPlayerLanternLightRadius();
+    const lanternRadiusSq = lanternRadius * lanternRadius;
+    const maxChainDist = Math.min(260, lanternRadius);
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     let target: Phaser.Physics.Arcade.Sprite | null = null;
-    let closestDistSq = 260 * 260;
+    let closestDistSq = maxChainDist * maxChainDist;
 
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (!e || !e.active || !e.scene || e === source) continue;
       const edata = e.getData('data') as EnemyData | undefined;
       if (!edata || edata.hp <= 0) continue;
+
+      // Chain lightning cannot strike enemies outside the lantern's light radius
+      const pdx = e.x - this.player.x;
+      const pdy = e.y - this.player.y;
+      if (pdx * pdx + pdy * pdy > lanternRadiusSq) continue;
+
       const dx = e.x - source.x;
       const dy = e.y - source.y;
       const dSq = dx * dx + dy * dy;
@@ -2133,16 +2161,12 @@ export class MainScene extends Phaser.Scene {
       this.darknessFallsTimerMs = Math.max(0, this.darknessFallsTimerMs - delta);
     }
 
-    // Horde Frenzy Blood Fog 30s active duration, banner auto-dismiss, and cooldown
+    // Horde Frenzy Blood Fog active duration & banner auto-dismiss
     if (this.bloodFogTimerMs > 0) {
       this.bloodFogTimerMs = Math.max(0, this.bloodFogTimerMs - delta);
       if (this.bloodFogTimerMs <= 0) {
-        this.bloodFogCooldownMs = HORDE_FRENZY.cooldownMs;
-        this.recentKillTimesMs = [];
         this.showFloatingCallout(this.player.x, this.player.y - 48, 'BLOOD FOG CLEARS', '#d8c9a8');
       }
-    } else if (this.bloodFogCooldownMs > 0) {
-      this.bloodFogCooldownMs = Math.max(0, this.bloodFogCooldownMs - delta);
     }
 
     if (this.bloodFogBannerTimerMs > 0) {
@@ -2264,8 +2288,7 @@ export class MainScene extends Phaser.Scene {
         }
       );
 
-      const standBonus = this.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1;
-      const playerLightRadius = LIGHT.player.baseRadius * standBonus * this.getLightRadiusMultiplier();
+      const playerLightRadius = this.getPlayerLanternLightRadius();
       this.shadowSystem.renderDynamicShadows({
         player: this.player,
         playerLightRadius,
@@ -2501,13 +2524,33 @@ export class MainScene extends Phaser.Scene {
     const py = this.player.y - lScrollY + zeroOffset.y;
 
     const pulse = this.lanternPulse.alpha; // 0.6 <-> 1.0
-    const lightMult = this.getLightRadiusMultiplier();
+    const targetLightMult = this.getLightRadiusMultiplier();
+    const targetStandFactor = this.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1.0;
 
-    // Soft cyan lantern glow rendered via a single GPU quad
+    if (targetLightMult > this.prevTargetLightMult + 0.01) {
+      this.lanternSurgeBoost = Math.min(0.45, this.lanternSurgeBoost + 0.36);
+    }
+    this.prevTargetLightMult = targetLightMult;
+
+    const multStep = 1 - Math.exp(-delta / 185);
+    const standStep = 1 - Math.exp(-delta / 115);
+    this.visualLightMult = Phaser.Math.Linear(this.visualLightMult, targetLightMult, multStep);
+    this.visualStandFactor = Phaser.Math.Linear(
+      this.visualStandFactor,
+      targetStandFactor,
+      standStep
+    );
+    this.lanternSurgeBoost = Math.max(0, this.lanternSurgeBoost - (delta / 760) * 0.45);
+
+    // Soft cyan lantern glow rendered via a single GPU quad with smooth expansion bloom
     if (this.lanternGlowSprite) {
+      const standScaleRatio = this.visualStandFactor / (1 + LIGHT.player.standingBonusRatio);
+      const surgeScale = 1 + this.lanternSurgeBoost * 0.14;
       this.lanternGlowSprite.setPosition(px, py);
-      this.lanternGlowSprite.setScale(2.1875 * lightMult);
-      this.lanternGlowSprite.setAlpha(pulse);
+      this.lanternGlowSprite.setScale(
+        2.1875 * this.visualLightMult * standScaleRatio * surgeScale
+      );
+      this.lanternGlowSprite.setAlpha(Math.min(1, pulse + this.lanternSurgeBoost * 0.45));
     }
 
     // "Pressure" aura when standing still >4s (delta-normalized)
@@ -2587,40 +2630,43 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // 2. Radiant Nova: Periodic holy ring pulse
+    // 2. Radiant Nova: Periodic holy ring pulse within lantern light radius
     const ring = this.weapons['ring'];
     if (ring && ring.unlocked) {
       const effectiveCooldown = ring.cooldown * this.playerStats.cooldownMultiplier;
       if (time >= this.nextRingPulse) {
-        this.fireRadiantRing();
-        this.nextRingPulse = time + effectiveCooldown;
+        if (this.fireRadiantRing()) {
+          this.nextRingPulse = time + effectiveCooldown;
+        }
       }
     }
 
-    // 3. Spark Burst: Periodic radial spark nova
+    // 3. Spark Burst: Periodic radial spark nova within lantern light radius
     const spark = this.weapons['spark'];
     if (spark && spark.unlocked) {
       const effectiveCooldown = spark.cooldown * this.playerStats.cooldownMultiplier;
       if (time >= this.nextSparkBurst) {
-        this.fireSparkBurst();
-        this.nextSparkBurst = time + effectiveCooldown;
+        if (this.fireSparkBurst()) {
+          this.nextSparkBurst = time + effectiveCooldown;
+        }
       }
     }
 
-    // 4. Radiant Scatter: Shotgun fires 3 cyan fx_bolt projectiles in a narrow spread
+    // 4. Radiant Scatter: Shotgun fires cyan bolts strictly up to lantern light radius
     const shotgun = this.weapons['shotgun'];
     if (shotgun && shotgun.unlocked) {
       const effectiveCooldown = shotgun.cooldown * this.playerStats.cooldownMultiplier;
       if (time >= this.nextShotgunBlast) {
-        this.fireShotgunCone();
-        this.nextShotgunBlast = time + effectiveCooldown;
+        if (this.fireShotgunCone()) {
+          this.nextShotgunBlast = time + effectiveCooldown;
+        }
       }
     }
   }
 
   // Weapon: Light Bolt
   private fireLightBolt(): boolean {
-    const maxRange = LOGICAL_HEIGHT * BALANCE.primaryWeapon.rangeScreenHeightRatio;
+    const maxRange = this.getPlayerLanternLightRadius();
     const target = this.getNearestEnemy(maxRange);
     if (!target) return false;
 
@@ -2682,6 +2728,9 @@ export class MainScene extends Phaser.Scene {
         isEnemy: false,
         life: 0,
         maxLife,
+        originX: this.player.x,
+        originY: this.player.y,
+        maxRangeSq: maxRange * maxRange,
       };
       proj.setData('data', data);
       proj.setVelocity(vx, vy);
@@ -2690,25 +2739,21 @@ export class MainScene extends Phaser.Scene {
     return true;
   }
 
-  // Weapon: Radiant Scatter (Fires 3 cyan fx_bolt.png projectiles in a narrow spread)
-  private fireShotgunCone() {
+  // Weapon: Radiant Scatter (Fires 3 cyan fx_bolt.png projectiles strictly within lantern light radius)
+  private fireShotgunCone(): boolean {
     const shotgun = this.weapons['shotgun'];
-    if (!shotgun || !shotgun.unlocked) return;
+    if (!shotgun || !shotgun.unlocked) return false;
+
+    const maxRange = this.getPlayerLanternLightRadius();
+    const target = this.getNearestEnemy(maxRange);
+    if (!target) return false;
 
     this.triggerPlayerAttack();
     soundManager.playShoot();
 
-    const range = 300 + shotgun.level * 35;
-    const target = this.getNearestEnemy(range + 160);
-
-    const baseAngle = target
-      ? Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y)
-      : this.player.flipX
-        ? Math.PI
-        : 0;
-
+    const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
     const speed = 480;
-    const maxLife = Math.round((range / speed) * 1000) + 150;
+    const maxLife = Math.round((maxRange / speed) * 1000);
     const spreadOffsets = [-0.14, 0, 0.14];
 
     for (const offset of spreadOffsets) {
@@ -2741,10 +2786,15 @@ export class MainScene extends Phaser.Scene {
         isEnemy: false,
         life: 0,
         maxLife,
+        originX: this.player.x,
+        originY: this.player.y,
+        maxRangeSq: maxRange * maxRange,
       };
       proj.setData('data', data);
       proj.setVelocity(vx, vy);
     }
+
+    return true;
   }
 
   // Weapon: Spectral Blades (Uses fx_blade_spin_sheet with full 360 rotation baked in)
@@ -2773,7 +2823,11 @@ export class MainScene extends Phaser.Scene {
     const speed = (0.0035 + blades.level * 0.0008) * delta;
     this.bladeAngle += speed;
 
-    const radius = 95;
+    const lanternRadius = this.getPlayerLanternLightRadius();
+    const radius = Math.min(
+      Math.max(40, lanternRadius - 14),
+      Math.max(68, Math.round(lanternRadius * 0.36))
+    );
     const hitRadiusSq = 45 * 45;
     const nearby = canDealDamage
       ? [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])]
@@ -2814,10 +2868,13 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  // Weapon: Radiant Ring
-  private fireRadiantRing() {
+  // Weapon: Radiant Ring (expands cleanly up to lantern light radius)
+  private fireRadiantRing(): boolean {
     const ring = this.weapons['ring'];
-    if (!ring || !ring.unlocked) return;
+    if (!ring || !ring.unlocked) return false;
+
+    const maxRadius = this.getPlayerLanternLightRadius();
+    if (!this.getNearestEnemy(maxRadius)) return false;
 
     this.triggerPlayerAttack();
     soundManager.playRingPulse();
@@ -2828,8 +2885,7 @@ export class MainScene extends Phaser.Scene {
     ringSprite.setScale(0.1);
     ringSprite.setAlpha(0.9);
 
-    const maxScale = 1.8 + ring.level * 0.25;
-    const maxRadius = maxScale * 140;
+    const maxScale = maxRadius / 140;
     const maxRadiusSq = maxRadius * maxRadius;
 
     this.tweens.add({
@@ -2862,12 +2918,16 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.spawnParticleBurst(this.player.x, this.player.y, 14, 'fx_ring', 90, 200, 0.2, 0.4);
+    return true;
   }
 
-  // Weapon: Spark Burst
-  private fireSparkBurst() {
+  // Weapon: Spark Burst (travels strictly up to lantern light radius)
+  private fireSparkBurst(): boolean {
     const spark = this.weapons['spark'];
-    if (!spark || !spark.unlocked) return;
+    if (!spark || !spark.unlocked) return false;
+
+    const maxRange = this.getPlayerLanternLightRadius();
+    if (!this.getNearestEnemy(maxRange)) return false;
 
     this.triggerPlayerAttack();
     soundManager.playSparkFire();
@@ -2875,6 +2935,7 @@ export class MainScene extends Phaser.Scene {
     const count = 6 + spark.level * 3;
     const dmg = Math.round(spark.damage * this.playerStats.damageMultiplier);
     const speed = 360;
+    const maxLife = Math.round((maxRange / speed) * 1000);
 
     for (let i = 0; i < count; i++) {
       const angle = (i * Math.PI * 2) / count + Phaser.Math.FloatBetween(-0.15, 0.15);
@@ -2901,11 +2962,16 @@ export class MainScene extends Phaser.Scene {
         isCrit: false,
         isEnemy: false,
         life: 0,
-        maxLife: 1200,
+        maxLife,
+        originX: this.player.x,
+        originY: this.player.y,
+        maxRangeSq: maxRange * maxRange,
       };
       proj.setData('data', data);
       proj.setVelocity(vx, vy);
     }
+
+    return true;
   }
 
   // -------------------------------------------------------------
@@ -2984,6 +3050,19 @@ export class MainScene extends Phaser.Scene {
       if (!data) continue;
 
       data.life += delta;
+      if (
+        !data.isEnemy &&
+        data.maxRangeSq !== undefined &&
+        data.originX !== undefined &&
+        data.originY !== undefined
+      ) {
+        const rdx = proj.x - data.originX;
+        const rdy = proj.y - data.originY;
+        if (rdx * rdx + rdy * rdy >= data.maxRangeSq) {
+          this.releasePlayerProjectile(proj);
+          continue;
+        }
+      }
       if (data.life >= data.maxLife) {
         if (data.isEnemy) {
           this.releaseEnemyProjectile(proj);
@@ -3042,7 +3121,8 @@ export class MainScene extends Phaser.Scene {
   private updateEnemies(time: number, delta: number) {
     const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
     const pressureSpeedFactor = this.isUnderPressure ? 1 + SPAWN_TIMELINE.pressure.enemySpeedBonus : 1;
-    const bloodFogSpeedFactor = this.bloodFogTimerMs > 0 ? HORDE_FRENZY.enemySpeedMultiplier : 1;
+    const bloodFogSpeedFactor =
+      this.bloodFogTimerMs > 0 ? this.getBloodFogModifiers(this.bloodFogTier).speedMult : 1;
     const globalEnemySpeedFactor = pressureSpeedFactor * bloodFogSpeedFactor;
 
     if (this.eliteAuraGraphics) {
@@ -3640,33 +3720,97 @@ export class MainScene extends Phaser.Scene {
   // -------------------------------------------------------------
   // Enemy Spawning & SPAWN_TIMELINE Pacing / Events
   // -------------------------------------------------------------
+  private getBloodFogModifiers(tier: number): {
+    durationMs: number;
+    speedMult: number;
+    densityMult: number;
+    hpMult: number;
+    dmgMult: number;
+    intervalScale: number;
+    eliteBonusChance: number;
+  } {
+    const t = Math.max(1, tier);
+    const scale = this.difficultyPreset.bloodFogScale;
+    const speedBonus = Math.min(0.75, (0.28 + (t - 1) * 0.08) * scale);
+    const densityBonus = Math.min(1.5, (0.55 + (t - 1) * 0.18) * scale);
+    const hpBonus = (0.15 + (t - 1) * 0.22) * scale;
+    const dmgBonus = (0.1 + (t - 1) * 0.12) * scale;
+    const intervalScale = Math.max(0.3, 0.56 - (t - 1) * 0.055);
+    const durationMs = Math.min(
+      HORDE_FRENZY.maxDurationMs,
+      HORDE_FRENZY.baseDurationMs + (t - 1) * 3000
+    );
+    const eliteBonusChance = Math.min(0.18, 0.04 * t * scale);
+
+    return {
+      durationMs,
+      speedMult: 1 + speedBonus,
+      densityMult: 1 + densityBonus,
+      hpMult: 1 + hpBonus,
+      dmgMult: 1 + dmgBonus,
+      intervalScale,
+      eliteBonusChance,
+    };
+  }
+
   private getTargetOnScreenCount(timeSec: number): number {
     const pts = SPAWN_TIMELINE.pacingTargets;
+    let baseCount: number = SPAWN_TIMELINE.maxActiveEnemies;
     if (timeSec <= pts[0].timeSec) {
-      return Math.round((pts[0].minTarget + pts[0].maxTarget) * 0.5);
-    }
-    for (let i = 1; i < pts.length; i++) {
-      if (timeSec <= pts[i].timeSec) {
-        const prev = pts[i - 1];
-        const curr = pts[i];
-        const prevVal = (prev.minTarget + prev.maxTarget) * 0.5;
-        const currVal = (curr.minTarget + curr.maxTarget) * 0.5;
-        const t = (timeSec - prev.timeSec) / Math.max(1, curr.timeSec - prev.timeSec);
-        return Math.round(Phaser.Math.Linear(prevVal, currVal, t));
+      baseCount = Math.round((pts[0].minTarget + pts[0].maxTarget) * 0.5);
+    } else {
+      for (let i = 1; i < pts.length; i++) {
+        if (timeSec <= pts[i].timeSec) {
+          const prev = pts[i - 1];
+          const curr = pts[i];
+          const prevVal = (prev.minTarget + prev.maxTarget) * 0.5;
+          const currVal = (curr.minTarget + curr.maxTarget) * 0.5;
+          const t = (timeSec - prev.timeSec) / Math.max(1, curr.timeSec - prev.timeSec);
+          baseCount = Math.round(Phaser.Math.Linear(prevVal, currVal, t));
+          break;
+        }
       }
     }
-    return SPAWN_TIMELINE.maxActiveEnemies;
+    // Gradual level-based crowd growth + selected difficulty density
+    const levelDensityBonus = 1 + Math.min(0.35, Math.floor(this.playerLevel / 10) * 0.07);
+    return Math.max(
+      4,
+      Math.min(
+        SPAWN_TIMELINE.maxActiveEnemies,
+        Math.round(baseCount * levelDensityBonus * this.difficultyPreset.spawnDensityMult)
+      )
+    );
   }
 
   private getTimelineScaling(): { hpMult: number; speedMult: number; dmgMult: number } {
     const minutes = this.runTime / 60;
-    const hpMult = 1 + minutes * SPAWN_TIMELINE.enemyScaling.hpGrowthPerMinute;
-    const speedMult = Math.min(
-      1 + SPAWN_TIMELINE.enemyScaling.maxSpeedBonus,
-      1 + minutes * SPAWN_TIMELINE.enemyScaling.speedGrowthPerMinute
-    );
+    const levelSteps = Math.max(0, this.playerLevel - 1);
+    const levelHpBonus = levelSteps * 0.028;
+    const levelSpeedBonus = Math.min(0.24, Math.floor(this.playerLevel / 10) * 0.04);
+    const levelDmgBonus = Math.floor(this.playerLevel / 10) * 0.08;
+
+    const fogMods =
+      this.bloodFogTimerMs > 0 ? this.getBloodFogModifiers(this.bloodFogTier) : null;
+
+    const hpMult =
+      (1 + minutes * SPAWN_TIMELINE.enemyScaling.hpGrowthPerMinute + levelHpBonus) *
+      this.difficultyPreset.enemyHpMult *
+      (fogMods ? fogMods.hpMult : 1);
+
+    const speedMult =
+      Math.min(
+        1 + SPAWN_TIMELINE.enemyScaling.maxSpeedBonus + levelSpeedBonus,
+        1 + minutes * SPAWN_TIMELINE.enemyScaling.speedGrowthPerMinute + levelSpeedBonus * 0.5
+      ) * this.difficultyPreset.enemySpeedMult;
+
     const diff = getDifficultyConfig(this.runTime);
-    return { hpMult, speedMult, dmgMult: diff.damageMultiplier };
+    const dmgMult =
+      diff.damageMultiplier *
+      (1 + levelDmgBonus) *
+      this.difficultyPreset.enemyDmgMult *
+      (fogMods ? fogMods.dmgMult : 1);
+
+    return { hpMult, speedMult, dmgMult };
   }
 
   private scheduleTimelineEvent(
@@ -3909,6 +4053,7 @@ export class MainScene extends Phaser.Scene {
     this.handleTimelineEvents();
 
     const isBloodFog = this.bloodFogTimerMs > 0;
+    const fogMods = isBloodFog ? this.getBloodFogModifiers(this.bloodFogTier) : null;
     const effectiveMaxActive = isBloodFog
       ? HORDE_FRENZY.maxActiveEnemiesOverride
       : SPAWN_TIMELINE.maxActiveEnemies;
@@ -3917,22 +4062,27 @@ export class MainScene extends Phaser.Scene {
     if (activeCount >= effectiveMaxActive) return;
 
     const baseTarget = this.getTargetOnScreenCount(this.runTime);
-    const targetOnScreen = isBloodFog
-      ? Math.min(
-          effectiveMaxActive,
-          Math.max(28, Math.round(baseTarget * HORDE_FRENZY.spawnDensityMultiplier))
-        )
-      : baseTarget;
+    const targetOnScreen =
+      isBloodFog && fogMods
+        ? Math.min(
+            effectiveMaxActive,
+            Math.max(
+              Math.round(24 * this.difficultyPreset.spawnDensityMult),
+              Math.round(baseTarget * fogMods.densityMult)
+            )
+          )
+        : baseTarget;
     const deficit = targetOnScreen - activeCount;
 
     if (time >= this.nextSpawnTime) {
       const diff = getDifficultyConfig(this.runTime);
       const { hpMult, speedMult, dmgMult } = this.getTimelineScaling();
 
-      // Dynamic interval keeps crowd pacing tightly aligned to targetOnScreen
+      // Dynamic interval keeps crowd pacing tightly aligned to targetOnScreen & difficulty preset
       let interval = deficit > 6 ? Math.min(diff.spawnIntervalMs, 380) : diff.spawnIntervalMs;
-      if (isBloodFog) {
-        interval = Math.max(180, Math.round(interval * HORDE_FRENZY.spawnIntervalScale));
+      interval = Math.round(interval * this.difficultyPreset.spawnIntervalMult);
+      if (isBloodFog && fogMods) {
+        interval = Math.max(150, Math.round(interval * fogMods.intervalScale));
       }
       this.nextSpawnTime = time + interval;
 
@@ -3985,9 +4135,11 @@ export class MainScene extends Phaser.Scene {
     if (this.countActiveElites() >= ELITE_VARIANTS.maxActiveElites) {
       return false;
     }
+    const fogBonus =
+      this.bloodFogTimerMs > 0 ? this.getBloodFogModifiers(this.bloodFogTier).eliteBonusChance : 0;
     const chance = Math.min(
-      ELITE_VARIANTS.maxSpawnChance,
-      ELITE_VARIANTS.baseSpawnChance + (this.runTime / 60) * ELITE_VARIANTS.chancePerMinute
+      ELITE_VARIANTS.maxSpawnChance + fogBonus,
+      ELITE_VARIANTS.baseSpawnChance + (this.runTime / 60) * ELITE_VARIANTS.chancePerMinute + fogBonus
     );
     return Math.random() < chance;
   }
@@ -4189,10 +4341,12 @@ export class MainScene extends Phaser.Scene {
       bossBody.setOffset(125, 26);
     }
 
-    const { hpMult, speedMult } = this.getTimelineScaling();
-    // Raid-scale Boss HP & damage calibrated for Recommended Level 60 builds
+    const { hpMult, speedMult, dmgMult } = this.getTimelineScaling();
+    // Raid-scale Boss HP & damage calibrated for Recommended Level 60 builds + difficulty preset
     const bossHp = Math.round(120000 * hpMult * Math.pow(1.85, tier - 1));
-    const bossDmg = Math.round(48 * (1 + (tier - 1) * 0.35));
+    const bossDmg = Math.round(
+      48 * (1 + (tier - 1) * 0.35) * this.difficultyPreset.enemyDmgMult
+    );
     const recommendedLevel = BOSS_RECOMMENDED_LEVEL + (tier - 1) * 15;
 
     const edata: EnemyData = {
@@ -4389,8 +4543,6 @@ export class MainScene extends Phaser.Scene {
       achievements.recordIncrement('bossesDefeated', 1);
     }
 
-    // Horde Frenzy detection: rapid kill surge OR high cumulative kill milestone
-    this.checkHordeFrenzyTrigger();
     if (this.playerStats.eliteKillHeal > 0 && (edata.isElite || edata.type === 'boss')) {
       const prevHp = this.playerStats.currentHp;
       this.playerStats.currentHp = Math.min(
@@ -4513,47 +4665,53 @@ export class MainScene extends Phaser.Scene {
     this.releaseEnemy(enemy);
   }
 
-  private checkHordeFrenzyTrigger(): void {
-    const nowRunMs = this.runTime * 1000;
-    const windowStart = nowRunMs - HORDE_FRENZY.killSurgeWindowMs;
-    this.recentKillTimesMs.push(nowRunMs);
-    while (this.recentKillTimesMs.length > 0 && this.recentKillTimesMs[0] < windowStart) {
-      this.recentKillTimesMs.shift();
-    }
-
-    if (this.bloodFogTimerMs > 0 || this.bloodFogCooldownMs > 0) {
-      return;
-    }
-
-    const hitSurge = this.recentKillTimesMs.length >= HORDE_FRENZY.killSurgeThreshold;
-    const hitMilestone = this.enemiesKilled >= this.nextFrenzyKillMilestone;
-    if (!hitSurge && !hitMilestone) {
-      return;
-    }
-
-    this.bloodFogTimerMs = HORDE_FRENZY.durationMs;
-    this.recentKillTimesMs = [];
-    this.nextFrenzyKillMilestone =
-      Math.floor(this.enemiesKilled / HORDE_FRENZY.killMilestoneStep) *
-        HORDE_FRENZY.killMilestoneStep +
-      HORDE_FRENZY.killMilestoneStep;
+  private triggerBloodFogWave(tier: number): void {
+    const t = Math.max(1, tier);
+    this.bloodFogTier = t;
+    const mods = this.getBloodFogModifiers(t);
+    this.bloodFogTimerMs = mods.durationMs;
 
     this.screenEdgeFlashAlpha = 0.95;
     soundManager.playBossWarning();
-    this.cameraController.triggerShake(260, 0.008);
     this.showFloatingCallout(
       this.player.x,
       this.player.y - 54,
-      'HORDE FRENZY: BLOOD FOG!',
+      `BLOOD FOG · WAVE ${t} (LV.${t * HORDE_FRENZY.levelInterval})`,
       '#ff4d5a'
     );
 
+    // Spawn an immediate surrounding surge wave scaling up each 10-level Blood Fog cycle
+    const { hpMult, speedMult, dmgMult } = this.getTimelineScaling();
+    const diff = getDifficultyConfig(this.runTime);
+    const surgeCount = Math.min(
+      14,
+      Math.max(4, Math.round((4 + t * 2) * this.difficultyPreset.spawnDensityMult))
+    );
+    for (let i = 0; i < surgeCount; i++) {
+      if (this.enemiesGroup.countActive(true) >= HORDE_FRENZY.maxActiveEnemiesOverride) break;
+      const ang = (i / surgeCount) * Math.PI * 2 + Math.random() * 0.25;
+      const dist = Phaser.Math.Between(460, 580);
+      const enemyType = pickEnemyTypeFromWeights(diff.enemyWeights);
+      this.spawnEnemyAt(
+        this.player.x + Math.cos(ang) * dist,
+        this.player.y + Math.sin(ang) * dist,
+        enemyType,
+        hpMult,
+        dmgMult,
+        speedMult
+      );
+    }
+
     if (!this.pendingEvent) {
+      const speedPct = Math.round((mods.speedMult - 1) * 100);
+      const densityPct = Math.round((mods.densityMult - 1) * 100);
+      const hpPct = Math.round((mods.hpMult - 1) * 100);
+      const durSec = Math.round(mods.durationMs / 1000);
       gameManager.emitEventWarning({
-        title: 'HORDE FRENZY · BLOOD FOG',
-        subtitle: 'Blood mist rises for 30s — +35% Enemy Speed & +65% Horde Density',
+        title: `BLOOD FOG · WAVE ${t}`,
+        subtitle: `Lv.${t * HORDE_FRENZY.levelInterval} Escalation (${durSec}s) — Speed +${speedPct}% · HP +${hpPct}% · Horde +${densityPct}%`,
       });
-      this.bloodFogBannerTimerMs = 2800;
+      this.bloodFogBannerTimerMs = 3200;
     }
   }
 
@@ -4686,9 +4844,10 @@ export class MainScene extends Phaser.Scene {
       this.spawnParticleBurst(pickup.x, pickup.y, 4, 'fx_spark', 50, 120, 0.12, 0.22, 0x00ffff);
     } else if (type === 'coin') {
       soundManager.playCoinCollect();
-      this.coinsEarned += value;
-      dailyMissions.recordIncrement('collect_coins', value);
-      achievements.recordIncrement('totalCoinsEarned', value);
+      const scaledCoins = Math.max(1, Math.round(value * this.difficultyPreset.coinMultiplier));
+      this.coinsEarned += scaledCoins;
+      dailyMissions.recordIncrement('collect_coins', scaledCoins);
+      achievements.recordIncrement('totalCoinsEarned', scaledCoins);
       this.spawnParticleBurst(pickup.x, pickup.y, 5, 'fx_spark', 60, 140, 0.15, 0.28, 0xffd700);
       if (this.activeChallenge?.status === 'active' && this.activeChallenge.id === 'no_coin_greed') {
         this.failDynamicChallenge('Collected a Soul Coin');
@@ -4781,6 +4940,12 @@ export class MainScene extends Phaser.Scene {
           `LV.${this.playerLevel} · HARDCORE XP SURGE!`,
           '#f2a93b'
         );
+      }
+
+      const nextBloodFogTier = Math.floor(this.playerLevel / HORDE_FRENZY.levelInterval);
+      if (nextBloodFogTier > this.lastTriggeredBloodFogTier) {
+        this.lastTriggeredBloodFogTier = nextBloodFogTier;
+        this.pendingBloodFogTier = nextBloodFogTier;
       }
 
       this.triggerLevelUp();
@@ -5019,6 +5184,11 @@ export class MainScene extends Phaser.Scene {
 
     // Unpause game completely (restoring timers/tweens/anims/DarknessScene if paused during level-up)
     this.resumeGame();
+    if (this.pendingBloodFogTier > 0) {
+      const waveTier = this.pendingBloodFogTier;
+      this.pendingBloodFogTier = 0;
+      this.triggerBloodFogWave(waveTier);
+    }
     this.emitStatsUpdate();
   }
 
@@ -5220,6 +5390,7 @@ export class MainScene extends Phaser.Scene {
           damageDealt: this.damageDealt,
           victory: false,
           challengesCompleted: this.challengesCompletedCount,
+          difficulty: this.difficultyPreset.id,
         };
         gameManager.emitGameOver(stats);
       },
@@ -5425,6 +5596,8 @@ export class MainScene extends Phaser.Scene {
         this.darknessFallsTimerMs > 0 ? Math.ceil(this.darknessFallsTimerMs / 1000) : 0,
       bloodFogRemainingSec:
         this.bloodFogTimerMs > 0 ? Math.ceil(this.bloodFogTimerMs / 1000) : 0,
+      bloodFogTier: this.bloodFogTier,
+      difficulty: this.difficultyPreset.id,
       activeChallenge: this.activeChallenge ? { ...this.activeChallenge } : null,
       dashCharges: this.dashChargesRemaining,
       maxDashCharges: this.playerStats.dashCharges,
@@ -5450,6 +5623,11 @@ export class MainScene extends Phaser.Scene {
       this.darknessFallsTimerMs > 0 ? 1 - LIGHT.progression.darknessFalls.radiusPenalty : 1;
     const relicMult = this.playerStats?.lightRadiusMultiplier ?? 1;
     return lanternMult * shardMult * darknessFallsMult * relicMult;
+  }
+
+  private getPlayerLanternLightRadius(): number {
+    const standBonus = this.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1;
+    return LIGHT.player.baseRadius * standBonus * this.getLightRadiusMultiplier();
   }
 
   public setWaitingForLoading(waiting: boolean) {

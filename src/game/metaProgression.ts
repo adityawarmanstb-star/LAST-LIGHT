@@ -14,11 +14,11 @@ export const INITIAL_UPGRADES: MetaUpgrade[] = [
   {
     id: 'lantern',
     name: 'Lantern Brightness',
-    description: 'Expands your lantern light radius in the dark by 10% per rank.',
+    description: 'Expands your lantern light radius and attack range in the dark by 10% per rank.',
     cost: [25, 55, 120, 260, 520],
     currentRank: 0,
     maxRank: 5,
-    statPerRank: '+10% Light Radius',
+    statPerRank: '+10% Light & Range',
     icon: 'sun',
   },
   {

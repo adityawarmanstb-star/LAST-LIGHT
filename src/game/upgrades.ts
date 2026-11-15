@@ -224,7 +224,7 @@ export function getAvailableUpgrades(
         id: 'shotgun_damage',
         weaponId: 'shotgun',
         title: 'Solar Barrage',
-        description: 'Increases scatter range by +35px and damage by 25%.',
+        description: 'Empowers Radiant Scatter with +25% damage.',
         category: 'weapon_upgrade',
         icon: 'spark',
         levelText: `Lv. ${shotgun.level + 1}`,
@@ -312,7 +312,7 @@ export function getAvailableUpgrades(
     pool.push({
       id: 'light_lantern',
       title: 'Brighter Lantern',
-      description: `Expands your lantern light radius by +${lanternBonusPct}% to reveal more of the dark.`,
+      description: `Expands your lantern light radius and attack range by +${lanternBonusPct}%.`,
       category: 'stat_upgrade',
       icon: 'lantern',
       levelText: `Lv. ${nextLv}/${lanternMax}`,

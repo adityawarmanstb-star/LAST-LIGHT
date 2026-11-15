@@ -1,3 +1,5 @@
+export type GameDifficultyId = 'baby' | 'pro' | 'hacker';
+
 export type RelicId =
   | 'lodestone_heart'
   | 'twin_zephyr'
@@ -96,6 +98,7 @@ export interface RunStats {
   damageDealt: number;
   victory: boolean;
   challengesCompleted?: number;
+  difficulty?: GameDifficultyId;
 }
 
 export type DynamicChallengeId =

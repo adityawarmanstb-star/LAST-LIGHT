@@ -312,7 +312,6 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
       <div className="w-full flex flex-col items-center shrink-0 mt-0.5">
         <button
           type="button"
-          data-sfx="play"
           onClick={() => {
             haptics.tap('heavy');
             onStartGame();

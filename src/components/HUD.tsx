@@ -37,6 +37,7 @@ interface HUDProps {
   redShardRemainingSec?: number;
   darknessFallsRemainingSec?: number;
   bloodFogRemainingSec?: number;
+  bloodFogTier?: number;
   activeChallenge?: ActiveDynamicChallenge | null;
   dashCharges?: number;
   maxDashCharges?: number;
@@ -87,6 +88,7 @@ const HUDComponent: React.FC<HUDProps> = ({
   redShardRemainingSec = 0,
   darknessFallsRemainingSec = 0,
   bloodFogRemainingSec = 0,
+  bloodFogTier = 0,
   activeChallenge = null,
   dashCharges = 1,
   maxDashCharges = 1,
@@ -461,7 +463,7 @@ const HUDComponent: React.FC<HUDProps> = ({
                   style={SLIM_BADGE_STYLE}
                 >
                   <span className="font-display font-bold uppercase text-[#ff7077] truncate">
-                    BLOOD FOG
+                    {bloodFogTier > 0 ? `BLOOD FOG W${bloodFogTier}` : 'BLOOD FOG'}
                   </span>
                   <span className="font-display font-extrabold text-[#e5303a] tabular-nums shrink-0">
                     {bloodFogRemainingSec}s

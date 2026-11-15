@@ -60,7 +60,7 @@ export const RELIC_SETS: Record<RelicSetId, RelicSynergyDefinition> = {
     id: 'fire',
     setName: 'Fire',
     synergyTitle: 'Solar Ignition',
-    bonusSummary: '+15% Weapon Damage · +15% Light Radius',
+    bonusSummary: '+15% Weapon Damage · +15% Light & Range',
     accentColor: '#ff7a33',
   },
   shadow: {
@@ -142,11 +142,11 @@ export const RELICS: RelicDefinition[] = [
     subtitle: 'Solar Focal Prism',
     description:
       'Projects a wider lantern beam through the gloom and sharpens every bolt toward fatal strikes.',
-    effectSummary: '+25% Light Radius · +12% Crit Chance',
+    effectSummary: '+25% Light & Attack Range · +12% Crit Chance',
     traitBenefits: [
-      '+25% Lantern light radius across normal and Darkness Falls waves',
+      '+25% Lantern light radius & weapon attack range across normal and Darkness Falls waves',
       '+12% Critical Hit Chance (total 17% base crit for 1.5x damage)',
-      'Fire Set (2/2): +15% Weapon Damage & +15% Light Radius',
+      'Fire Set (2/2): +15% Weapon Damage & +15% Light & Range',
     ],
     cost: 140,
     icon: 'sun',

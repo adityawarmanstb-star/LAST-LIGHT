@@ -14,6 +14,7 @@ import { HowToPlayModal } from './components/HowToPlayModal';
 import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
 import { PauseModal } from './components/PauseModal';
+import { DifficultyModal } from './components/DifficultyModal';
 import { LoadingScreen } from './components/LoadingScreen';
 import { DarkFantasyTouchFx } from './components/DarkFantasyTouchFx';
 import { gameManager } from './game/GameManager';
@@ -27,6 +28,7 @@ import {
   BossInfo,
   DynamicChallengeOffer,
   EventWarningInfo,
+  GameDifficultyId,
   RelicId,
   RelicSetId,
   RunStats,
@@ -43,6 +45,10 @@ export default function App() {
   const [lobbyTab, setLobbyTab] = useState<LobbyTabId>('home');
   const [lobbyShopSubTab, setLobbyShopSubTab] = useState<ShopSubTab>('market');
   const [showSettings, setShowSettings] = useState(false);
+  const [showDifficultyModal, setShowDifficultyModal] = useState(false);
+  const [selectedDifficulty, setSelectedDifficulty] = useState<GameDifficultyId>(() =>
+    gameManager.getDifficulty()
+  );
   const [showHowToPlay, setShowHowToPlay] = useState<boolean>(
     () => !saveDataStore.read().hasSeenHowToPlay
   );
@@ -71,6 +77,7 @@ export default function App() {
   const [redShardRemainingSec, setRedShardRemainingSec] = useState<number>(0);
   const [darknessFallsRemainingSec, setDarknessFallsRemainingSec] = useState<number>(0);
   const [bloodFogRemainingSec, setBloodFogRemainingSec] = useState<number>(0);
+  const [bloodFogTier, setBloodFogTier] = useState<number>(0);
   const [activeChallenge, setActiveChallenge] = useState<ActiveDynamicChallenge | null>(null);
   const [dashCharges, setDashCharges] = useState<number>(1);
   const [maxDashCharges, setMaxDashCharges] = useState<number>(1);
@@ -106,6 +113,8 @@ export default function App() {
   lobbyTabRef.current = lobbyTab;
   const showSettingsRef = useRef(showSettings);
   showSettingsRef.current = showSettings;
+  const showDifficultyModalRef = useRef(showDifficultyModal);
+  showDifficultyModalRef.current = showDifficultyModal;
   const showHowToPlayRef = useRef(showHowToPlay);
   showHowToPlayRef.current = showHowToPlay;
 
@@ -127,6 +136,7 @@ export default function App() {
       setRedShardRemainingSec(data.redShardRemainingSec ?? 0);
       setDarknessFallsRemainingSec(data.darknessFallsRemainingSec ?? 0);
       setBloodFogRemainingSec(data.bloodFogRemainingSec ?? 0);
+      setBloodFogTier(data.bloodFogTier ?? 0);
       setActiveChallenge(data.activeChallenge ?? null);
       setDashCharges(data.dashCharges ?? 1);
       setMaxDashCharges(data.maxDashCharges ?? 1);
@@ -336,6 +346,10 @@ export default function App() {
           setShowSettings(false);
           return true;
         }
+        if (showDifficultyModalRef.current) {
+          setShowDifficultyModal(false);
+          return true;
+        }
         if (gameStateRef.current === 'TITLE' && lobbyTabRef.current !== 'home') {
           setLobbyTab('home');
           return true;
@@ -369,6 +383,7 @@ export default function App() {
   const handleStartGame = () => {
     setShowSettings(false);
     setShowHowToPlay(false);
+    setShowDifficultyModal(false);
 
     if (loadingFailsafeTimerRef.current !== null) {
       window.clearTimeout(loadingFailsafeTimerRef.current);
@@ -404,6 +419,7 @@ export default function App() {
     setRedShardRemainingSec(0);
     setDarknessFallsRemainingSec(0);
     setBloodFogRemainingSec(0);
+    setBloodFogTier(0);
     setActiveChallenge(null);
     setDashCharges(1);
     setMaxDashCharges(1);
@@ -419,6 +435,22 @@ export default function App() {
 
     // Initialize or restart Phaser Game
     createPhaserGame('phaser-container');
+  };
+
+  const handleOpenDifficultyModal = () => {
+    setSelectedDifficulty(gameManager.getDifficulty());
+    setShowDifficultyModal(true);
+  };
+
+  const handleSelectDifficulty = (difficulty: GameDifficultyId) => {
+    setSelectedDifficulty(difficulty);
+    gameManager.setDifficulty(difficulty);
+  };
+
+  const handleConfirmDifficultyPlay = () => {
+    gameManager.setDifficulty(selectedDifficulty);
+    setShowDifficultyModal(false);
+    handleStartGame();
   };
 
   const handleToggleMute = () => {
@@ -546,14 +578,14 @@ export default function App() {
       {bootReady && gameState === 'TITLE' && (
         <TitleScreen
           isMuted={isMuted}
-          isModalOpen={showSettings || (bootOverlayDone && showHowToPlay)}
+          isModalOpen={showSettings || (bootOverlayDone && showHowToPlay) || showDifficultyModal}
           initialTab={lobbyTab}
           initialShopSubTab={lobbyShopSubTab}
           onTabChange={(tab, sub) => {
             setLobbyTab(tab);
             if (sub) setLobbyShopSubTab(sub);
           }}
-          onStartGame={handleStartGame}
+          onStartGame={handleOpenDifficultyModal}
           onToggleMute={handleToggleMute}
           onOpenSettings={() => setShowSettings(true)}
         />
@@ -578,6 +610,7 @@ export default function App() {
           redShardRemainingSec={redShardRemainingSec}
           darknessFallsRemainingSec={darknessFallsRemainingSec}
           bloodFogRemainingSec={bloodFogRemainingSec}
+          bloodFogTier={bloodFogTier}
           activeChallenge={activeChallenge}
           dashCharges={dashCharges}
           maxDashCharges={maxDashCharges}
@@ -625,6 +658,15 @@ export default function App() {
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
         onToggleMute={handleToggleMute}
+      />
+
+      {/* Modal: Difficulty Selection before entering arena */}
+      <DifficultyModal
+        isOpen={gameState === 'TITLE' && showDifficultyModal}
+        selectedDifficulty={selectedDifficulty}
+        onSelectDifficulty={handleSelectDifficulty}
+        onConfirmPlay={handleConfirmDifficultyPlay}
+        onClose={() => setShowDifficultyModal(false)}
       />
 
       {/* Modal: How to Play (First Launch & Settings Guide) */}

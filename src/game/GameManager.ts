@@ -4,12 +4,14 @@ import {
   DebugStats,
   DynamicChallengeOffer,
   EventWarningInfo,
+  GameDifficultyId,
   RelicId,
   RelicSetId,
   RunStats,
   UpgradeOption,
   WeaponState,
 } from './types';
+import { DIFFICULTY_PRESETS, DifficultyPreset } from './difficulty';
 import {
   ResolutionQualityMode,
   TargetFpsOption,
@@ -43,6 +45,8 @@ export interface HudStatsPayload {
   redShardRemainingSec?: number;
   darknessFallsRemainingSec?: number;
   bloodFogRemainingSec?: number;
+  bloodFogTier?: number;
+  difficulty?: GameDifficultyId;
   activeChallenge?: ActiveDynamicChallenge | null;
   dashCharges?: number;
   maxDashCharges?: number;
@@ -117,6 +121,7 @@ class GameManager {
   // Joystick state from touch
   public joystickVector = { x: 0, y: 0 };
   private brightness: number = saveDataStore.read().settings.brightness;
+  private selectedDifficulty: GameDifficultyId = saveDataStore.read().difficulty;
   private qualityTier: QualityTier = 'high';
   private graphicsConfig: GraphicsConfig = (() => {
     const s = saveDataStore.read().settings;
@@ -127,6 +132,21 @@ class GameManager {
       frameGenEnabled: s.frameGenEnabled,
     };
   })();
+
+  public getDifficulty(): GameDifficultyId {
+    return this.selectedDifficulty;
+  }
+
+  public setDifficulty(difficulty: GameDifficultyId) {
+    this.selectedDifficulty = difficulty;
+    saveDataStore.update((draft) => {
+      draft.difficulty = difficulty;
+    });
+  }
+
+  public getDifficultyConfig(): DifficultyPreset {
+    return DIFFICULTY_PRESETS[this.selectedDifficulty];
+  }
 
   public getGameState(): GameScreenState {
     return this.gameState;

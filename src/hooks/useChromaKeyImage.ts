@@ -36,6 +36,9 @@ export const UI_ASSETS = {
   dealWardenTribute: './assets/aistudio/warden_tribute_b165309f.webp',
   upgradeLantern: './assets/aistudio/lantern_6d635f24.webp',
   upgradeVitality: './assets/aistudio/vitality_0e6c8215.webp',
+  diffBaby: './assets/aistudio/baby_2a82300e.png',
+  diffPro: './assets/aistudio/pro_61caf01c.png',
+  diffHacker: './assets/aistudio/hacker_98e53967.png',
 } as const;
 
 const resolvedDataUrlCache = new Map<string, string>();
@@ -282,6 +285,9 @@ const SECONDARY_CHROMA_ASSETS: readonly string[] = [
   UI_ASSETS.dealWardenTribute,
   UI_ASSETS.upgradeLantern,
   UI_ASSETS.upgradeVitality,
+  UI_ASSETS.diffBaby,
+  UI_ASSETS.diffPro,
+  UI_ASSETS.diffHacker,
 ];
 
 export function getChromaKeyPreloadCount(): number {

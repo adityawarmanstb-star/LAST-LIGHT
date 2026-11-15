@@ -36,6 +36,22 @@ function resolveCustomAssetUrl(id: string): string | null {
   return CUSTOM_UI_ICON_ASSETS[normalized] ?? null;
 }
 
+const DirectAssetIcon: React.FC<{
+  src: string;
+  alt: string;
+  className?: string;
+}> = ({ src, alt, className = '' }) => (
+  <img
+    src={src}
+    alt={alt}
+    aria-hidden={alt ? undefined : true}
+    draggable={false}
+    decoding="async"
+    referrerPolicy="no-referrer"
+    className={`w-full h-full object-contain select-none pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] ${className}`}
+  />
+);
+
 const CustomAssetIcon: React.FC<{
   src: string;
   alt: string;
@@ -131,9 +147,13 @@ export const Icon: React.FC<IconProps> = ({
   const customAssetUrl = resolveCustomAssetUrl(id);
   const spec = customAssetUrl ? null : resolveIconSpec(id);
   const frameSpec = rarity ? resolveIconSpec(getRarityFrameId(rarity)) : null;
-  const resolvedChromaUrl = customAssetUrl ?? spec?.assetUrl ?? null;
+  const resolvedChromaUrl =
+    customAssetUrl ?? (spec?.atlas === 'standalone_chroma' ? spec.assetUrl ?? null : null);
 
   const renderGlyph = () => {
+    if (spec?.atlas === 'standalone_direct' && spec.assetUrl) {
+      return <DirectAssetIcon src={spec.assetUrl} alt={alt} />;
+    }
     if (resolvedChromaUrl) {
       return <CustomAssetIcon src={resolvedChromaUrl} alt={alt} />;
     }

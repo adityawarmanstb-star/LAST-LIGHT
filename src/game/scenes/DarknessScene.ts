@@ -42,6 +42,7 @@ export class DarknessScene extends Phaser.Scene {
   private torchGlowPool: Phaser.GameObjects.Image[] = [];
   private fogLayer1!: Phaser.GameObjects.TileSprite;
   private fogLayer2!: Phaser.GameObjects.TileSprite;
+  private auraSurgeGraphics!: Phaser.GameObjects.Graphics;
   private eyeGraphics!: Phaser.GameObjects.Graphics;
   private edgeArrowGraphics!: Phaser.GameObjects.Graphics;
 
@@ -58,10 +59,28 @@ export class DarknessScene extends Phaser.Scene {
   private forceRtRedraw: boolean = true;
   private prevPausedState: boolean = false;
 
-  // Smooth player light state
+  // Smooth player light state & eased expansion animations
+  private hasInitializedLightState: boolean = false;
   private currentStandBonus: number = 1.2;
+  private standEaseStart: number = 1.2;
+  private standEaseTarget: number = 1.2;
+  private standEaseElapsedMs: number = 0;
+  private standEaseDurationMs: number = 0;
   private currentLowHpScale: number = 1.0;
   private currentExternalRadiusMult: number = 1.0;
+  private radiusEaseStartMult: number = 1.0;
+  private radiusEaseTargetMult: number = 1.0;
+  private radiusEaseElapsedMs: number = 0;
+  private radiusEaseDurationMs: number = 0;
+  private radiusEaseIsGrowth: boolean = false;
+
+  // Expanding safe-zone aura wavefront ring on light radius increase
+  private auraSurgeElapsedMs: number = 0;
+  private auraSurgeDurationMs: number = 0;
+  private auraSurgeStartRadius: number = 0;
+  private auraSurgeEndRadius: number = 0;
+  private auraSurgeIsMajor: boolean = false;
+
   private bloodFogBlend: number = 0;
   private wasBloodFogTinted: boolean = false;
   private effectTimeMs: number = 0;
@@ -102,6 +121,13 @@ export class DarknessScene extends Phaser.Scene {
     // Non-interactive scene strictly below UIScene / HUD so it never steals touches or clicks
     this.input.enabled = false;
     this.input.topOnly = false;
+    this.hasInitializedLightState = false;
+    this.radiusEaseElapsedMs = 0;
+    this.radiusEaseDurationMs = 0;
+    this.standEaseElapsedMs = 0;
+    this.standEaseDurationMs = 0;
+    this.auraSurgeElapsedMs = 0;
+    this.auraSurgeDurationMs = 0;
 
     // Sync screen-space darkness overlay to logical 540x960 grid over high-DPI / 4K buffer
     const activeScale = Math.max(1, this.scale.width / LOGICAL_WIDTH) || performanceRuntime.currentRenderScale;
@@ -179,6 +205,10 @@ export class DarknessScene extends Phaser.Scene {
       .setVisible(false);
     this.stripInteractivity(this.bossGlowSprite);
 
+    // Luminous safe-zone expansion wavefront rendered just above darkRT
+    this.auraSurgeGraphics = this.add.graphics().setDepth(6);
+    this.stripInteractivity(this.auraSurgeGraphics);
+
     // Glowing monster eye/accent dots visible at distance in the dark
     this.eyeGraphics = this.add.graphics().setDepth(7);
     this.stripInteractivity(this.eyeGraphics);
@@ -239,6 +269,7 @@ export class DarknessScene extends Phaser.Scene {
         this.unsubGraphics = null;
       }
       this.scale.off('resize', this.handleResize, this);
+      this.auraSurgeGraphics?.destroy();
       this.shadowMaskGraphics?.destroy();
       for (let i = 0; i < this.torchGlowPool.length; i++) {
         this.torchGlowPool[i].destroy();
@@ -416,11 +447,69 @@ export class DarknessScene extends Phaser.Scene {
         }
       }
 
-      // 2. Player light radius: standing still (+20% over 0.3s), low HP (<30% -> 70% faster flicker)
+      // 2. Player light radius: smooth eased expansion/contraction + safe-zone aura surge
+      const targetStand = snap.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1.0;
+      const targetExternalMult = snap.lightRadiusMultiplier ?? 1.0;
+      const radiusBrightnessMult = 0.92 + this.brightness * 0.08;
+
+      if (!this.hasInitializedLightState) {
+        this.hasInitializedLightState = true;
+        this.currentStandBonus = targetStand;
+        this.standEaseStart = targetStand;
+        this.standEaseTarget = targetStand;
+        this.standEaseElapsedMs = 0;
+        this.standEaseDurationMs = 0;
+
+        this.currentExternalRadiusMult = targetExternalMult;
+        this.radiusEaseStartMult = targetExternalMult;
+        this.radiusEaseTargetMult = targetExternalMult;
+        this.radiusEaseElapsedMs = 0;
+        this.radiusEaseDurationMs = 0;
+        this.radiusEaseIsGrowth = false;
+      }
+
       if (!snap.isGamePaused) {
-        const targetStand = snap.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1.0;
-        const standStep = Math.min(1, delta / LIGHT.player.transitionDurationMs);
-        this.currentStandBonus = Phaser.Math.Linear(this.currentStandBonus, targetStand, standStep);
+        if (Math.abs(targetStand - this.standEaseTarget) > 0.002) {
+          const isGrowingStand = targetStand > this.currentStandBonus + 0.01;
+          this.standEaseStart = this.currentStandBonus;
+          this.standEaseTarget = targetStand;
+          this.standEaseElapsedMs = 0;
+          this.standEaseDurationMs = isGrowingStand ? 340 : 280;
+
+          // Subtle edge shimmer when standing still expands the safe zone, if no major surge is active
+          if (
+            isGrowingStand &&
+            (this.auraSurgeElapsedMs >= this.auraSurgeDurationMs || !this.auraSurgeIsMajor)
+          ) {
+            const baseVisualMult =
+              LIGHT.player.baseRadius *
+              this.currentLowHpScale *
+              this.currentExternalRadiusMult *
+              radiusBrightnessMult;
+            this.auraSurgeStartRadius = baseVisualMult * this.currentStandBonus * 0.94;
+            this.auraSurgeEndRadius = baseVisualMult * targetStand * 1.02;
+            this.auraSurgeElapsedMs = 0;
+            this.auraSurgeDurationMs = 420;
+            this.auraSurgeIsMajor = false;
+          }
+        }
+
+        if (this.standEaseDurationMs > 0 && this.standEaseElapsedMs < this.standEaseDurationMs) {
+          this.standEaseElapsedMs = Math.min(
+            this.standEaseDurationMs,
+            this.standEaseElapsedMs + delta
+          );
+          const p = this.standEaseElapsedMs / this.standEaseDurationMs;
+          // Smooth cubic ease-out for responsive stand-still focus
+          const eased = 1 - Math.pow(1 - p, 3);
+          this.currentStandBonus = Phaser.Math.Linear(
+            this.standEaseStart,
+            this.standEaseTarget,
+            eased
+          );
+        } else {
+          this.currentStandBonus = this.standEaseTarget;
+        }
 
         const hpRatio = snap.currentHp / Math.max(1, snap.maxHp);
         const isLowHpCheck = hpRatio < LIGHT.lowHp.threshold && !snap.isDead;
@@ -431,13 +520,75 @@ export class DarknessScene extends Phaser.Scene {
           Math.min(1, delta / 350)
         );
 
-        const targetExternalMult = snap.lightRadiusMultiplier ?? 1.0;
-        this.currentExternalRadiusMult = Phaser.Math.Linear(
-          this.currentExternalRadiusMult,
-          targetExternalMult,
-          Math.min(1, delta / 300)
-        );
+        if (Math.abs(targetExternalMult - this.radiusEaseTargetMult) > 0.002) {
+          const isGrowth = targetExternalMult > this.currentExternalRadiusMult + 0.004;
+          const prevRadius =
+            LIGHT.player.baseRadius *
+            this.currentStandBonus *
+            this.currentLowHpScale *
+            this.currentExternalRadiusMult *
+            radiusBrightnessMult;
+          const nextRadius =
+            LIGHT.player.baseRadius *
+            this.currentStandBonus *
+            this.currentLowHpScale *
+            targetExternalMult *
+            radiusBrightnessMult;
+
+          this.radiusEaseStartMult = this.currentExternalRadiusMult;
+          this.radiusEaseTargetMult = targetExternalMult;
+          this.radiusEaseElapsedMs = 0;
+          this.radiusEaseDurationMs = isGrowth ? 720 : 520;
+          this.radiusEaseIsGrowth = isGrowth;
+
+          if (isGrowth) {
+            this.auraSurgeStartRadius = prevRadius * 0.9;
+            this.auraSurgeEndRadius = nextRadius * 1.06;
+            this.auraSurgeElapsedMs = 0;
+            this.auraSurgeDurationMs = 780;
+            this.auraSurgeIsMajor = true;
+          }
+        }
+
+        if (this.radiusEaseDurationMs > 0 && this.radiusEaseElapsedMs < this.radiusEaseDurationMs) {
+          this.radiusEaseElapsedMs = Math.min(
+            this.radiusEaseDurationMs,
+            this.radiusEaseElapsedMs + delta
+          );
+          const p = this.radiusEaseElapsedMs / this.radiusEaseDurationMs;
+          if (this.radiusEaseIsGrowth) {
+            // Smooth cubic ease-out with gentle +4% luminous bloom overshoot before settling
+            const cubicOut = 1 - Math.pow(1 - p, 3);
+            const bloomBump = Math.sin(p * Math.PI) * (1 - p) * 0.09;
+            this.currentExternalRadiusMult = Phaser.Math.Linear(
+              this.radiusEaseStartMult,
+              this.radiusEaseTargetMult,
+              cubicOut + bloomBump
+            );
+          } else {
+            const sineOut = Math.sin((p * Math.PI) / 2);
+            this.currentExternalRadiusMult = Phaser.Math.Linear(
+              this.radiusEaseStartMult,
+              this.radiusEaseTargetMult,
+              sineOut
+            );
+          }
+        } else {
+          this.currentExternalRadiusMult = this.radiusEaseTargetMult;
+        }
+
+        if (this.auraSurgeDurationMs > 0 && this.auraSurgeElapsedMs < this.auraSurgeDurationMs) {
+          this.auraSurgeElapsedMs = Math.min(
+            this.auraSurgeDurationMs,
+            this.auraSurgeElapsedMs + delta
+          );
+        }
       }
+
+      const isAnimatingRadius =
+        (this.radiusEaseDurationMs > 0 && this.radiusEaseElapsedMs < this.radiusEaseDurationMs) ||
+        (this.standEaseDurationMs > 0 && this.standEaseElapsedMs < this.standEaseDurationMs) ||
+        (this.auraSurgeDurationMs > 0 && this.auraSurgeElapsedMs < this.auraSurgeDurationMs);
 
       const hpRatio = snap.currentHp / Math.max(1, snap.maxHp);
       const isLowHp = hpRatio < LIGHT.lowHp.threshold && !snap.isDead;
@@ -449,8 +600,6 @@ export class DarknessScene extends Phaser.Scene {
         Math.sin(tSec * flickerFreq * 1.73 * Math.PI * 2) * 0.35;
       const flickerFactor = 1 + flickerWave * flickerAmp;
 
-      // Brightness slightly assists player radius (0.96..1.04) while clamping ambient darkness <= 85%
-      const radiusBrightnessMult = 0.92 + this.brightness * 0.08;
       const playerRadius =
         LIGHT.player.baseRadius *
         this.currentStandBonus *
@@ -648,6 +797,7 @@ export class DarknessScene extends Phaser.Scene {
       const shouldRedrawRt =
         this.forceRtRedraw ||
         exceededOverscan ||
+        isAnimatingRadius ||
         this.levelUpPulseRemainingMs > 0 ||
         performanceRuntime.shouldRunTemporalHeavyPass(delta, false);
 
@@ -704,6 +854,33 @@ export class DarknessScene extends Phaser.Scene {
       } else {
         // Inter-frame temporal scroll compensation: locks cached lightmap to world at zero RT cost
         this.darkRT.setPosition(scrollDeltaX - RT_OVERSCAN, scrollDeltaY - RT_OVERSCAN);
+      }
+    }
+
+    // 4.5 Render smooth expanding Safe-Zone Aura Wavefront above darkRT when light grows
+    this.auraSurgeGraphics.clear();
+    if (this.auraSurgeDurationMs > 0 && this.auraSurgeElapsedMs < this.auraSurgeDurationMs) {
+      const p = this.auraSurgeElapsedMs / this.auraSurgeDurationMs;
+      const eased = 1 - Math.pow(1 - p, 3);
+      const ringR = Phaser.Math.Linear(this.auraSurgeStartRadius, this.auraSurgeEndRadius, eased);
+      const fadeAlpha = p < 0.18 ? p / 0.18 : Math.pow(1 - (p - 0.18) / 0.82, 1.35);
+      const psx = snap.player.x - scrollX;
+      const psy = snap.player.y - scrollY;
+
+      if (this.auraSurgeIsMajor) {
+        this.auraSurgeGraphics.fillStyle(0x5de4ff, 0.055 * fadeAlpha);
+        this.auraSurgeGraphics.fillCircle(psx, psy, ringR * 0.97);
+        this.auraSurgeGraphics.lineStyle(18, 0x22d3ee, 0.14 * fadeAlpha);
+        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
+        this.auraSurgeGraphics.lineStyle(6, 0x7df3ff, 0.34 * fadeAlpha);
+        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
+        this.auraSurgeGraphics.lineStyle(2, 0xe8fdff, 0.56 * fadeAlpha);
+        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
+      } else {
+        this.auraSurgeGraphics.lineStyle(10, 0x22d3ee, 0.08 * fadeAlpha);
+        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
+        this.auraSurgeGraphics.lineStyle(2.5, 0x8ef5ff, 0.22 * fadeAlpha);
+        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
       }
     }
 
