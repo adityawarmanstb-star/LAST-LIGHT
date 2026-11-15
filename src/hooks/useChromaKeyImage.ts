@@ -5,25 +5,83 @@ export const UI_ASSETS = {
   btnPlay: './assets/ui/btn_play.png',
   panelIronCard: './assets/ui/panel_iron_card.png',
   navBarBg: './assets/ui/nav_bar_bg.png',
-  iconShop: './assets/ui/icon_shop.png',
-  iconMissions: './assets/ui/icon_missions.png',
-  iconHome: './assets/ui/icon_home.png',
-  iconBestiary: './assets/ui/icon_bestiary.png',
-  iconAchievements: './assets/ui/icon_achievements.png',
   gameTitleLogo: './assets/ui/game_title_logo.png',
   loadingSplash: './assets/ui/loading_splash.png',
   appIcon: './assets/ui/app_icon.png',
+  iconHome: './assets/ui/icon_home.png',
+  iconMissions: './assets/ui/icon_missions.png',
+  iconBestiary: './assets/ui/icon_bestiary.png',
+  iconShop: './assets/ui/icon_shop.png',
+  iconAchievements: './assets/ui/icon_achievements.png',
+  relicBloodChalice: './assets/aistudio/blood_chalice_3a3b81b6.png',
+  relicSunforgedLens: './assets/aistudio/sunforged_lens_de858746.png',
+  relicIronSpurs: './assets/aistudio/iron_spurs_40c52100.png',
+  relicExecutionerSeal: './assets/aistudio/executioner_seal_3f778ae0.png',
+  synergySolarIgnition: './assets/aistudio/solar_ignition_d7407a04.png',
+  synergyEyeOfTheStorm: './assets/aistudio/eye_of_the_storm_6cd23746.png',
+  weaponBolt: './assets/aistudio/bolt_71ac68d8.png',
+  weaponBlades: './assets/aistudio/blades_26a1aed0.png',
+  weaponRing: './assets/aistudio/ring_500d8c8b.png',
+  weaponSpark: './assets/aistudio/spark_f849b892.png',
+  weaponShotgun: './assets/aistudio/shotgun_578505c0.png',
+  statVitality: './assets/aistudio/stat_vitality_86a307d0.png',
+  statSpeed: './assets/aistudio/stat_speed_e88dad10.png',
+  statMight: './assets/aistudio/stat_might_b187c7b7.png',
+  statMagnet: './assets/aistudio/stat_magnet_466d6ed9.png',
+  statCooldown: './assets/aistudio/stat_cooldown_2fe51f54.png',
+  statCrit: './assets/aistudio/stat_crit_6168bb7b.png',
+  skillLightBurst: './assets/aistudio/light_burst_95f6973e.png',
+  dealBloodSeal: './assets/aistudio/blood_seal_bec54a9a.png',
+  dealAshHoard: './assets/aistudio/ash_hoard_d283c510.png',
+  dealWardenTribute: './assets/aistudio/warden_tribute_b165309f.png',
+  upgradeLantern: './assets/aistudio/lantern_6d635f24.png',
+  upgradeVitality: './assets/aistudio/vitality_0e6c8215.png',
 } as const;
 
 const resolvedDataUrlCache = new Map<string, string>();
 const inFlightCache = new Map<string, Promise<string>>();
+let lobbyPreloadStarted = false;
+
+const MAX_PROCESSED_DIMENSION = 1024;
+
+function canvasToFastUrl(canvas: HTMLCanvasElement): Promise<string> {
+  return new Promise((resolve) => {
+    if (typeof canvas.toBlob === 'function') {
+      canvas.toBlob(
+        (webpBlob) => {
+          if (webpBlob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+            resolve(URL.createObjectURL(webpBlob));
+            return;
+          }
+          canvas.toBlob(
+            (pngBlob) => {
+              if (pngBlob && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+                resolve(URL.createObjectURL(pngBlob));
+                return;
+              }
+              resolve(canvas.toDataURL('image/png'));
+            },
+            'image/png'
+          );
+        },
+        'image/webp',
+        0.95
+      );
+      return;
+    }
+    resolve(canvas.toDataURL('image/png'));
+  });
+}
 
 /**
  * Strips bright #00FF00 chroma-key green pixels and anti-aliased green fringe/spill
- * from an image via an offscreen HTML5 Canvas, returning a cached transparent PNG data URL.
+ * from an image via an offscreen HTML5 Canvas, returning a cached transparent object/data URL.
  * Preserves cyan/blue highlights (where blue channel is near green) and warm gold/crimson tones.
  */
-export function processChromaKeyImage(src: string): Promise<string> {
+export function processChromaKeyImage(
+  src: string,
+  priority: 'high' | 'low' = 'low'
+): Promise<string> {
   const existing = resolvedDataUrlCache.get(src);
   if (existing) {
     return Promise.resolve(existing);
@@ -43,16 +101,30 @@ export function processChromaKeyImage(src: string): Promise<string> {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.decoding = 'async';
+    if ('fetchPriority' in img) {
+      (img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = priority;
+    }
 
-    img.onload = () => {
+    const processLoadedImage = async () => {
       try {
-        const w = img.naturalWidth || img.width;
-        const h = img.naturalHeight || img.height;
-        if (!w || !h) {
+        if (typeof img.decode === 'function') {
+          await img.decode().catch(() => {});
+        }
+
+        const rawW = img.naturalWidth || img.width;
+        const rawH = img.naturalHeight || img.height;
+        if (!rawW || !rawH) {
           resolvedDataUrlCache.set(src, src);
           resolve(src);
           return;
         }
+
+        // Scale oversized 2K/3K source graphics down to retina-sharp 1024px cap
+        // so pixel chroma-keying & encoding finish ~6-8x faster without jank.
+        const maxSide = Math.max(rawW, rawH);
+        const scale = maxSide > MAX_PROCESSED_DIMENSION ? MAX_PROCESSED_DIMENSION / maxSide : 1;
+        const w = Math.max(1, Math.round(rawW * scale));
+        const h = Math.max(1, Math.round(rawH * scale));
 
         const canvas = document.createElement('canvas');
         canvas.width = w;
@@ -64,7 +136,10 @@ export function processChromaKeyImage(src: string): Promise<string> {
           return;
         }
 
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, w, h);
+
         const imageData = ctx.getImageData(0, 0, w, h);
         const data = imageData.data;
 
@@ -84,13 +159,18 @@ export function processChromaKeyImage(src: string): Promise<string> {
             continue;
           }
 
-          // Anti-aliased edge despill where green channel clearly dominates R and B
+          // Anti-aliased edge & green-smoke despill while preserving true cyan/aqua magic glow
           if (greenExcess > 14 && g > 44) {
-            const strength = Math.min(1, (greenExcess - 14) / 42);
-            const nextAlpha = Math.round(a * (1 - strength * 0.88));
-            data[i + 3] = nextAlpha;
-            // Clamp green spill back toward neutral metallic/dark tone
-            data[i + 1] = Math.min(g, maxRB + 6);
+            const isCyanGlow = b >= g * 0.72 && b > r + 15;
+            if (isCyanGlow) {
+              data[i + 1] = Math.min(g, maxRB + 6);
+            } else {
+              const strength = Math.min(1, (greenExcess - 14) / 36);
+              const nextAlpha = Math.round(a * (1 - strength));
+              data[i + 3] = nextAlpha;
+              // Clamp green spill back toward neutral metallic/dark tone
+              data[i + 1] = Math.min(g, maxRB + 2);
+            }
           }
         }
 
@@ -131,14 +211,18 @@ export function processChromaKeyImage(src: string): Promise<string> {
           }
         }
 
-        const dataUrl = outputCanvas.toDataURL('image/png');
-        resolvedDataUrlCache.set(src, dataUrl);
-        resolve(dataUrl);
+        const fastUrl = await canvasToFastUrl(outputCanvas);
+        resolvedDataUrlCache.set(src, fastUrl);
+        resolve(fastUrl);
       } catch (err) {
         reject(err);
       } finally {
         inFlightCache.delete(src);
       }
+    };
+
+    img.onload = () => {
+      void processLoadedImage();
     };
 
     img.onerror = (err) => {
@@ -157,23 +241,64 @@ export function getCachedChromaKeyImage(src: string): string | null {
   return resolvedDataUrlCache.get(src) ?? null;
 }
 
+/**
+ * Immediately starts high-priority chroma-keying for the main title logo,
+ * then sequentially warms the remaining lobby assets in the background so
+ * the initial loading animation never stutters or fights for bandwidth.
+ */
+export function preloadCriticalLoadingLogo(): Promise<string | null> {
+  return processChromaKeyImage(UI_ASSETS.gameTitleLogo, 'high').catch(() => null);
+}
+
 export function preloadAllChromaKeyUiAssets(): void {
-  const chromaSources = [
+  if (lobbyPreloadStarted) return;
+  lobbyPreloadStarted = true;
+
+  const secondarySources = [
     UI_ASSETS.btnPlay,
     UI_ASSETS.panelIronCard,
     UI_ASSETS.navBarBg,
-    UI_ASSETS.iconShop,
-    UI_ASSETS.iconMissions,
     UI_ASSETS.iconHome,
+    UI_ASSETS.iconMissions,
     UI_ASSETS.iconBestiary,
+    UI_ASSETS.iconShop,
     UI_ASSETS.iconAchievements,
-    UI_ASSETS.gameTitleLogo,
+    UI_ASSETS.relicBloodChalice,
+    UI_ASSETS.relicSunforgedLens,
+    UI_ASSETS.relicIronSpurs,
+    UI_ASSETS.relicExecutionerSeal,
+    UI_ASSETS.synergySolarIgnition,
+    UI_ASSETS.synergyEyeOfTheStorm,
+    UI_ASSETS.weaponBolt,
+    UI_ASSETS.weaponBlades,
+    UI_ASSETS.weaponRing,
+    UI_ASSETS.weaponSpark,
+    UI_ASSETS.weaponShotgun,
+    UI_ASSETS.statVitality,
+    UI_ASSETS.statSpeed,
+    UI_ASSETS.statMight,
+    UI_ASSETS.statMagnet,
+    UI_ASSETS.statCooldown,
+    UI_ASSETS.statCrit,
+    UI_ASSETS.skillLightBurst,
+    UI_ASSETS.dealBloodSeal,
+    UI_ASSETS.dealAshHoard,
+    UI_ASSETS.dealWardenTribute,
+    UI_ASSETS.upgradeLantern,
+    UI_ASSETS.upgradeVitality,
   ];
-  chromaSources.forEach((asset) => {
-    processChromaKeyImage(asset).catch(() => {
-      // Fallback handled gracefully per-component
-    });
+
+  void preloadCriticalLoadingLogo().then(async () => {
+    for (const asset of secondarySources) {
+      await new Promise<void>((r) => window.setTimeout(r, 30));
+      await processChromaKeyImage(asset, 'low').catch(() => {});
+    }
   });
+}
+
+// Kick off title logo chroma-key processing as soon as module loads
+if (typeof window !== 'undefined') {
+  void preloadCriticalLoadingLogo();
 }
 
 export function useChromaKeyImage(src: string): {
@@ -197,7 +322,8 @@ export function useChromaKeyImage(src: string): {
     let cancelled = false;
     setHasError(false);
 
-    processChromaKeyImage(src)
+    const priority = src === UI_ASSETS.gameTitleLogo ? 'high' : 'low';
+    processChromaKeyImage(src, priority)
       .then((url) => {
         if (!cancelled) {
           setProcessedSrc(url);

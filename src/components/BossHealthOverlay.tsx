@@ -1,7 +1,7 @@
 import React from 'react';
-import { Crown, Flame } from 'lucide-react';
 import { BossInfo } from '../game/types';
 import { ForgedIronFrame } from './ForgedIronFrame';
+import { Icon } from './Icon';
 
 interface BossHealthOverlayProps {
   boss: BossInfo | null;
@@ -56,11 +56,7 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
           {/* Header Row: Boss Name, Danger Indicator (<25%), Numeric & % Health */}
           <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-2">
             <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <Crown
-                className={`w-4 h-4 shrink-0 ${
-                  isDangerLow ? 'text-[#e5303a] animate-pulse' : 'text-[#f2a93b]'
-                }`}
-              />
+              <Icon id="ui_crown" size={18} />
               <span className="font-display text-xs sm:text-sm font-bold tracking-wider text-[#e5303a] truncate">
                 {boss.name}
               </span>
@@ -73,8 +69,8 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
                 Rec. Lv.{recLevel}
               </span>
               {(isDangerLow || boss.enraged) && (
-                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#3a0a0e]/90 border border-[#e5303a]/75 text-[9px] font-bold uppercase tracking-widest text-[#ff6b73] shrink-0 boss-danger-pulse">
-                  <Flame className="w-2.5 h-2.5 text-[#e5303a]" />
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-[#3a0a0e]/90 border border-[#e5303a]/75 text-[9px] font-bold uppercase tracking-widest text-[#ff6b73] shrink-0">
+                  <Icon id="ui_flame" size={12} />
                   <span>{isDangerLow ? 'Danger' : 'Enraged'}</span>
                 </span>
               )}

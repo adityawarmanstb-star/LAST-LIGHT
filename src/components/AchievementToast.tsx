@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Coins, Trophy } from 'lucide-react';
 import { achievements } from '../game/achievements';
 import { soundManager } from '../game/audio';
 import { AchievementDefinition } from '../game/types';
 import { haptics } from '../mobile/haptics';
 import { ForgedIronFrame } from './ForgedIronFrame';
+import { Icon } from './Icon';
 
 const TOAST_DURATION_MS = 3800;
 
@@ -76,7 +76,7 @@ export const AchievementToast: React.FC = () => {
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-3 min-w-0">
               <div className="w-10 h-10 rounded-[9px] bg-[#121417] border border-[#f2a93b]/75 flex items-center justify-center shrink-0 shadow-[0_0_12px_rgba(242,169,59,0.28)]">
-                <Trophy className="w-5 h-5 text-[#f2a93b]" />
+                <Icon id="ui_trophy" size={24} />
               </div>
 
               <div className="flex flex-col min-w-0">
@@ -93,7 +93,7 @@ export const AchievementToast: React.FC = () => {
             </div>
 
             <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-[8px] bg-[#121417]/90 border border-[#f2a93b]/55">
-              <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
+              <Icon id="soul_coin" size={16} />
               <span className="font-mono-numbers text-xs font-bold text-[#f2a93b]">
                 +{active.rewardCoins}
               </span>

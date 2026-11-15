@@ -1,24 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Check,
-  CircleDot,
-  Coins,
-  Crosshair,
-  Disc,
-  Eye,
-  Flame,
-  Gem,
-  Heart,
-  Magnet,
-  ShieldAlert,
-  Skull,
-  Sparkles,
-  Sun,
-  Sword,
-  Wind,
-  Zap,
-} from 'lucide-react';
+import { IconRarity } from '../game/iconRegistry';
 import { DynamicChallengeOffer, UpgradeOption } from '../game/types';
+import { Icon } from './Icon';
 import { IronCard } from './IronCard';
 import { preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
 import { soundManager } from '../game/audio';
@@ -32,10 +15,8 @@ interface LevelUpModalProps {
 
 type RarityTheme = {
   label: string;
-  outerShadow: string;
-  accentText: string;
-  frameBorder: string;
-  frameBg: string;
+  frameRarity: IconRarity;
+  highlight: 'gold' | 'blood' | 'ember' | 'none';
   tagColor: string;
 };
 
@@ -79,94 +60,49 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
     if (option.rarity === 'epic') {
       return {
         label: 'EPIC',
-        outerShadow:
-          'drop-shadow(0 0 14px rgba(242, 169, 59, 0.58)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
-        accentText: 'text-[#f2c464]',
-        frameBorder: '#d99a32',
-        frameBg: 'linear-gradient(180deg, #2b2110 0%, #14100a 100%)',
+        frameRarity: 'epic',
+        highlight: 'gold',
         tagColor: 'text-[#f2c464]',
       };
     }
     if (option.category === 'weapon_unlock') {
       return {
         label: 'RELIC',
-        outerShadow:
-          'drop-shadow(0 0 12px rgba(34, 211, 238, 0.5)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
-        accentText: 'text-[#5de4ff]',
-        frameBorder: '#22d3ee',
-        frameBg: 'linear-gradient(180deg, #10242c 0%, #091216 100%)',
+        frameRarity: 'rare',
+        highlight: 'ember',
         tagColor: 'text-[#5de4ff]',
       };
     }
     if (option.rarity === 'rare') {
       return {
         label: 'RARE',
-        outerShadow:
-          'drop-shadow(0 0 12px rgba(229, 48, 58, 0.52)) drop-shadow(0 0 8px rgba(242, 169, 59, 0.32)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
-        accentText: 'text-[#ff6b72]',
-        frameBorder: '#c4242d',
-        frameBg: 'linear-gradient(180deg, #2d1115 0%, #16090b 100%)',
+        frameRarity: 'rare',
+        highlight: 'blood',
         tagColor: 'text-[#f2a93b]',
       };
     }
     return {
       label: 'COMMON',
-      outerShadow:
-        'drop-shadow(0 0 10px rgba(34, 211, 238, 0.36)) drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
-      accentText: 'text-[#5de4ff]',
-      frameBorder: '#3f7688',
-      frameBg: 'linear-gradient(180deg, #172128 0%, #0c1115 100%)',
+      frameRarity: 'common',
+      highlight: 'none',
       tagColor: 'text-[#5de4ff]',
     };
   };
 
-  const renderIcon = (iconName: string, accentClass: string) => {
-    const cls = `w-6 h-6 sm:w-7 sm:h-7 ${accentClass}`;
-    switch (iconName) {
-      case 'bolt':
-        return <Zap className={cls} />;
-      case 'blade':
-        return <Disc className={cls} />;
-      case 'ring':
-        return <CircleDot className={cls} />;
-      case 'spark':
-        return <Sparkles className={cls} />;
-      case 'heart':
-        return <Heart className={cls} />;
-      case 'wind':
-        return <Wind className={cls} />;
-      case 'sword':
-        return <Sword className={cls} />;
-      case 'magnet':
-        return <Magnet className={cls} />;
-      case 'crosshair':
-        return <Crosshair className={cls} />;
-      case 'lantern':
-        return <Flame className={cls} />;
-      case 'sun':
-        return <Sun className={cls} />;
-      case 'eye':
-        return <Eye className={cls} />;
-      default:
-        return <Sparkles className={cls} />;
-    }
-  };
-
   const renderChallengeIcon = (icon: DynamicChallengeOffer['icon']) => {
-    const cls = 'w-5 h-5';
     switch (icon) {
       case 'shard':
-        return <Gem className={`${cls} text-[#e5303a]`} />;
+        return <Icon id="crimson_gem" size={28} />;
       case 'coins':
-        return <Coins className={`${cls} text-[#f2c464]`} />;
+        return <Icon id="soul_coin" size={28} />;
       case 'shield':
-        return <ShieldAlert className={`${cls} text-[#5de4ff]`} />;
+        return <Icon id="ui_shield" size={28} />;
       case 'flame':
-        return <Flame className={`${cls} text-[#f2c464]`} />;
+        return <Icon id="ui_flame" size={28} />;
       case 'skull':
-        return <Skull className={`${cls} text-[#e5303a]`} />;
+        return <Icon id="ui_skull" size={28} />;
       case 'sun':
-        return <Sun className={`${cls} text-[#5de4ff]`} />;
+        return <Icon id="ui_brightness" size={28} />;
     }
   };
 
@@ -210,15 +146,9 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
 
         {/* Dynamic Challenge / Pact Card using panel_iron_card.png */}
         {challengeOffer && (
-          <div
-            className="w-full shrink-0"
-            style={{
-              filter: acceptChallenge
-                ? 'drop-shadow(0 0 14px rgba(242, 169, 59, 0.6)) drop-shadow(0 0 12px rgba(220, 38, 38, 0.5))'
-                : 'drop-shadow(0 0 12px rgba(220, 38, 38, 0.5)) drop-shadow(0 0 16px rgba(147, 51, 234, 0.32))',
-            }}
-          >
+          <div className="w-full shrink-0">
             <IronCard
+              highlight={acceptChallenge ? 'gold' : 'blood'}
               className="w-full"
               contentClassName="px-3.5 py-2.5 sm:px-4 sm:py-3 flex flex-col gap-2"
             >
@@ -264,7 +194,7 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                   haptics.tap('medium');
                   setAcceptChallenge((prev) => !prev);
                 }}
-                className="w-full h-[36px] rounded-[7px] flex items-center justify-center gap-2 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
+                className="w-full min-h-[56px] rounded-[7px] flex items-center justify-center gap-2 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
                 style={{
                   background: acceptChallenge
                     ? 'linear-gradient(180deg, #8f2222 0%, #5c1014 55%, #36080a 100%)'
@@ -277,9 +207,7 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                     : 'inset 0 1px 0 rgba(242, 169, 59, 0.22), 0 4px 10px rgba(0, 0, 0, 0.8)',
                 }}
               >
-                {acceptChallenge && (
-                  <Check className="w-4 h-4 text-[#f2c464] shrink-0" />
-                )}
+                {acceptChallenge && <Icon id="ui_check" size={16} />}
                 <span className="font-display font-black text-[11px] tracking-[0.14em] uppercase text-[#f6dfa0]">
                   {acceptChallenge ? 'PACT ACCEPTED' : 'ACCEPT PACT'}
                 </span>
@@ -299,11 +227,11 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                 className="animate-card-slide-up w-full"
                 style={{
                   animationDelay: `${index * 70}ms`,
-                  filter: theme.outerShadow,
                 }}
               >
                 <IronCard
                   asButton
+                  highlight={theme.highlight}
                   onClick={() => {
                     haptics.tap('medium');
                     onSelectUpgrade(option, acceptChallenge);
@@ -312,17 +240,9 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                   className="w-full active:scale-[0.97] hover:-translate-y-0.5 transition-transform duration-150"
                   contentClassName="px-3.5 py-3 md:p-5 flex flex-row md:flex-col items-center gap-3.5 md:gap-3 text-left md:text-center min-h-[100px] md:min-h-[210px]"
                 >
-                  {/* Left: Beveled Dark-Iron Metallic Icon Frame */}
-                  <div
-                    className="w-13 h-13 sm:w-14 sm:h-14 rounded-[10px] flex items-center justify-center shrink-0"
-                    style={{
-                      background: theme.frameBg,
-                      border: `2px solid ${theme.frameBorder}`,
-                      boxShadow:
-                        'inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -2px 4px rgba(0,0,0,0.85), 0 4px 12px rgba(0,0,0,0.85)',
-                    }}
-                  >
-                    {renderIcon(option.icon, theme.accentText)}
+                  {/* Left: Rarity-Framed Hand-Painted Skill Icon */}
+                  <div className="shrink-0 flex items-center justify-center">
+                    <Icon id={option.title} rarity={theme.frameRarity} size={58} />
                   </div>
 
                   {/* Right: Rarity Tag + Cinzel Title + 2-Line Rajdhani Description */}

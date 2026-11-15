@@ -15,7 +15,7 @@ import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
 import { PauseModal } from './components/PauseModal';
 import { LoadingScreen } from './components/LoadingScreen';
-import { gameManager, GraphicsConfig } from './game/GameManager';
+import { gameManager } from './game/GameManager';
 import { createPhaserGame } from './game/phaserConfig';
 import { soundManager } from './game/audio';
 import { saveDataStore } from './game/saveData';
@@ -23,8 +23,6 @@ import { getActiveRelicSynergies } from './game/relics';
 import {
   ActiveDynamicChallenge,
   BossInfo,
-  DebugStats,
-  DpsSample,
   DynamicChallengeOffer,
   EventWarningInfo,
   RelicId,
@@ -35,7 +33,6 @@ import {
 } from './game/types';
 import { MainScene } from './game/scenes/MainScene';
 import { initCapacitorMobile } from './mobile/capacitorBridge';
-import { haptics } from './mobile/haptics';
 
 export default function App() {
   const [gameState, setGameState] = useState<'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('TITLE');
@@ -52,11 +49,6 @@ export default function App() {
   const [masterVolume, setMasterVolume] = useState<number>(soundManager.getMasterVolume());
   const [musicVolume, setMusicVolume] = useState<number>(soundManager.getMusicVolume());
   const [sfxVolume, setSfxVolume] = useState<number>(soundManager.getSfxVolume());
-  const [brightness, setBrightness] = useState<number>(gameManager.getBrightness());
-  const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(() => haptics.isEnabled());
-  const [graphicsConfig, setGraphicsConfig] = useState<GraphicsConfig>(() =>
-    gameManager.getGraphicsConfig()
-  );
 
   // In-run state
   const [hp, setHp] = useState<number>(100);
@@ -81,14 +73,6 @@ export default function App() {
   const [dashCooldownProgress, setDashCooldownProgress] = useState<number>(1);
   const [equippedRelicIds, setEquippedRelicIds] = useState<RelicId[]>([]);
   const [activeRelicSynergies, setActiveRelicSynergies] = useState<RelicSetId[]>([]);
-  const [debugStats, setDebugStats] = useState<DebugStats>({
-    fps: 60,
-    enemyCount: 0,
-    killsPerMin: 0,
-    playerDps: 0,
-    currentMinute: 0,
-  });
-  const [dpsHistory, setDpsHistory] = useState<DpsSample[]>([{ timeSec: 0, dps: 0 }]);
   const [eventWarning, setEventWarning] = useState<EventWarningInfo | null>(null);
 
   // Modals
@@ -108,8 +92,6 @@ export default function App() {
   });
 
   const containerRef = useRef<HTMLDivElement>(null);
-  const lastDpsSampleSecRef = useRef<number>(0);
-  const loadingFinishTimerRef = useRef<number | null>(null);
   const loadingFailsafeTimerRef = useRef<number | null>(null);
   const handleTogglePauseRef = useRef<() => void>(() => {});
   const handleQuitToTitleRef = useRef<() => void>(() => {});
@@ -147,29 +129,6 @@ export default function App() {
       setDashCooldownProgress(data.dashCooldownProgress ?? 1);
       setEquippedRelicIds(data.equippedRelicIds ?? []);
       setActiveRelicSynergies(data.activeRelicSynergies ?? []);
-      setDebugStats(data.debug);
-
-      const sampleSec = Math.max(0, Math.floor(data.time));
-      const liveDps = Math.max(0, data.debug.playerDps);
-      if (sampleSec > lastDpsSampleSecRef.current) {
-        lastDpsSampleSecRef.current = sampleSec;
-        setDpsHistory((prev) => {
-          const next = [...prev, { timeSec: sampleSec, dps: liveDps }];
-          if (next.length > 360) {
-            const compacted: DpsSample[] = [];
-            for (let i = 0; i < next.length - 120; i += 2) {
-              compacted.push(next[i]);
-            }
-            for (let i = next.length - 120; i < next.length; i++) {
-              compacted.push(next[i]);
-            }
-            return compacted;
-          }
-          return next;
-        });
-      } else if (sampleSec === 0 && lastDpsSampleSecRef.current === 0 && liveDps > 0) {
-        setDpsHistory([{ timeSec: 0, dps: liveDps }]);
-      }
     });
 
     const unsubLevelUp = gameManager.onLevelUp((options, challengeOffer) => {
@@ -211,13 +170,12 @@ export default function App() {
           window.clearTimeout(loadingFailsafeTimerRef.current);
           loadingFailsafeTimerRef.current = null;
         }
-        if (loadingFinishTimerRef.current !== null) {
-          window.clearTimeout(loadingFinishTimerRef.current);
-        }
-        loadingFinishTimerRef.current = window.setTimeout(() => {
-          loadingFinishTimerRef.current = null;
-          setLoadingOverlay((prev) => ({ ...prev, visible: false }));
-        }, 280);
+        setLoadingOverlay((prev) => ({
+          ...prev,
+          progress: 100,
+          phase: payload.phase,
+          visible: false,
+        }));
       }
     });
 
@@ -229,10 +187,6 @@ export default function App() {
       unsubEventWarning();
       unsubTogglePause();
       unsubLoadProgress();
-      if (loadingFinishTimerRef.current !== null) {
-        window.clearTimeout(loadingFinishTimerRef.current);
-        loadingFinishTimerRef.current = null;
-      }
       if (loadingFailsafeTimerRef.current !== null) {
         window.clearTimeout(loadingFailsafeTimerRef.current);
         loadingFailsafeTimerRef.current = null;
@@ -243,52 +197,50 @@ export default function App() {
   // Smooth initial app boot entrance until fonts & shell hydrate
   useEffect(() => {
     let cancelled = false;
-    let finalizeDelayTimer: number | null = null;
     let fontsDelayTimer: number | null = null;
 
     const t1 = window.setTimeout(() => {
       if (!cancelled) {
         setLoadingOverlay((prev) =>
           prev.mode === 'boot' && prev.visible
-            ? { ...prev, progress: 64, phase: 'Forging Obsidian Sanctuary…' }
+            ? { ...prev, progress: 42, phase: 'Forging Obsidian Sanctuary…' }
             : prev
         );
       }
-    }, 180);
+    }, 850);
+
+    const t2 = window.setTimeout(() => {
+      if (!cancelled) {
+        setLoadingOverlay((prev) =>
+          prev.mode === 'boot' && prev.visible
+            ? { ...prev, progress: 76, phase: 'Awakening the Dark Warden…' }
+            : prev
+        );
+      }
+    }, 1850);
 
     const finalizeBoot = () => {
       if (cancelled) return;
       setLoadingOverlay((prev) =>
-        prev.mode === 'boot' && prev.visible
-          ? { ...prev, progress: 100, phase: 'Lantern Lit…' }
+        prev.mode === 'boot'
+          ? { ...prev, progress: 100, phase: 'Lantern Lit…', visible: false }
           : prev
       );
-      if (finalizeDelayTimer !== null) {
-        window.clearTimeout(finalizeDelayTimer);
-      }
-      finalizeDelayTimer = window.setTimeout(() => {
-        finalizeDelayTimer = null;
-        if (!cancelled) {
-          setLoadingOverlay((prev) =>
-            prev.mode === 'boot' ? { ...prev, visible: false } : prev
-          );
-        }
-      }, 320);
     };
 
-    const maxWait = window.setTimeout(finalizeBoot, 950);
+    const maxWait = window.setTimeout(finalizeBoot, 2600);
     const fontsReady = document.fonts?.ready ?? Promise.resolve();
     fontsReady.then(() => {
       if (!cancelled) {
-        fontsDelayTimer = window.setTimeout(finalizeBoot, 460);
+        fontsDelayTimer = window.setTimeout(finalizeBoot, 2200);
       }
     });
 
     return () => {
       cancelled = true;
       window.clearTimeout(t1);
+      window.clearTimeout(t2);
       window.clearTimeout(maxWait);
-      if (finalizeDelayTimer !== null) window.clearTimeout(finalizeDelayTimer);
       if (fontsDelayTimer !== null) window.clearTimeout(fontsDelayTimer);
     };
   }, []);
@@ -435,10 +387,6 @@ export default function App() {
     setShowSettings(false);
     setShowHowToPlay(false);
 
-    if (loadingFinishTimerRef.current !== null) {
-      window.clearTimeout(loadingFinishTimerRef.current);
-      loadingFinishTimerRef.current = null;
-    }
     if (loadingFailsafeTimerRef.current !== null) {
       window.clearTimeout(loadingFailsafeTimerRef.current);
       loadingFailsafeTimerRef.current = null;
@@ -454,7 +402,11 @@ export default function App() {
     loadingFailsafeTimerRef.current = window.setTimeout(() => {
       loadingFailsafeTimerRef.current = null;
       setLoadingOverlay((prev) => ({ ...prev, progress: 100, visible: false }));
-    }, 6000);
+      const scene = gameManager.activeScene as MainScene | null;
+      if (scene && scene.sys?.isActive()) {
+        scene.setWaitingForLoading(false);
+      }
+    }, 8000);
 
     gameManager.setGameState('PLAYING');
     setGameState('PLAYING');
@@ -473,8 +425,6 @@ export default function App() {
     setDashCharges(1);
     setMaxDashCharges(1);
     setDashCooldownProgress(1);
-    lastDpsSampleSecRef.current = 0;
-    setDpsHistory([{ timeSec: 0, dps: 0 }]);
     const savedRelicIds = saveDataStore.read().equippedRelicIds;
     setEquippedRelicIds(savedRelicIds);
     setActiveRelicSynergies(getActiveRelicSynergies(savedRelicIds).map((s) => s.id));
@@ -508,21 +458,6 @@ export default function App() {
     setSfxVolume(val);
   };
 
-  const handleBrightnessChange = (val: number) => {
-    gameManager.setBrightness(val);
-    setBrightness(val);
-  };
-
-  const handleToggleHaptics = () => {
-    const next = haptics.toggle();
-    setHapticsEnabled(next);
-  };
-
-  const handleGraphicsConfigChange = (partial: Partial<GraphicsConfig>) => {
-    const next = gameManager.updateGraphicsConfig(partial);
-    setGraphicsConfig(next);
-  };
-
   const handleOpenSettings = () => {
     soundManager.playUiClick();
     if (gameState === 'PLAYING') {
@@ -537,11 +472,6 @@ export default function App() {
     });
     setShowHowToPlay(false);
     setIsFirstLaunchGuide(false);
-  };
-
-  const handleOpenHowToPlayFromSettings = () => {
-    setIsFirstLaunchGuide(false);
-    setShowHowToPlay(true);
   };
 
   // Toggle pause: handles physics, timers, tweens, anims, DarknessScene, audio without conflicting with level up
@@ -578,10 +508,6 @@ export default function App() {
 
   const navigateToLobbyPage = (tab: LobbyTabId = 'home', shopSubTab: ShopSubTab = 'market') => {
     soundManager.playUiClick();
-    if (loadingFinishTimerRef.current !== null) {
-      window.clearTimeout(loadingFinishTimerRef.current);
-      loadingFinishTimerRef.current = null;
-    }
     if (loadingFailsafeTimerRef.current !== null) {
       window.clearTimeout(loadingFailsafeTimerRef.current);
       loadingFailsafeTimerRef.current = null;
@@ -704,27 +630,18 @@ export default function App() {
         />
       )}
 
-      {/* Modal: Settings (hidden cleanly while HowToPlay sub-modal is open so close buttons never stack) */}
+      {/* Modal: Settings (Audio only) */}
       <SettingsModal
         isOpen={showSettings && !showHowToPlay}
         onClose={() => setShowSettings(false)}
         masterVolume={masterVolume}
         musicVolume={musicVolume}
         sfxVolume={sfxVolume}
-        brightness={brightness}
         isMuted={isMuted}
-        hapticsEnabled={hapticsEnabled}
-        graphicsConfig={graphicsConfig}
-        debugStats={debugStats}
-        dpsHistory={dpsHistory}
         onMasterVolumeChange={handleMasterVolumeChange}
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
-        onBrightnessChange={handleBrightnessChange}
         onToggleMute={handleToggleMute}
-        onToggleHaptics={handleToggleHaptics}
-        onGraphicsConfigChange={handleGraphicsConfigChange}
-        onOpenHowToPlay={handleOpenHowToPlayFromSettings}
       />
 
       {/* Modal: How to Play (First Launch & Settings Guide) */}
@@ -767,6 +684,12 @@ export default function App() {
         progress={loadingOverlay.progress}
         phase={loadingOverlay.phase}
         mode={loadingOverlay.mode}
+        onTransitionEnd={() => {
+          const scene = gameManager.activeScene as MainScene | null;
+          if (scene && scene.sys?.isActive()) {
+            scene.setWaitingForLoading(false);
+          }
+        }}
       />
     </main>
   );

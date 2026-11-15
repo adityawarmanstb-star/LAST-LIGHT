@@ -1,0 +1,152 @@
+{
+ "frames": {
+  "frame_common": {
+   "frame": {
+    "x": 0,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "sourceSize": {
+    "w": 256,
+    "h": 256
+   }
+  },
+  "frame_rare": {
+   "frame": {
+    "x": 256,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "sourceSize": {
+    "w": 256,
+    "h": 256
+   }
+  },
+  "frame_epic": {
+   "frame": {
+    "x": 512,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "sourceSize": {
+    "w": 256,
+    "h": 256
+   }
+  },
+  "frame_legendary": {
+   "frame": {
+    "x": 768,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 256,
+    "h": 256
+   },
+   "sourceSize": {
+    "w": 256,
+    "h": 256
+   }
+  },
+  "tutorial_drag": {
+   "frame": {
+    "x": 0,
+    "y": 256,
+    "w": 288,
+    "h": 288
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 288,
+    "h": 288
+   },
+   "sourceSize": {
+    "w": 288,
+    "h": 288
+   }
+  },
+  "tutorial_dash": {
+   "frame": {
+    "x": 288,
+    "y": 256,
+    "w": 288,
+    "h": 288
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 288,
+    "h": 288
+   },
+   "sourceSize": {
+    "w": 288,
+    "h": 288
+   }
+  },
+  "tutorial_stand_still": {
+   "frame": {
+    "x": 576,
+    "y": 256,
+    "w": 288,
+    "h": 288
+   },
+   "rotated": false,
+   "trimmed": false,
+   "spriteSourceSize": {
+    "x": 0,
+    "y": 0,
+    "w": 288,
+    "h": 288
+   },
+   "sourceSize": {
+    "w": 288,
+    "h": 288
+   }
+  }
+ },
+ "meta": {
+  "image": "ui_extra_atlas.png",
+  "size": {
+   "w": 1152,
+   "h": 544
+  },
+  "scale": "1"
+ }
+}

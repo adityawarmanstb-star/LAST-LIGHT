@@ -1,18 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle,
-  CircleDot,
-  Coins,
-  Disc,
-  Flame,
-  Gem,
-  Heart,
-  Skull,
-  Sparkles,
-  Wind,
-  Zap,
-} from 'lucide-react';
-import {
   ActiveDynamicChallenge,
   BossInfo,
   EventWarningInfo,
@@ -21,8 +8,10 @@ import {
   RelicSetId,
   WeaponState,
 } from '../game/types';
-import { getRelicById } from '../game/relics';
+import { IconRarity } from '../game/iconRegistry';
+import { RELIC_SETS, getRelicById } from '../game/relics';
 import { VirtualJoystick } from './VirtualJoystick';
+import { Icon } from './Icon';
 import { IronCard } from './IronCard';
 import { BloodHpBar } from './BloodHpBar';
 import { BloodSplatterHit, BloodSplatterOverlay } from './BloodSplatterOverlay';
@@ -64,29 +53,12 @@ interface HUDProps {
   onTriggerDash: () => void;
 }
 
-export const getWeaponIcon = (
-  weaponId: WeaponState['id'],
-  sizeClass = 'w-4 h-4'
-) => {
-  switch (weaponId) {
-    case 'bolt':
-    case 'light_bolt':
-      return <Zap className={`${sizeClass} text-[#5de4ff] shrink-0`} />;
-    case 'blades':
-    case 'orbit_blade':
-      return <Disc className={`${sizeClass} text-[#f2a93b] shrink-0`} />;
-    case 'ring':
-    case 'shadow_wave':
-      return <CircleDot className={`${sizeClass} text-[#e5303a] shrink-0`} />;
-    case 'spark':
-      return <Sparkles className={`${sizeClass} text-[#5de4ff] shrink-0`} />;
-    case 'shotgun':
-    case 'ember_aura':
-      return <Flame className={`${sizeClass} text-[#f2a93b] shrink-0`} />;
-    default:
-      return <Sparkles className={`${sizeClass} text-[#d8c9a8] shrink-0`} />;
-  }
-};
+export function getWeaponFrameRarity(weapon: WeaponState): IconRarity {
+  if (weapon.level >= weapon.maxLevel) return 'legendary';
+  if (weapon.level >= 4) return 'epic';
+  if (weapon.level >= 2) return 'rare';
+  return 'common';
+}
 
 const DASH_RING_RADIUS = 29;
 const DASH_RING_CIRCUMFERENCE = 2 * Math.PI * DASH_RING_RADIUS;
@@ -323,7 +295,7 @@ const HUDComponent: React.FC<HUDProps> = ({
             >
               <div className="flex items-center justify-between gap-1 text-[10.5px] leading-none">
                 <div className="flex items-center gap-1 min-w-0">
-                  <Heart className="w-2.5 h-2.5 text-[#e5303a] fill-[#b3121a] shrink-0" />
+                  <Icon id="ui_heart" size={12} />
                   <span className="font-display font-bold text-[#ede0c4] tabular-nums whitespace-nowrap">
                     {Math.round(hp)}
                     <span className="text-[#9c8e72] font-semibold">/{maxHp}</span>
@@ -376,7 +348,7 @@ const HUDComponent: React.FC<HUDProps> = ({
               <span className="w-px h-3 bg-[#4a505c]/75 shrink-0" aria-hidden="true" />
 
               <div className="flex items-center gap-1 whitespace-nowrap" title="Kills">
-                <Skull className="w-3 h-3 text-[#e5303a] shrink-0" />
+                <Icon id="ui_skull" size={14} />
                 <span className="font-display text-[11px] sm:text-xs font-bold text-[#ede0c4] tabular-nums">
                   {kills}
                 </span>
@@ -391,7 +363,7 @@ const HUDComponent: React.FC<HUDProps> = ({
                 }`}
                 title="Coins"
               >
-                <Coins className="w-3 h-3 text-[#f2c464] shrink-0" />
+                <Icon id="soul_coin" size={14} />
                 <span className="font-display text-[11px] sm:text-xs font-bold text-[#f2c464] tabular-nums">
                   {coins}
                 </span>
@@ -575,7 +547,7 @@ const HUDComponent: React.FC<HUDProps> = ({
             highlight="blood"
             contentClassName="px-3.5 py-2 flex items-center gap-2.5 justify-center text-center"
           >
-            <AlertTriangle className="w-4 h-4 text-[#e5303a] shrink-0" />
+            <Icon id="ui_warning" size={18} />
             <div className="flex flex-col">
               <span className="font-display text-xs font-bold tracking-wider text-[#e5303a]">
                 {eventWarning.title}
@@ -602,37 +574,47 @@ const HUDComponent: React.FC<HUDProps> = ({
         {equippedRelics.map((relic) => {
           const hasSynergy = activeSynergySet.has(relic.setId);
           return (
-            <IronCard
+            <div
               key={relic.id}
-              highlight={hasSynergy ? 'gold' : 'none'}
-              className="w-[36px] h-[36px] shrink-0"
-              contentClassName="w-full h-full p-0 flex items-center justify-center relative"
+              title={`${relic.name} — ${relic.effectSummary}`}
+              className="relative w-[36px] h-[36px] shrink-0 flex items-center justify-center"
             >
-              <Gem
-                className="w-4 h-4 shrink-0"
-                style={{ color: relic.accentColor }}
-              />
+              <Icon id={relic.name} rarity={relic.rarity} size={36} />
               <span
-                className="absolute bottom-[1px] right-[2px] font-display font-extrabold text-[8px] leading-none px-[2px] rounded-[2px] bg-[#090b0f]/90"
+                className="absolute bottom-[1px] right-[2px] z-20 font-display font-extrabold text-[8px] leading-none px-[2px] rounded-[2px] bg-[#090b0f]/90"
                 style={{ color: hasSynergy ? '#f2c464' : '#9c8e72' }}
               >
                 R
               </span>
-            </IronCard>
+            </div>
+          );
+        })}
+
+        {activeRelicSynergies.map((setId) => {
+          const synergy = RELIC_SETS[setId];
+          if (!synergy) return null;
+          return (
+            <div
+              key={`synergy-${setId}`}
+              title={`${synergy.synergyTitle} — ${synergy.bonusSummary}`}
+              className="relative w-[32px] h-[32px] shrink-0 rounded-[6px] border flex items-center justify-center bg-[#12100d]/90"
+              style={{ borderColor: synergy.accentColor }}
+            >
+              <Icon id={synergy.synergyTitle} size={24} alt={synergy.synergyTitle} />
+            </div>
           );
         })}
 
         {unlockedWeapons.map((w) => (
-          <IronCard
+          <div
             key={w.id}
-            className="w-[36px] h-[36px] shrink-0"
-            contentClassName="w-full h-full p-0 flex items-center justify-center relative"
+            className="relative w-[36px] h-[36px] shrink-0 flex items-center justify-center"
           >
-            {getWeaponIcon(w.id, 'w-4 h-4')}
-            <span className="absolute bottom-[1px] right-[2px] font-display font-extrabold text-[8.5px] leading-none text-[#f2c464] bg-[#090b0f]/90 px-[2px] rounded-[2px] tabular-nums">
+            <Icon id={w.name} rarity={getWeaponFrameRarity(w)} size={36} />
+            <span className="absolute bottom-[1px] right-[2px] z-20 font-display font-extrabold text-[8.5px] leading-none text-[#f2c464] bg-[#090b0f]/90 px-[2px] rounded-[2px] tabular-nums">
               Lv.{w.level}
             </span>
-          </IronCard>
+          </div>
         ))}
       </div>
 
@@ -695,13 +677,9 @@ const HUDComponent: React.FC<HUDProps> = ({
           />
         </svg>
 
-        <Wind
-          className={`relative z-10 w-5 h-5 transition-colors ${
-            dashReady
-              ? 'text-[#5de4ff] drop-shadow-[0_0_8px_rgba(34,211,238,0.65)]'
-              : 'text-[#4d5663]'
-          }`}
-        />
+        <span className="relative z-10 flex items-center justify-center">
+          <Icon id="ui_dash" size={24} muted={!dashReady} />
+        </span>
         <span
           className={`relative z-10 mt-0.5 font-display text-[10px] font-black tracking-[0.1em] uppercase leading-none ${
             dashReady ? 'text-[#ede0c4]' : 'text-[#6e747e]'

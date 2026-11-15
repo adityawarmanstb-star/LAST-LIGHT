@@ -1,7 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Flame, Gem, Heart, Lock, Magnet, Sun, Sword, Wind, Zap } from 'lucide-react';
 import {
-  RELIC_RARITY_META,
   getActiveRelicSynergies,
   getEquippedRelicIds,
   getEquippedRelics,
@@ -14,35 +12,12 @@ import { soundManager } from '../../game/audio';
 import { RelicDefinition, RelicId } from '../../game/types';
 import { UI_ASSETS, useChromaKeyImage } from '../../hooks/useChromaKeyImage';
 import { haptics } from '../../mobile/haptics';
+import { Icon } from '../Icon';
 import { IronCard } from '../IronCard';
-import { PlayTriangle3DIcon, SkullTrimEmblem } from '../LobbyIcons';
 
 interface HomePageProps {
   onStartGame: () => void;
   onOpenRelicsShop: () => void;
-}
-
-function renderRelicIcon(
-  icon: RelicDefinition['icon'] | null | undefined,
-  className: string,
-  color: string
-) {
-  switch (icon) {
-    case 'magnet':
-      return <Magnet className={className} style={{ color }} />;
-    case 'wind':
-      return <Wind className={className} style={{ color }} />;
-    case 'heart':
-      return <Heart className={className} style={{ color }} />;
-    case 'sun':
-      return <Sun className={className} style={{ color }} />;
-    case 'zap':
-      return <Zap className={className} style={{ color }} />;
-    case 'sword':
-      return <Sword className={className} style={{ color }} />;
-    default:
-      return <Gem className={className} style={{ color }} />;
-  }
 }
 
 export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsShop }) => {
@@ -189,7 +164,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
             />
           ) : (
             <div className="relative z-10 w-20 h-20 rounded-full bg-[#13161c] border border-[#4f5866] flex items-center justify-center">
-              <Flame className="w-8 h-8 text-[#b3121a]" />
+              <Icon id="ui_skull" size={40} />
             </div>
           )}
         </div>
@@ -210,14 +185,14 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
           <span aria-hidden="true" className="absolute bottom-1 left-1 w-1 h-1 rounded-full bg-[#525a66]/80" />
           <span aria-hidden="true" className="absolute bottom-1 right-1 w-1 h-1 rounded-full bg-[#525a66]/80" />
 
-          <SkullTrimEmblem className="w-4 h-4 shrink-0" />
+          <Icon id="ui_skull" size={16} />
           <span
             className="font-display font-bold text-xs sm:text-[13px] tracking-[0.2em] text-[#ede0c4] whitespace-nowrap"
             style={{ textShadow: '0 1px 2px #000, 0 0 10px rgba(93, 228, 255, 0.35)' }}
           >
             DARK WARDEN
           </span>
-          <SkullTrimEmblem className="w-4 h-4 shrink-0" />
+          <Icon id="ui_skull" size={16} />
         </div>
       </div>
 
@@ -238,43 +213,50 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
             <span className="font-display font-bold text-xs tracking-[0.1em] text-[#efe3c8]">
               EQUIPPED RELICS ({equippedRelics.length}/{maxRelicSlots})
             </span>
-            <span className="font-body text-xs font-medium text-[#b9aa8e] leading-snug">
-              {activeSynergies.length > 0
-                ? activeSynergies.map((s) => s.synergyTitle).join(' · ')
-                : equippedRelics.length > 0
+            {activeSynergies.length > 0 ? (
+              <span className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 mt-0.5">
+                {activeSynergies.map((s) => (
+                  <span
+                    key={s.id}
+                    title={`${s.synergyTitle}: ${s.bonusSummary}`}
+                    className="inline-flex items-center gap-1 font-body text-xs font-semibold"
+                    style={{ color: s.accentColor }}
+                  >
+                    <Icon id={s.synergyTitle} size={16} alt={s.synergyTitle} />
+                    <span>{s.synergyTitle}</span>
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className="font-body text-xs font-medium text-[#b9aa8e] leading-snug">
+                {equippedRelics.length > 0
                   ? equippedRelics.map((r) => r.name).join(' · ')
                   : 'Forge & equip bloodbound relics'}
-            </span>
+              </span>
+            )}
           </div>
 
-          {/* Beveled Dark-Iron Relic Slot Frames */}
+          {/* Rarity-Framed Relic Slots */}
           <div className="flex items-center gap-1.5 shrink-0">
             {Array.from({ length: maxRelicSlots }).map((_, slotIdx) => {
               const slotRelic = equippedRelics[slotIdx] ?? null;
               if (slotRelic) {
-                const rMeta = RELIC_RARITY_META[slotRelic.rarity];
                 return (
                   <div
                     key={slotRelic.id}
-                    className={`w-9 h-9 rounded-[6px] border-2 flex items-center justify-center shrink-0 ${
+                    title={`${slotRelic.name} — ${slotRelic.effectSummary}`}
+                    className={`w-10 h-10 flex items-center justify-center shrink-0 ${
                       equipPopSeq > 0 ? 'relic-equip-pop' : ''
                     }`}
-                    style={{
-                      background:
-                        'linear-gradient(180deg, #272b34 0%, #14171c 55%, #090a0d 100%)',
-                      borderColor: rMeta.borderColor,
-                      boxShadow:
-                        'inset 0 1px 0 rgba(210, 220, 235, 0.28), inset 0 -2px 3px rgba(0, 0, 0, 0.92), 0 3px 8px rgba(0, 0, 0, 0.85)',
-                    }}
                   >
-                    {renderRelicIcon(slotRelic.icon, 'w-4 h-4', rMeta.textColor)}
+                    <Icon id={slotRelic.name} rarity={slotRelic.rarity} size={40} />
                   </div>
                 );
               }
               return (
                 <div
                   key={`relic-slot-${slotIdx}`}
-                  className="w-9 h-9 rounded-[6px] border-2 border-[#4d5462] flex items-center justify-center font-mono-numbers text-xs font-bold text-[#958972] shrink-0"
+                  className="w-10 h-10 rounded-[6px] border-2 border-[#4d5462] flex items-center justify-center font-mono-numbers text-xs font-bold text-[#958972] shrink-0"
                   style={{
                     background:
                       'linear-gradient(180deg, #21252d 0%, #111318 55%, #08090c 100%)',
@@ -291,7 +273,10 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
 
         <div className="w-full flex items-center justify-between gap-2 px-1">
           <div className="flex items-center gap-1.5">
-            <Lock className="w-3.5 h-3.5 text-[#d49635] shrink-0" aria-hidden="true" />
+            <Icon
+              id={canUnlockNewSlot ? 'ui_lock_open' : 'ui_lock_closed'}
+              size={16}
+            />
             <span className="font-body text-xs font-semibold text-[#cbbba0]">
               {nextSlotInfo
                 ? canUnlockNewSlot
@@ -309,7 +294,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
               haptics.tap('light');
               onOpenRelicsShop();
             }}
-            className="relative min-h-[36px] px-3.5 py-1 rounded-[7px] border border-[#c89643] font-display font-bold text-[11px] tracking-[0.14em] text-[#fae6b6] whitespace-nowrap transition-transform duration-150 active:scale-95 cursor-pointer"
+            className="relative min-h-[56px] min-w-[96px] px-4 py-1.5 rounded-[7px] border border-[#c89643] font-display font-bold text-[11px] tracking-[0.14em] text-[#fae6b6] whitespace-nowrap transition-transform duration-150 active:scale-95 cursor-pointer"
             style={{
               background:
                 'linear-gradient(180deg, #75151e 0%, #460a10 52%, #240407 100%)',
@@ -331,9 +316,6 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
             haptics.tap('heavy');
             onStartGame();
           }}
-          style={{
-            filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
-          }}
           className="group relative w-[85%] max-w-[340px] h-[76px] flex items-center justify-center gap-2.5 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
         >
           {playBtnSrc ? (
@@ -342,16 +324,24 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
               alt=""
               aria-hidden="true"
               referrerPolicy="no-referrer"
+              style={{
+                filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
+              }}
               className="pointer-events-none absolute inset-0 w-full h-full object-fill select-none"
             />
           ) : playBtnError ? (
             <div
               aria-hidden="true"
+              style={{
+                filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
+              }}
               className="pointer-events-none absolute inset-0 rounded-[10px] rusted-play-bar border border-[#942027]"
             />
           ) : null}
 
-          <PlayTriangle3DIcon className="relative z-10 w-6 h-6 drop-shadow-[0_0_10px_rgba(242,169,59,0.7)] transition-transform duration-150 group-hover:scale-110" />
+          <span className="relative z-10 inline-flex items-center justify-center transition-transform duration-150 group-hover:scale-110">
+            <Icon id="ui_play" size={24} />
+          </span>
           <span
             className="relative z-10 font-display font-black text-[28px] tracking-[0.22em] whitespace-nowrap"
             style={{

@@ -1,40 +1,29 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  CheckCircle2,
-  Clock,
-  Coins,
-  Crown,
-  Flame,
-  KeyRound,
-  ScrollText,
-  Skull,
-  Sparkles,
-} from 'lucide-react';
 import { dailyMissions } from '../game/dailyMissions';
 import { soundManager } from '../game/audio';
 import { DailyMission } from '../game/types';
 import { haptics } from '../mobile/haptics';
 import { ForgedIronFrame } from './ForgedIronFrame';
+import { Icon } from './Icon';
 
 const TOAST_DURATION_MS = 3600;
 
 function renderMissionIcon(mission: DailyMission) {
-  const cls = 'w-5 h-5';
   switch (mission.icon) {
     case 'skull':
-      return <Skull className={`${cls} text-[#e5303a]`} />;
+      return <Icon id="ui_skull" size={24} />;
     case 'clock':
-      return <Clock className={`${cls} text-[#5de4ff]`} />;
+      return <Icon id="ui_clock" size={24} />;
     case 'coins':
-      return <Coins className={`${cls} text-[#f2a93b]`} />;
+      return <Icon id="soul_coin" size={24} />;
     case 'crown':
-      return <Crown className={`${cls} text-[#f2a93b]`} />;
+      return <Icon id="ui_crown" size={24} />;
     case 'sparkles':
-      return <Sparkles className={`${cls} text-[#5de4ff]`} />;
+      return <Icon id="ui_sparkles" size={24} />;
     case 'flame':
-      return <Flame className={`${cls} text-[#e5303a]`} />;
+      return <Icon id="ui_day_flame" size={24} />;
     default:
-      return <ScrollText className={`${cls} text-[#f2a93b]`} />;
+      return <Icon id="ui_scroll" size={24} />;
   }
 }
 
@@ -113,7 +102,7 @@ export const MissionCompleteToast: React.FC = () => {
 
               <div className="flex flex-col min-w-0">
                 <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-[#f2a93b] shrink-0" />
+                  <Icon id="ui_check" size={16} />
                   <span className="font-display text-xs font-bold tracking-[0.14em] text-[#f2a93b] uppercase">
                     Mission Complete
                   </span>
@@ -130,13 +119,13 @@ export const MissionCompleteToast: React.FC = () => {
             {/* Right: Reward Coin & Seal Banner Badge */}
             <div className="shrink-0 flex flex-col items-end justify-center px-2.5 py-1.5 rounded-[8px] bg-[#121417]/90 border border-[#f2a93b]/55">
               <div className="flex items-center gap-1">
-                <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
+                <Icon id="soul_coin" size={16} />
                 <span className="font-mono-numbers text-xs font-bold text-[#f2a93b]">
                   +{activeMission.rewardCoins}
                 </span>
               </div>
               <div className="flex items-center gap-1 mt-0.5">
-                <KeyRound className="w-3 h-3 text-[#c084fc]" />
+                <Icon id="crimson_gem" size={14} />
                 <span className="font-mono-numbers text-[10px] font-bold text-[#d8b4fe]">
                   +{activeMission.rewardSeals || 1} Seal
                 </span>

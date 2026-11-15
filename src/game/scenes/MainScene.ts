@@ -660,6 +660,7 @@ export class MainScene extends Phaser.Scene {
 
   // State flags & 90Hz/4K Performance Engine hooks
   private isGamePaused: boolean = false;
+  private isWaitingForLoading: boolean = false;
   private hitstopTimer: number = 0;
   private isHitstopPausedPhysics: boolean = false;
   private unsubCritImpact: (() => void) | null = null;
@@ -679,6 +680,7 @@ export class MainScene extends Phaser.Scene {
   init() {
     this.isDead = false;
     this.isGamePaused = false;
+    this.isWaitingForLoading = false;
     this.simTimeMs = 0;
     this.nextSpawnTime = 1000;
     this.hitstopTimer = 0;
@@ -1171,7 +1173,7 @@ export class MainScene extends Phaser.Scene {
     this.cameraController = new CameraController(this.cameras.main);
     this.cameraController.followTarget(this.player, false, 0.15, 0.15);
 
-    // Trigger muzzle effect and camera shake on attack frame 2
+    // Trigger muzzle effect on attack frame 2
     this.player.on(
       Phaser.Animations.Events.ANIMATION_UPDATE,
       (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
@@ -1310,6 +1312,9 @@ export class MainScene extends Phaser.Scene {
     this.scene.bringToTop('DarknessScene');
     this.scene.bringToTop('UIScene');
 
+    // Pause simulation while the 4s arena loading screen completes its transition
+    this.setWaitingForLoading(true);
+
     // Notify React loading screen that the arena, lighting, and shadow casters are ready
     gameManager.emitLoadProgress({
       active: true,
@@ -1318,16 +1323,10 @@ export class MainScene extends Phaser.Scene {
       ready: true,
     });
 
-    // Subscribe to GameManager critical hit impact bus (screen-shake + hitstop + color shockwave)
+    // Subscribe to GameManager critical hit impact bus (hitstop + color shockwave)
     this.unsubCritImpact?.();
     this.unsubCritImpact = gameManager.onCritImpact((impact) => {
       if (this.isDead || this.isGamePaused || !this.scene?.isActive()) return;
-
-      this.cameraController.triggerShake(
-        impact.shakeDurationMs,
-        impact.shakeIntensity,
-        impact.isEliteOrBoss
-      );
 
       this.hitstopTimer = Math.max(this.hitstopTimer, impact.hitstopMs);
       if (!this.isHitstopPausedPhysics) {
@@ -1993,9 +1992,6 @@ export class MainScene extends Phaser.Scene {
     if (this.muzzleFiredThisAttack || this.isDead || !this.sys?.isActive() || !this.player?.active) return;
     this.muzzleFiredThisAttack = true;
 
-    // Small camera shake on attack frame 2
-    this.cameraController.triggerShake(90, 0.003);
-
     // Muzzle flash particle effect at the lantern / hand position
     const offsetX = this.player.flipX ? -28 : 28;
     const mx = this.player.x + offsetX;
@@ -2026,7 +2022,14 @@ export class MainScene extends Phaser.Scene {
   // Main Update Loop
   // -------------------------------------------------------------
   update(time: number, rawDelta: number) {
-    if (this.isDead || this.isGamePaused || !this.sys?.isActive() || !this.player?.active) return;
+    if (
+      this.isDead ||
+      this.isGamePaused ||
+      this.isWaitingForLoading ||
+      !this.sys?.isActive() ||
+      !this.player?.active
+    )
+      return;
 
     try {
       // 90Hz/120Hz Dynamic Resolution Scaling & Quality Tier adaptation
@@ -5249,7 +5252,7 @@ export class MainScene extends Phaser.Scene {
     this.floatingTexts = [];
     for (let i = 0; i < this.MAX_FLOATING_TEXTS; i++) {
       const text = this.add.text(0, 0, '', {
-        fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+        fontFamily: 'Almendra, Spectral, Georgia, serif',
         fontStyle: '700',
         fontSize: '16px',
         color: '#ffffff',
@@ -5447,6 +5450,18 @@ export class MainScene extends Phaser.Scene {
       this.darknessFallsTimerMs > 0 ? 1 - LIGHT.progression.darknessFalls.radiusPenalty : 1;
     const relicMult = this.playerStats?.lightRadiusMultiplier ?? 1;
     return lanternMult * shardMult * darknessFallsMult * relicMult;
+  }
+
+  public setWaitingForLoading(waiting: boolean) {
+    if (!this.sys?.isActive()) return;
+    this.isWaitingForLoading = waiting;
+    if (waiting) {
+      if (this.physics?.world) this.physics.pause();
+      if (this.time) this.time.paused = true;
+    } else if (!this.isGamePaused && !this.isDead) {
+      if (this.physics?.world) this.physics.resume();
+      if (this.time) this.time.paused = false;
+    }
   }
 
   // Comprehensive pause / resume (physics, timers, tweens, animations, darkness, audio)

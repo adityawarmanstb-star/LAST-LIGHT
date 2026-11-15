@@ -1,19 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Check,
-  Clock,
-  Coins,
-  Crown,
-  Flame,
-  Lock,
-  Skull,
-  Sparkles,
-  Swords,
-} from 'lucide-react';
 import { ACHIEVEMENTS, achievements } from '../../game/achievements';
 import { soundManager } from '../../game/audio';
 import { AchievementDefinition, AchievementsProgressState } from '../../game/types';
 import { haptics } from '../../mobile/haptics';
+import { Icon } from '../Icon';
 import { IronCard } from '../IronCard';
 
 type AchievementFilter = 'all' | 'ready' | 'locked';
@@ -34,42 +24,21 @@ function formatStatProgress(ach: AchievementDefinition, rawValue: number): strin
 }
 
 function renderAchievementIcon(icon: AchievementDefinition['icon'], unlocked: boolean) {
-  const cls = 'w-5 h-5';
-  const mutedCls = `${cls} text-[#6b7280]`;
-  if (!unlocked) {
-    switch (icon) {
-      case 'clock':
-        return <Clock className={mutedCls} />;
-      case 'crown':
-        return <Crown className={mutedCls} />;
-      case 'swords':
-        return <Swords className={mutedCls} />;
-      case 'coins':
-        return <Coins className={mutedCls} />;
-      case 'flame':
-        return <Flame className={mutedCls} />;
-      case 'sparkles':
-        return <Sparkles className={mutedCls} />;
-      default:
-        return <Skull className={mutedCls} />;
-    }
-  }
-
   switch (icon) {
     case 'clock':
-      return <Clock className={`${cls} text-[#5de4ff]`} />;
+      return <Icon id="ui_clock" size={24} muted={!unlocked} />;
     case 'crown':
-      return <Crown className={`${cls} text-[#f2a93b]`} />;
+      return <Icon id="ui_crown" size={24} muted={!unlocked} />;
     case 'swords':
-      return <Swords className={`${cls} text-[#e5303a]`} />;
+      return <Icon id="ui_swords" size={24} muted={!unlocked} />;
     case 'coins':
-      return <Coins className={`${cls} text-[#f2a93b]`} />;
+      return <Icon id="soul_coin" size={24} muted={!unlocked} />;
     case 'flame':
-      return <Flame className={`${cls} text-[#e5303a]`} />;
+      return <Icon id="ui_flame" size={24} muted={!unlocked} />;
     case 'sparkles':
-      return <Sparkles className={`${cls} text-[#5de4ff]`} />;
+      return <Icon id="ui_sparkles" size={24} muted={!unlocked} />;
     default:
-      return <Skull className={`${cls} text-[#e5303a]`} />;
+      return <Icon id="ui_skull" size={24} muted={!unlocked} />;
   }
 }
 
@@ -138,7 +107,7 @@ export const AchievementsPage: React.FC = () => {
           <button
             type="button"
             onClick={handleClaimAll}
-            className="min-h-[40px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-[11px] tracking-wider text-[#f2a93b] cursor-pointer active:scale-95 shrink-0"
+            className="min-h-[56px] px-3.5 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-[11px] tracking-wider text-[#f2a93b] cursor-pointer active:scale-95 shrink-0"
           >
             CLAIM ALL (+{unclaimedTotal})
           </button>
@@ -192,7 +161,7 @@ export const AchievementsPage: React.FC = () => {
                   haptics.tap('light');
                   setFilter(tab);
                 }}
-                className={`min-h-[36px] px-2 rounded-[6px] border font-display font-bold text-[11px] cursor-pointer transition-colors ${
+                className={`min-h-[56px] px-2 rounded-[6px] border font-display font-bold text-[11px] cursor-pointer transition-colors ${
                   active
                     ? 'bg-[#360f14] border-[#b3121a] text-[#f2dfba]'
                     : 'bg-[#121418] border-[#3a3f47] text-[#9c8e72]'
@@ -239,7 +208,7 @@ export const AchievementsPage: React.FC = () => {
                       {ach.title}
                     </h2>
                     <span className="inline-flex items-center gap-1 font-mono-numbers text-xs font-bold text-[#f2a93b]">
-                      <Coins className="w-3 h-3" />+{ach.rewardCoins}
+                      <Icon id="soul_coin" size={14} />+{ach.rewardCoins}
                     </span>
                   </div>
 
@@ -268,21 +237,21 @@ export const AchievementsPage: React.FC = () => {
 
               <div className="shrink-0">
                 {isClaimed ? (
-                  <div className="min-h-[44px] px-2.5 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
-                    <Check className="w-4 h-4" />
+                  <div className="min-h-[56px] px-2.5 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
+                    <Icon id="ui_check" size={16} />
                     <span>CLAIMED</span>
                   </div>
                 ) : canClaim ? (
                   <button
                     type="button"
                     onClick={() => handleClaim(ach.id)}
-                    className="min-h-[46px] min-w-[82px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
+                    className="min-h-[56px] min-w-[82px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
                   >
                     CLAIM
                   </button>
                 ) : (
-                  <div className="min-h-[44px] px-2 flex items-center gap-1 font-display font-bold text-[11px] text-[#7c7361]">
-                    <Lock className="w-3.5 h-3.5" />
+                  <div className="min-h-[56px] px-2 flex items-center gap-1 font-display font-bold text-[11px] text-[#7c7361]">
+                    <Icon id="ui_lock_closed" size={16} muted />
                     <span>LOCKED</span>
                   </div>
                 )}

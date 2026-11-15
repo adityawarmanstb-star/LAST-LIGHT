@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { RotateCcw } from 'lucide-react';
 import { soundManager } from '../game/audio';
 import { dailyMissions } from '../game/dailyMissions';
 import { RunStats } from '../game/types';
@@ -9,7 +8,8 @@ import {
   useChromaKeyImage,
 } from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
-import { ChromaKeyImg, IronCard } from './IronCard';
+import { Icon } from './Icon';
+import { IronCard } from './IronCard';
 
 interface GameOverModalProps {
   stats: RunStats;
@@ -69,15 +69,9 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         boxShadow: 'inset 0 0 120px rgba(120, 10, 16, 0.35)',
       }}
     >
-      <div
-        className="w-[92%] max-w-[400px] max-h-[92vh] flex flex-col"
-        style={{
-          filter:
-            'drop-shadow(0 20px 42px rgba(0, 0, 0, 0.96)) drop-shadow(0 0 28px rgba(153, 15, 23, 0.45))',
-        }}
-      >
+      <div className="w-[92%] max-w-[400px] max-h-[92vh] flex flex-col">
         <IronCard
-          highlight={stats.victory ? 'gold' : 'none'}
+          highlight={stats.victory ? 'gold' : 'blood'}
           className="w-full max-h-[92vh] flex flex-col"
           contentClassName="p-5 sm:p-6 flex flex-col items-center text-center max-h-[92vh] overflow-y-auto"
         >
@@ -202,9 +196,6 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                 haptics.tap('heavy');
                 onRestart();
               }}
-              style={{
-                filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
-              }}
               className="group relative w-full h-[68px] flex items-center justify-center gap-2.5 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
             >
               {playBtnSrc ? (
@@ -213,19 +204,24 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                   alt=""
                   aria-hidden="true"
                   referrerPolicy="no-referrer"
+                  style={{
+                    filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
+                  }}
                   className="pointer-events-none absolute inset-0 w-full h-full object-fill select-none"
                 />
               ) : playBtnError ? (
                 <div
                   aria-hidden="true"
+                  style={{
+                    filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
+                  }}
                   className="pointer-events-none absolute inset-0 rounded-[10px] rusted-play-bar border border-[#942027]"
                 />
               ) : null}
 
-              <RotateCcw
-                className="relative z-10 w-5 h-5 text-[#f2c464] shrink-0 transition-transform duration-150 group-hover:-rotate-45"
-                style={{ filter: 'drop-shadow(0 0 8px rgba(242, 169, 59, 0.65))' }}
-              />
+              <span className="relative z-10 flex items-center justify-center transition-transform duration-150 group-hover:-rotate-45">
+                <Icon id="ui_restart" size={20} />
+              </span>
               <span
                 className="relative z-10 font-display font-black text-[18px] tracking-[0.14em] uppercase whitespace-nowrap"
                 style={{
@@ -251,15 +247,11 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                   haptics.tap('light');
                   onOpenMissions();
                 }}
-                className="w-full h-[54px] active:scale-95"
+                className="w-full h-[56px] active:scale-95"
                 contentClassName="h-full px-3 flex items-center justify-center gap-2"
               >
                 <div className="relative shrink-0 flex items-center justify-center">
-                  <ChromaKeyImg
-                    src={UI_ASSETS.iconMissions}
-                    alt=""
-                    className="w-7 h-7 object-contain drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]"
-                  />
+                  <Icon id="nav_missions" size={24} />
                   {unclaimedMissions > 0 && (
                     <span
                       aria-label={`${unclaimedMissions} unclaimed`}
@@ -281,21 +273,17 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                   haptics.tap('light');
                   onOpenShop('upgrades');
                 }}
-                className="w-full h-[54px] active:scale-95"
+                className="w-full h-[56px] active:scale-95"
                 contentClassName="h-full px-3 flex items-center justify-center gap-2"
               >
-                <ChromaKeyImg
-                  src={UI_ASSETS.iconShop}
-                  alt=""
-                  className="w-7 h-7 object-contain shrink-0 drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]"
-                />
+                <Icon id="nav_shop" size={24} />
                 <span className="font-display font-bold text-[13px] tracking-[0.1em] text-[#ede0c4] whitespace-nowrap">
                   SHOP
                 </span>
               </IronCard>
             </div>
 
-            {/* Bottom Button: MAIN MENU using panel_iron_card.png + icon_home.png */}
+            {/* Bottom Button: MAIN MENU */}
             <IronCard
               asButton
               onClick={() => {
@@ -306,11 +294,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               className="w-full h-[56px] active:scale-95"
               contentClassName="h-full px-4 flex items-center justify-center gap-2.5"
             >
-              <ChromaKeyImg
-                src={UI_ASSETS.iconHome}
-                alt=""
-                className="w-6 h-6 object-contain shrink-0 drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]"
-              />
+              <Icon id="nav_home" size={24} />
               <span className="font-display font-bold text-[15px] tracking-[0.14em] text-[#ede0c4] whitespace-nowrap">
                 MAIN MENU
               </span>

@@ -42,11 +42,11 @@ interface IronCardProps {
 }
 
 const HIGHLIGHT_STYLES: Record<NonNullable<IronCardProps['highlight']>, string> = {
-  none: 'drop-shadow-[0_10px_22px_rgba(0,0,0,0.85)]',
-  gold: 'drop-shadow-[0_0_14px_rgba(242,169,59,0.45)]',
-  blood: 'drop-shadow-[0_0_14px_rgba(179,18,26,0.55)]',
-  cyan: 'drop-shadow-[0_0_12px_rgba(93,228,255,0.38)]',
-  ember: 'drop-shadow-[0_0_14px_rgba(217,72,38,0.5)]',
+  none: 'shadow-[0_10px_22px_rgba(0,0,0,0.85)]',
+  gold: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#c9a24b]/55',
+  blood: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#b3121a]/65',
+  cyan: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#5de4ff]/45',
+  ember: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#c9a24b]/40',
 };
 
 export const IronCard: React.FC<IronCardProps> = ({
@@ -66,7 +66,7 @@ export const IronCard: React.FC<IronCardProps> = ({
       {!processedSrc && (
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 rounded-[6px] bg-gradient-to-b from-[#23262d] via-[#15171c] to-[#0b0c0f] border border-[#3a3f47]/60"
+          className={`pointer-events-none absolute inset-0 rounded-[6px] bg-gradient-to-b from-[#23262d] via-[#15171c] to-[#0b0c0f] border border-[#3a3f47]/60 ${HIGHLIGHT_STYLES[highlight]}`}
         />
       )}
       {processedSrc && (
@@ -75,7 +75,7 @@ export const IronCard: React.FC<IronCardProps> = ({
           alt=""
           aria-hidden="true"
           referrerPolicy="no-referrer"
-          className="pointer-events-none absolute inset-0 w-full h-full object-fill select-none"
+          className={`pointer-events-none absolute inset-0 w-full h-full object-fill select-none ${HIGHLIGHT_STYLES[highlight]}`}
         />
       )}
       <div className={`relative z-10 w-full ${contentClassName}`}>{children}</div>
@@ -91,7 +91,7 @@ export const IronCard: React.FC<IronCardProps> = ({
         aria-label={ariaLabel}
         className={`relative text-left transition-transform duration-150 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#f2a93b] ${
           disabled ? 'opacity-65 cursor-not-allowed' : 'cursor-pointer'
-        } ${HIGHLIGHT_STYLES[highlight]} ${className}`}
+        } ${className}`}
       >
         {inner}
       </button>
@@ -99,7 +99,7 @@ export const IronCard: React.FC<IronCardProps> = ({
   }
 
   return (
-    <div className={`relative ${HIGHLIGHT_STYLES[highlight]} ${className}`}>
+    <div className={`relative ${className}`}>
       {inner}
     </div>
   );

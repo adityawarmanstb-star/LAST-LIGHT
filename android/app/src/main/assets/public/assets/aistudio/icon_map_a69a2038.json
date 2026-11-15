@@ -1,0 +1,308 @@
+{
+ "umbral_pact": {
+  "display": "Umbral Pact",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "lodestone_heart": {
+  "display": "Lodestone Heart",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "twin_wind_feather": {
+  "display": "Twin-Wind Feather",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "multishot": {
+  "display": "Multishot",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "bloodied_blade": {
+  "display": "Bloodied Blade",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "quick_hands": {
+  "display": "Quick Hands",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "wraith_boots": {
+  "display": "Wraith Boots",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "iron_heart": {
+  "display": "Iron Heart",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "magnet_horseshoe": {
+  "display": "Magnet Horseshoe",
+  "category": "relic",
+  "source_sheet": "Dark_fantasy_game_item_ico",
+  "atlas": "icons_atlas"
+ },
+ "ui_settings": {
+  "display": "Settings",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_sound_on": {
+  "display": "Sound on",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_sound_off": {
+  "display": "Sound off (muted)",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_music": {
+  "display": "Music",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_sfx": {
+  "display": "Sound effects",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_brightness": {
+  "display": "Lantern brightness",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_haptics": {
+  "display": "Haptic feedback",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_lock_closed": {
+  "display": "Locked",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_lock_open": {
+  "display": "Unlocked",
+  "category": "ui",
+  "source_sheet": "Embossed_steel_game_icon_s",
+  "atlas": "icons_atlas"
+ },
+ "ui_dash": {
+  "display": "Dash",
+  "category": "ui",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "ui_stand_still": {
+  "display": "Stand still",
+  "category": "ui",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "ui_nearest_foes": {
+  "display": "Nearest foes",
+  "category": "ui",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "crimson_gem": {
+  "display": "Crimson Gem",
+  "category": "currency",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "soul_coin": {
+  "display": "Soul Coin",
+  "category": "currency",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "ui_day_flame": {
+  "display": "Day counter flame",
+  "category": "ui",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "ui_close": {
+  "display": "Close",
+  "category": "ui",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "ui_back": {
+  "display": "Back",
+  "category": "ui",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "ui_info": {
+  "display": "Info",
+  "category": "ui",
+  "source_sheet": "Fantasy_game_item_icon_she",
+  "atlas": "icons_atlas"
+ },
+ "brighter_lantern": {
+  "display": "Brighter Lantern",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "spinning_blade": {
+  "display": "Spinning Blade",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "chain_lightning": {
+  "display": "Chain Lightning",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "shield_ward": {
+  "display": "Shield Ward",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "critical_fang": {
+  "display": "Critical Fang",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "soul_magnet": {
+  "display": "Soul Magnet",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "cursed_coin": {
+  "display": "Cursed Coin",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "embers": {
+  "display": "Embers",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "night_eyes": {
+  "display": "Night Eyes",
+  "category": "skill",
+  "source_sheet": "Game_item_icon_sheet_desig",
+  "atlas": "icons_atlas"
+ },
+ "frame_common": {
+  "display": "Rarity frame: common",
+  "category": "frame",
+  "source_sheet": "Hand-painted_dark_fantasy_",
+  "atlas": "ui_extra_atlas",
+  "inner_opening": [
+   58,
+   52,
+   197,
+   202
+  ],
+  "outer_bounds": [
+   12,
+   8,
+   244,
+   249
+  ]
+ },
+ "frame_rare": {
+  "display": "Rarity frame: rare",
+  "category": "frame",
+  "source_sheet": "Hand-painted_dark_fantasy_",
+  "atlas": "ui_extra_atlas",
+  "inner_opening": [
+   57,
+   53,
+   199,
+   202
+  ],
+  "outer_bounds": [
+   11,
+   8,
+   245,
+   248
+  ]
+ },
+ "frame_epic": {
+  "display": "Rarity frame: epic",
+  "category": "frame",
+  "source_sheet": "Hand-painted_dark_fantasy_",
+  "atlas": "ui_extra_atlas",
+  "inner_opening": [
+   58,
+   53,
+   198,
+   203
+  ],
+  "outer_bounds": [
+   12,
+   7,
+   243,
+   248
+  ]
+ },
+ "frame_legendary": {
+  "display": "Rarity frame: legendary",
+  "category": "frame",
+  "source_sheet": "Hand-painted_dark_fantasy_",
+  "atlas": "ui_extra_atlas",
+  "inner_opening": [
+   57,
+   56,
+   198,
+   200
+  ],
+  "outer_bounds": [
+   9,
+   7,
+   246,
+   249
+  ]
+ },
+ "tutorial_drag": {
+  "display": "How to play: drag",
+  "category": "tutorial",
+  "source_sheet": "Hooded_figures_and_ghostly",
+  "atlas": "ui_extra_atlas"
+ },
+ "tutorial_dash": {
+  "display": "How to play: dash",
+  "category": "tutorial",
+  "source_sheet": "Hooded_figures_and_ghostly",
+  "atlas": "ui_extra_atlas"
+ },
+ "tutorial_stand_still": {
+  "display": "How to play: stand_still",
+  "category": "tutorial",
+  "source_sheet": "Hooded_figures_and_ghostly",
+  "atlas": "ui_extra_atlas"
+ }
+}

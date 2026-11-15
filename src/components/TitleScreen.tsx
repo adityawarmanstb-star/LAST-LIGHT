@@ -1,5 +1,4 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Flame, Settings, Volume2, VolumeX } from 'lucide-react';
 import { achievements } from '../game/achievements';
 import { soundManager } from '../game/audio';
 import { dailyMissions } from '../game/dailyMissions';
@@ -14,8 +13,8 @@ import {
 } from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
 import { ForgedIronFrame } from './ForgedIronFrame';
-import { ChromaKeyImg, IronCard } from './IronCard';
-import { Coin3DIcon, Gem3DIcon } from './LobbyIcons';
+import { Icon } from './Icon';
+import { IronCard } from './IronCard';
 import { AchievementsPage } from './lobby/AchievementsPage';
 import { BestiaryPage } from './lobby/BestiaryPage';
 import { HomePage } from './lobby/HomePage';
@@ -168,23 +167,23 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   const navTabs: {
     id: LobbyTabId;
     label: string;
-    iconSrc: string;
+    iconId: string;
     badge?: number;
     isHome?: boolean;
   }[] = [
-    { id: 'shop', label: 'SHOP', iconSrc: UI_ASSETS.iconShop },
+    { id: 'shop', label: 'SHOP', iconId: 'nav_shop' },
     {
       id: 'missions',
       label: 'MISSIONS',
-      iconSrc: UI_ASSETS.iconMissions,
+      iconId: 'nav_missions',
       badge: unclaimedMissions > 0 ? unclaimedMissions : undefined,
     },
-    { id: 'home', label: 'HOME', iconSrc: UI_ASSETS.iconHome, isHome: true },
-    { id: 'bestiary', label: 'BESTIARY', iconSrc: UI_ASSETS.iconBestiary },
+    { id: 'home', label: 'HOME', iconId: 'nav_home', isHome: true },
+    { id: 'bestiary', label: 'BESTIARY', iconId: 'nav_bestiary' },
     {
       id: 'achievements',
       label: 'ACHIEVEMENTS',
-      iconSrc: UI_ASSETS.iconAchievements,
+      iconId: 'nav_achievements',
       badge: unclaimedAchievements > 0 ? unclaimedAchievements : undefined,
     },
   ];
@@ -270,17 +269,17 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               asButton
               onClick={() => switchTab('shop', 'market')}
               ariaLabel={`Coins ${bankCoins} and Gems ${relicSeals}. Open Shop`}
-              contentClassName="px-2.5 py-1.5 min-h-[44px] flex items-center gap-2"
+              contentClassName="px-2.5 py-1.5 min-h-[56px] flex items-center gap-2"
             >
               <div className="flex items-center gap-1">
-                <Coin3DIcon className="w-4 h-4 shrink-0" />
+                <Icon id="soul_coin" size={18} />
                 <span className="font-mono-numbers text-xs font-bold text-[#edd18a] whitespace-nowrap">
                   {bankCoins}
                 </span>
               </div>
               <span className="w-px h-4 bg-[#5e382c]" aria-hidden="true" />
               <div className="flex items-center gap-1">
-                <Gem3DIcon className="w-4 h-4 shrink-0" />
+                <Icon id="crimson_gem" size={18} />
                 <span className="font-mono-numbers text-xs font-bold text-[#f0cad9] whitespace-nowrap">
                   {relicSeals}
                 </span>
@@ -292,9 +291,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               onClick={() => switchTab('missions')}
               highlight="ember"
               ariaLabel={`Day ${Math.max(1, streak.currentStreak)} streak. Open Missions`}
-              contentClassName="px-2.5 py-1.5 min-h-[44px] flex items-center gap-1"
+              contentClassName="px-2.5 py-1.5 min-h-[56px] flex items-center gap-1.5"
             >
-              <Flame className="w-3.5 h-3.5 text-[#f2a93b] shrink-0" />
+              <Icon id="ui_day_flame" size={16} />
               <span className="font-mono-numbers text-xs font-bold text-[#f2dfba] whitespace-nowrap">
                 Day {Math.max(1, streak.currentStreak)}
               </span>
@@ -311,9 +310,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 onOpenSettings();
               }}
               ariaLabel="Open Settings"
-              contentClassName="w-11 h-11 min-w-[44px] min-h-[44px] flex items-center justify-center p-0"
+              contentClassName="w-14 h-14 min-w-[56px] min-h-[56px] flex items-center justify-center p-0"
             >
-              <Settings className="w-[18px] h-[18px] text-[#e8dcc2]" />
+              <Icon id="ui_settings" size={24} />
             </IronCard>
 
             <IronCard
@@ -324,13 +323,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               }}
               highlight={isMuted ? 'blood' : 'none'}
               ariaLabel={isMuted ? 'Unmute Sound' : 'Mute Sound'}
-              contentClassName="w-11 h-11 min-w-[44px] min-h-[44px] flex items-center justify-center p-0"
+              contentClassName="w-14 h-14 min-w-[56px] min-h-[56px] flex items-center justify-center p-0"
             >
-              {isMuted ? (
-                <VolumeX className="w-[18px] h-[18px] text-[#e5303a]" />
-              ) : (
-                <Volume2 className="w-[18px] h-[18px] text-[#e8dcc2]" />
-              )}
+              <Icon id={isMuted ? 'ui_sound_off' : 'ui_sound_on'} size={24} />
             </IronCard>
           </div>
         </header>
@@ -342,7 +337,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             aria-live="polite"
             className="fixed left-1/2 -translate-x-1/2 z-40 w-[calc(100%-2rem)] max-w-sm pointer-events-none"
             style={{
-              top: 'calc(max(12px, env(safe-area-inset-top)) + 58px)',
+              top: 'calc(max(12px, env(safe-area-inset-top)) + 68px)',
             }}
           >
             <div className="mission-banner-enter">
@@ -356,7 +351,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 contentClassName="px-3.5 py-2 flex items-center justify-between gap-2.5"
               >
                 <div className="flex items-center gap-2 min-w-0">
-                  <Flame className="w-4 h-4 text-[#d94826] shrink-0" />
+                  <Icon id="ui_day_flame" size={18} />
                   <div className="flex flex-col min-w-0 text-left">
                     <span className="font-display text-[11px] font-bold tracking-[0.1em] text-[#e6c38d] uppercase">
                       Day {streakBonusToast.streak} Daily Streak
@@ -369,7 +364,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   </div>
                 </div>
                 <div className="shrink-0 flex items-center gap-1 font-mono-numbers text-xs font-bold text-[#edd18a]">
-                  <Coin3DIcon className="w-4 h-4" />
+                  <Icon id="soul_coin" size={18} />
                   <span>+{streakBonusToast.coins}</span>
                 </div>
               </ForgedIronFrame>
@@ -426,25 +421,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                       isActive ? '-translate-y-2' : ''
                     }`}
                   >
-                    <ChromaKeyImg
-                      src={tab.iconSrc}
+                    <Icon
+                      id={tab.iconId}
+                      size={isActive ? 44 : 36}
                       alt={tab.label}
-                      style={
-                        isActive
-                          ? {
-                              filter: tab.isHome
-                                ? 'drop-shadow(0 0 12px rgba(93, 228, 255, 0.72)) drop-shadow(0 0 8px rgba(242, 169, 59, 0.75))'
-                                : 'drop-shadow(0 0 12px rgba(242, 169, 59, 0.85)) drop-shadow(0 0 6px rgba(93, 228, 255, 0.45))',
-                            }
-                          : {
-                              filter: 'drop-shadow(0 3px 6px rgba(0, 0, 0, 0.92))',
-                            }
-                      }
-                      className={`${
-                        isActive
-                          ? 'w-[54px] h-[54px]'
-                          : 'w-[44px] h-[44px] opacity-85 hover:opacity-100'
-                      } object-contain transition-all duration-150`}
+                      className={isActive ? '' : 'opacity-85 hover:opacity-100'}
                     />
 
                     {tab.badge !== undefined && tab.badge > 0 && (

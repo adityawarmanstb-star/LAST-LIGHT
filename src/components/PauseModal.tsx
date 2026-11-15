@@ -1,5 +1,4 @@
 import React, { useEffect } from 'react';
-import { Gem, Play, RotateCcw, Settings, Sparkles } from 'lucide-react';
 import { soundManager } from '../game/audio';
 import { RELIC_SETS, getRelicById } from '../game/relics';
 import {
@@ -14,8 +13,9 @@ import {
   useChromaKeyImage,
 } from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
-import { getWeaponIcon } from './HUD';
-import { ChromaKeyImg, IronCard } from './IronCard';
+import { getWeaponFrameRarity } from './HUD';
+import { Icon } from './Icon';
+import { IronCard } from './IronCard';
 
 interface PauseModalProps {
   weapons: WeaponState[];
@@ -62,14 +62,9 @@ export const PauseModal: React.FC<PauseModalProps> = ({
         background: 'rgba(5, 8, 12, 0.8)',
       }}
     >
-      <div
-        className="w-[92%] max-w-[390px] flex flex-col my-auto"
-        style={{
-          filter:
-            'drop-shadow(0 20px 42px rgba(0, 0, 0, 0.96)) drop-shadow(0 0 24px rgba(153, 15, 23, 0.38))',
-        }}
-      >
+      <div className="w-[92%] max-w-[390px] flex flex-col my-auto">
         <IronCard
+          highlight="blood"
           className="w-full"
           contentClassName="p-5 sm:p-6 flex flex-col items-center text-center"
         >
@@ -118,10 +113,10 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                 {unlockedWeapons.map((w) => (
                   <div
                     key={w.id}
-                    className="flex items-start gap-2 rounded-[6px] bg-[#13161c]/90 border border-[#2d323b]/70 px-2 py-1.5"
+                    className="flex items-start gap-2.5 rounded-[6px] bg-[#13161c]/90 border border-[#2d323b]/70 px-2 py-1.5"
                   >
-                    <div className="w-6 h-6 rounded-[4px] bg-[#090b0f] border border-[#3a3f47]/70 flex items-center justify-center shrink-0 mt-0.5">
-                      {getWeaponIcon(w.id, 'w-3.5 h-3.5')}
+                    <div className="shrink-0 mt-0.5">
+                      <Icon id={w.name} rarity={getWeaponFrameRarity(w)} size={32} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
@@ -142,13 +137,10 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                 {equippedRelics.map((relic) => (
                   <div
                     key={relic.id}
-                    className="flex items-start gap-2 rounded-[6px] bg-[#13161c]/90 border border-[#2d323b]/70 px-2 py-1.5"
+                    className="flex items-start gap-2.5 rounded-[6px] bg-[#13161c]/90 border border-[#2d323b]/70 px-2 py-1.5"
                   >
-                    <div className="w-6 h-6 rounded-[4px] bg-[#090b0f] border border-[#3a3f47]/70 flex items-center justify-center shrink-0 mt-0.5">
-                      <Gem
-                        className="w-3.5 h-3.5 shrink-0"
-                        style={{ color: relic.accentColor }}
-                      />
+                    <div className="shrink-0 mt-0.5">
+                      <Icon id={relic.name} rarity={relic.rarity} size={32} />
                     </div>
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center justify-between gap-2">
@@ -172,12 +164,11 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                 {activeSynergies.map((synergy) => (
                   <div
                     key={synergy.id}
-                    className="flex items-start gap-2 rounded-[6px] bg-[#18140d]/90 border border-[#f2a93b]/45 px-2 py-1.5"
+                    className="flex items-start gap-2.5 rounded-[6px] bg-[#18140d]/90 border border-[#f2a93b]/45 px-2 py-1.5"
                   >
-                    <Sparkles
-                      className="w-3.5 h-3.5 shrink-0 mt-0.5"
-                      style={{ color: synergy.accentColor }}
-                    />
+                    <div className="shrink-0 mt-0.5">
+                      <Icon id={synergy.synergyTitle} size={22} />
+                    </div>
                     <div className="min-w-0 flex-1">
                       <span
                         className="font-display text-[10.5px] font-bold uppercase tracking-wide block"
@@ -203,9 +194,6 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                 haptics.tap('medium');
                 onResume();
               }}
-              style={{
-                filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
-              }}
               className="group relative w-full h-[60px] flex items-center justify-center gap-2.5 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
             >
               {playBtnSrc ? (
@@ -214,16 +202,24 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                   alt=""
                   aria-hidden="true"
                   referrerPolicy="no-referrer"
+                  style={{
+                    filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
+                  }}
                   className="pointer-events-none absolute inset-0 w-full h-full object-fill select-none"
                 />
               ) : playBtnError ? (
                 <div
                   aria-hidden="true"
+                  style={{
+                    filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
+                  }}
                   className="pointer-events-none absolute inset-0 rounded-[10px] rusted-play-bar border border-[#942027]"
                 />
               ) : null}
 
-              <Play className="relative z-10 w-5 h-5 fill-[#f2c464] text-[#f2c464] shrink-0 drop-shadow-[0_0_8px_rgba(242,169,59,0.7)]" />
+              <span className="relative z-10 flex items-center justify-center">
+                <Icon id="ui_play" size={20} />
+              </span>
               <span
                 className="relative z-10 font-display font-black text-[17px] tracking-[0.16em] uppercase whitespace-nowrap"
                 style={{
@@ -246,10 +242,10 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                 haptics.tap('medium');
                 onRestart();
               }}
-              className="w-full h-[48px] active:scale-95"
+              className="w-full h-[56px] active:scale-95"
               contentClassName="h-full px-4 flex items-center justify-center gap-2.5"
             >
-              <RotateCcw className="w-4 h-4 text-[#e5303a] shrink-0" />
+              <Icon id="ui_restart" size={20} />
               <span className="font-display font-bold text-[14px] tracking-[0.12em] text-[#ede0c4] whitespace-nowrap">
                 RESTART
               </span>
@@ -263,30 +259,26 @@ export const PauseModal: React.FC<PauseModalProps> = ({
                 haptics.tap('light');
                 onOpenSettings();
               }}
-              className="w-full h-[48px] active:scale-95"
+              className="w-full h-[56px] active:scale-95"
               contentClassName="h-full px-4 flex items-center justify-center gap-2.5"
             >
-              <Settings className="w-4 h-4 text-[#f2c464] shrink-0" />
+              <Icon id="ui_settings" size={20} />
               <span className="font-display font-bold text-[14px] tracking-[0.12em] text-[#ede0c4] whitespace-nowrap">
                 SETTINGS
               </span>
             </IronCard>
 
-            {/* Secondary: QUIT TO MENU using icon_home.png */}
+            {/* Secondary: QUIT TO MENU */}
             <IronCard
               asButton
               onClick={() => {
                 haptics.tap('light');
                 onQuitToTitle();
               }}
-              className="w-full h-[48px] active:scale-95"
+              className="w-full h-[56px] active:scale-95"
               contentClassName="h-full px-4 flex items-center justify-center gap-2.5"
             >
-              <ChromaKeyImg
-                src={UI_ASSETS.iconHome}
-                alt=""
-                className="w-5 h-5 object-contain shrink-0 drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)]"
-              />
+              <Icon id="nav_home" size={20} />
               <span className="font-display font-bold text-[14px] tracking-[0.12em] text-[#ede0c4] whitespace-nowrap">
                 QUIT TO MENU
               </span>

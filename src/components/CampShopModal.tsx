@@ -310,7 +310,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
             >
               <KeyRound className="w-4 h-4 text-[#c7566b]" />
               <span>{relicSeals}</span>
-              <span className="text-[11px] font-sans font-normal text-[#8e8168] hidden sm:inline">
+              <span className="text-[11px] font-body font-normal text-[#8e8168] hidden sm:inline">
                 Seals
               </span>
             </div>

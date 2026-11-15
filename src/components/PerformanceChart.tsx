@@ -144,7 +144,7 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
     gx.selectAll('text')
       .attr('fill', '#8e8168')
       .attr('font-size', '9px')
-      .attr('font-family', 'Inter, system-ui, sans-serif');
+      .attr('font-family', 'Spectral, Georgia, serif');
 
     const gy = root.append('g').call(yAxis);
     gy.select('.domain').attr('stroke', '#3a3f47');
@@ -152,7 +152,7 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
     gy.selectAll('text')
       .attr('fill', '#8e8168')
       .attr('font-size', '9px')
-      .attr('font-family', 'Inter, system-ui, sans-serif');
+      .attr('font-family', 'Spectral, Georgia, serif');
 
     // Area fill under DPS line
     const dpsArea = area<DpsSample>()

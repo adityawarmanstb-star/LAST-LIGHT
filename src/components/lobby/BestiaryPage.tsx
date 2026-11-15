@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Flame, HelpCircle, Lock, ShieldAlert, Skull, Swords } from 'lucide-react';
 import { BESTIARY_ENTRIES, bestiary } from '../../game/bestiary';
 import { soundManager } from '../../game/audio';
 import { BestiaryEntry, BestiaryKillsMap } from '../../game/types';
 import { haptics } from '../../mobile/haptics';
+import { Icon } from '../Icon';
 import { IronCard } from '../IronCard';
 
 type GridSlotItem =
@@ -86,9 +86,9 @@ export const BestiaryPage: React.FC = () => {
                     }`}
                   />
                 ) : isSelectedDiscovered ? (
-                  <Skull className="w-8 h-8 text-[#d8c9a8]" />
+                  <Icon id="ui_skull" size={32} />
                 ) : (
-                  <HelpCircle className="w-8 h-8 text-[#7c7361]" />
+                  <Icon id="ui_info" size={32} muted />
                 )}
               </div>
 
@@ -98,7 +98,7 @@ export const BestiaryPage: React.FC = () => {
                     {isSelectedDiscovered ? selectedEntry.name : 'Unknown Horror'}
                   </h2>
                   <span className="inline-flex items-center gap-1 font-mono-numbers text-xs font-bold text-[#f2a93b] shrink-0">
-                    <Swords className="w-3.5 h-3.5 text-[#e5303a]" />
+                    <Icon id="ui_swords" size={16} />
                     {selectedKills.toLocaleString()}
                   </span>
                 </div>
@@ -121,11 +121,12 @@ export const BestiaryPage: React.FC = () => {
 
             {isSelectedDiscovered && (
               <div className="pt-2 border-t border-[#3a3f47]/70 flex items-start gap-2 font-body text-xs text-[#d8c9a8]">
-                {selectedEntry.id === 'boss' ? (
-                  <ShieldAlert className="w-4 h-4 text-[#e5303a] shrink-0 mt-0.5" />
-                ) : (
-                  <Flame className="w-4 h-4 text-[#f2a93b] shrink-0 mt-0.5" />
-                )}
+                <span className="shrink-0 mt-0.5">
+                  <Icon
+                    id={selectedEntry.id === 'boss' ? 'ui_warning' : 'ui_day_flame'}
+                    size={16}
+                  />
+                </span>
                 <span>
                   <strong className="font-bold text-[#f2a93b]">Field Note:</strong>{' '}
                   {selectedEntry.tacticalNote}
@@ -136,7 +137,7 @@ export const BestiaryPage: React.FC = () => {
         ) : (
           <div className="flex items-center gap-3.5 py-2">
             <div className="w-20 h-20 rounded-[10px] bg-[#0e1014] border border-[#3a3f47] flex items-center justify-center shrink-0">
-              <Lock className="w-8 h-8 text-[#7c7361]" />
+              <Icon id="ui_lock_closed" size={32} muted />
             </div>
             <div className="flex-1 min-w-0">
               <h2 className="font-display font-bold text-base text-[#9c8e72]">
@@ -169,7 +170,7 @@ export const BestiaryPage: React.FC = () => {
                   contentClassName="p-2.5 flex flex-col items-center justify-between text-center gap-1.5 min-h-[118px]"
                 >
                   <div className="w-12 h-12 rounded-[8px] bg-[#0c0e12] border border-[#2f343d] flex items-center justify-center">
-                    <Lock className="w-5 h-5 text-[#6d6558]" />
+                    <Icon id="ui_lock_closed" size={24} muted />
                   </div>
                   <div className="font-display font-bold text-[11px] leading-tight text-[#8e8168]">
                     Abyssal Seal
@@ -211,7 +212,7 @@ export const BestiaryPage: React.FC = () => {
                       }`}
                     />
                   ) : (
-                    <Skull className="w-6 h-6 text-[#8e8168]" />
+                    <Icon id="ui_skull" size={24} muted={!discovered} />
                   )}
                 </div>
 

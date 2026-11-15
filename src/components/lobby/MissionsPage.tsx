@@ -1,20 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import {
-  Check,
-  Clock,
-  Coins,
-  Crown,
-  Flame,
-  Gem,
-  Play,
-  ScrollText,
-  Skull,
-  Sparkles,
-} from 'lucide-react';
 import { dailyMissions, getTimeUntilReset } from '../../game/dailyMissions';
 import { soundManager } from '../../game/audio';
 import { DailyMission, DailyMissionsState } from '../../game/types';
 import { haptics } from '../../mobile/haptics';
+import { Icon } from '../Icon';
 import { IronCard } from '../IronCard';
 
 interface MissionsPageProps {
@@ -87,22 +76,21 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
   };
 
   const renderIcon = (mission: DailyMission) => {
-    const cls = 'w-5 h-5';
     switch (mission.icon) {
       case 'skull':
-        return <Skull className={`${cls} text-[#e5303a]`} />;
+        return <Icon id="ui_skull" size={26} />;
       case 'clock':
-        return <Clock className={`${cls} text-[#5de4ff]`} />;
+        return <Icon id="ui_clock" size={26} />;
       case 'coins':
-        return <Coins className={`${cls} text-[#f2a93b]`} />;
+        return <Icon id="soul_coin" size={26} />;
       case 'crown':
-        return <Crown className={`${cls} text-[#f2a93b]`} />;
+        return <Icon id="ui_crown" size={26} />;
       case 'sparkles':
-        return <Sparkles className={`${cls} text-[#5de4ff]`} />;
+        return <Icon id="ui_sparkles" size={26} />;
       case 'flame':
-        return <Flame className={`${cls} text-[#e5303a]`} />;
+        return <Icon id="ui_day_flame" size={26} />;
       default:
-        return <ScrollText className={`${cls} text-[#d8c9a8]`} />;
+        return <Icon id="ui_scroll" size={26} />;
     }
   };
 
@@ -127,7 +115,7 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
           <button
             type="button"
             onClick={handleClaimAll}
-            className="min-h-[40px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#6e121a] to-[#34070c] font-display font-bold text-[11px] tracking-wider text-[#f2a93b] cursor-pointer active:scale-95 shrink-0"
+            className="min-h-[56px] px-3.5 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#6e121a] to-[#34070c] font-display font-bold text-[11px] tracking-wider text-[#f2a93b] cursor-pointer active:scale-95 shrink-0"
           >
             CLAIM ALL ({unclaimedCount})
           </button>
@@ -150,7 +138,7 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
                     : 'bg-[#101216] border-[#4b3c32]'
                 }`}
               >
-                <Crown className={`w-6 h-6 ${canClaimChest ? 'text-[#f2a93b]' : 'text-[#c98f3a]'}`} />
+                <Icon id="ui_crown" size={26} />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -170,15 +158,15 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
 
             <div className="shrink-0">
               {chestClaimed ? (
-                <div className="min-h-[42px] px-3 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
-                  <Check className="w-4 h-4" />
+                <div className="min-h-[56px] px-3 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
+                  <Icon id="ui_check" size={16} />
                   <span>CLAIMED</span>
                 </div>
               ) : canClaimChest ? (
                 <button
                   type="button"
                   onClick={handleClaimChest}
-                  className="min-h-[44px] px-3.5 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
+                  className="min-h-[56px] px-3.5 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
                 >
                   CLAIM CHEST
                 </button>
@@ -234,10 +222,10 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
                       {mission.title}
                     </h3>
                     <span className="inline-flex items-center gap-1 font-mono-numbers text-xs font-bold text-[#f2a93b]">
-                      <Coins className="w-3 h-3" />+{mission.rewardCoins}
+                      <Icon id="soul_coin" size={14} />+{mission.rewardCoins}
                     </span>
                     <span className="inline-flex items-center gap-1 font-mono-numbers text-xs font-bold text-[#d8b4fe]">
-                      <Gem className="w-3 h-3 text-[#c084fc]" />+{mission.rewardSeals || 1}
+                      <Icon id="crimson_gem" size={14} />+{mission.rewardSeals || 1}
                     </span>
                   </div>
 
@@ -271,15 +259,15 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
               {/* Action Button: GO / CLAIM / CLAIMED */}
               <div className="shrink-0">
                 {mission.claimed ? (
-                  <div className="min-h-[44px] px-2.5 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
-                    <Check className="w-4 h-4" />
+                  <div className="min-h-[56px] px-2.5 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
+                    <Icon id="ui_check" size={16} />
                     <span>CLAIMED</span>
                   </div>
                 ) : canClaim ? (
                   <button
                     type="button"
                     onClick={() => handleClaim(mission.id)}
-                    className="min-h-[46px] min-w-[82px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
+                    className="min-h-[56px] min-w-[82px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
                   >
                     CLAIM
                   </button>
@@ -291,9 +279,9 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
                       haptics.tap('medium');
                       onStartGame();
                     }}
-                    className="min-h-[46px] min-w-[74px] px-3 rounded-[7px] border border-[#545c6a] bg-gradient-to-b from-[#2b2f38] to-[#13151a] font-display font-bold text-xs tracking-wider text-[#e8dcc2] flex items-center justify-center gap-1 cursor-pointer active:scale-95"
+                    className="min-h-[56px] min-w-[74px] px-3 rounded-[7px] border border-[#545c6a] bg-gradient-to-b from-[#2b2f38] to-[#13151a] font-display font-bold text-xs tracking-wider text-[#e8dcc2] flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                   >
-                    <Play className="w-3.5 h-3.5 fill-[#e5303a] text-[#e5303a]" />
+                    <Icon id="ui_play" size={16} />
                     <span>GO</span>
                   </button>
                 )}
