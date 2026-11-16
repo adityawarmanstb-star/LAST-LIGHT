@@ -63,6 +63,8 @@ export interface CritImpactPayload {
   x: number;
   y: number;
   isEliteOrBoss: boolean;
+  enemyType?: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss';
+  enemyDisplaySize?: number;
   shakeDurationMs: number;
   shakeIntensity: number;
   hitstopMs: number;
@@ -399,6 +401,8 @@ class GameManager {
     x: number;
     y: number;
     isEliteOrBoss?: boolean;
+    enemyType?: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss';
+    enemyDisplaySize?: number;
   }): boolean {
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const isEliteOrBoss = Boolean(input.isEliteOrBoss);
@@ -416,6 +420,8 @@ class GameManager {
       x: input.x,
       y: input.y,
       isEliteOrBoss,
+      enemyType: input.enemyType,
+      enemyDisplaySize: input.enemyDisplaySize,
       shakeDurationMs: 0,
       shakeIntensity: 0,
       hitstopMs: isHeavyCrit ? 46 : 30,

@@ -122,7 +122,9 @@ class AudioManager {
   private lastDeathKnellMs: number = 0;
   private lastBossSirenMs: number = 0;
   private lastUiClickMs: number = 0;
+  private lastBloodSplashMs: number = 0;
   private uiNoiseBuffer: AudioBuffer | null = null;
+  private bloodSplashNoiseBuffer: AudioBuffer | null = null;
 
   // Music Track State (1s crossfade between tracks, loop-ready .ogg)
   private currentTrackKey: MusicTrackKey | null = null;
@@ -649,6 +651,174 @@ class AudioManager {
   }
   public playRevival() {
     this.playSfx('level_up', 1.0);
+  }
+
+  private getBloodSplashNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (
+      this.bloodSplashNoiseBuffer &&
+      this.bloodSplashNoiseBuffer.sampleRate === ctx.sampleRate
+    ) {
+      return this.bloodSplashNoiseBuffer;
+    }
+    const durationSec = 0.19;
+    const len = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
+    const buffer = ctx.createBuffer(1, len, ctx.sampleRate);
+    const ch = buffer.getChannelData(0);
+    for (let i = 0; i < len; i++) {
+      const t = i / ctx.sampleRate;
+      const mainEnv = Math.exp(-t / 0.042);
+      // Micro-droplet bursts give a wet splatter grain rather than flat noise
+      const splatterPulse = 0.58 + 0.42 * Math.sin(t * 210 + Math.sin(t * 75) * 2.5);
+      ch[i] = (Math.random() * 2 - 1) * mainEnv * splatterPulse;
+    }
+    this.bloodSplashNoiseBuffer = buffer;
+    return buffer;
+  }
+
+  /**
+   * Wet, viscous blood splash SFX scaled dynamically by monster size and crit power.
+   */
+  public playBloodSplash(sizeScale: number = 1.0, isCrit: boolean = false) {
+    if (this.isMuted || this.isPaused) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastBloodSplashMs < 55) return;
+
+    this.initCtx(false);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.resumeContext();
+      return;
+    }
+
+    this.lastBloodSplashMs = nowMs;
+    this.triggerBloodSplashNodes(sizeScale, isCrit);
+  }
+
+  private triggerBloodSplashNodes(sizeScale: number, isCrit: boolean) {
+    if (!this.ctx || !this.sfxGain) return;
+
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const clampedScale = Math.max(0.65, Math.min(2.9, sizeScale));
+    const pitchScale = Math.max(0.62, Math.min(1.18, 1.14 - clampedScale * 0.16));
+    const detune = 0.94 + Math.random() * 0.12;
+    const freqFactor = pitchScale * detune;
+    const gainBoost = Math.min(1.45, 0.85 + clampedScale * 0.22 + (isCrit ? 0.16 : 0));
+    const durScale = Math.min(1.45, 0.88 + clampedScale * 0.16 + (isCrit ? 0.1 : 0));
+
+    try {
+      const cleanupTargets: AudioNode[] = [];
+      const noiseBuf = this.getBloodSplashNoiseBuffer(ctx);
+
+      // 1. Heavy wet flesh impact thump (deeper on larger monsters)
+      const thudOsc = ctx.createOscillator();
+      thudOsc.type = 'triangle';
+      thudOsc.frequency.setValueAtTime(165 * freqFactor, now);
+      thudOsc.frequency.exponentialRampToValueAtTime(46 * freqFactor, now + 0.068 * durScale);
+
+      const thudGain = ctx.createGain();
+      thudGain.gain.setValueAtTime(0.001, now);
+      thudGain.gain.linearRampToValueAtTime(0.24 * gainBoost, now + 0.005);
+      thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.075 * durScale);
+
+      thudOsc.connect(thudGain);
+      thudGain.connect(this.sfxGain);
+      thudOsc.start(now);
+      thudOsc.stop(now + 0.085 * durScale);
+      cleanupTargets.push(thudOsc, thudGain);
+
+      // 2. Resonant downward-swept wet squelch body
+      const squelchSrc = ctx.createBufferSource();
+      squelchSrc.buffer = noiseBuf;
+      squelchSrc.playbackRate.value = Math.max(0.7, Math.min(1.25, freqFactor));
+
+      const squelchFilter = ctx.createBiquadFilter();
+      squelchFilter.type = 'bandpass';
+      squelchFilter.Q.setValueAtTime(2.9, now);
+      squelchFilter.frequency.setValueAtTime(1850 * freqFactor, now);
+      squelchFilter.frequency.exponentialRampToValueAtTime(
+        320 * freqFactor,
+        now + 0.105 * durScale
+      );
+
+      const squelchGain = ctx.createGain();
+      squelchGain.gain.setValueAtTime(0.001, now);
+      squelchGain.gain.linearRampToValueAtTime(0.38 * gainBoost, now + 0.008);
+      squelchGain.gain.exponentialRampToValueAtTime(0.001, now + 0.125 * durScale);
+
+      squelchSrc.connect(squelchFilter);
+      squelchFilter.connect(squelchGain);
+      squelchGain.connect(this.sfxGain);
+      squelchSrc.start(now);
+      squelchSrc.stop(now + 0.14 * durScale);
+      cleanupTargets.push(squelchSrc, squelchFilter, squelchGain);
+
+      // 3. Crisp crimson droplet spray high-mid splatter
+      const spraySrc = ctx.createBufferSource();
+      spraySrc.buffer = noiseBuf;
+      spraySrc.playbackRate.value = Math.max(0.75, Math.min(1.3, freqFactor * 1.08));
+
+      const sprayFilter = ctx.createBiquadFilter();
+      sprayFilter.type = 'bandpass';
+      sprayFilter.Q.setValueAtTime(1.35, now);
+      sprayFilter.frequency.setValueAtTime(3200 * freqFactor, now);
+      sprayFilter.frequency.exponentialRampToValueAtTime(
+        1150 * freqFactor,
+        now + 0.135 * durScale
+      );
+
+      const sprayGain = ctx.createGain();
+      sprayGain.gain.setValueAtTime(0.001, now + 0.006);
+      sprayGain.gain.linearRampToValueAtTime(0.24 * gainBoost, now + 0.018);
+      sprayGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.155 * durScale);
+
+      spraySrc.connect(sprayFilter);
+      sprayFilter.connect(sprayGain);
+      sprayGain.connect(this.sfxGain);
+      spraySrc.start(now);
+      spraySrc.stop(now + 0.175 * durScale);
+      cleanupTargets.push(spraySrc, sprayFilter, sprayGain);
+
+      // 4. Secondary splatter burst for big monsters or critical strikes
+      if (isCrit || clampedScale >= 1.25) {
+        const tailAt = now + 0.026;
+        const tailSrc = ctx.createBufferSource();
+        tailSrc.buffer = noiseBuf;
+        tailSrc.playbackRate.value = Math.max(0.68, freqFactor * 0.92);
+
+        const tailFilter = ctx.createBiquadFilter();
+        tailFilter.type = 'bandpass';
+        tailFilter.Q.setValueAtTime(2.2, tailAt);
+        tailFilter.frequency.setValueAtTime(1450 * freqFactor, tailAt);
+        tailFilter.frequency.exponentialRampToValueAtTime(420 * freqFactor, tailAt + 0.11);
+
+        const tailGain = ctx.createGain();
+        tailGain.gain.setValueAtTime(0.001, tailAt);
+        tailGain.gain.linearRampToValueAtTime(0.2 * gainBoost, tailAt + 0.012);
+        tailGain.gain.exponentialRampToValueAtTime(0.0008, tailAt + 0.12);
+
+        tailSrc.connect(tailFilter);
+        tailFilter.connect(tailGain);
+        tailGain.connect(this.sfxGain);
+        tailSrc.start(tailAt);
+        tailSrc.stop(tailAt + 0.14);
+        cleanupTargets.push(tailSrc, tailFilter, tailGain);
+      }
+
+      window.setTimeout(() => {
+        for (const node of cleanupTargets) {
+          try {
+            node.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+      }, Math.ceil((0.22 * durScale + 0.08) * 1000));
+    } catch {
+      // fail silently
+    }
   }
   private getUiNoiseBuffer(ctx: AudioContext): AudioBuffer {
     if (this.uiNoiseBuffer && this.uiNoiseBuffer.sampleRate === ctx.sampleRate) {

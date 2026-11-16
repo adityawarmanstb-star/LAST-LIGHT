@@ -387,25 +387,39 @@ export const GORE = {
     scaleMultiplier: 0.6,
   },
   hitSplash: {
-    dropletMin: 3,
-    dropletMax: 5,
-    critDropletMin: 6,
-    critDropletMax: 8,
-    colors: [0x8f1119, 0x6b0f15, 0x470a0f] as readonly number[],
-    spitterColors: [0x751335, 0x5e122b, 0x3d0a1f] as readonly number[],
-    splashTint: 0x9c141d,
+    dropletMin: 7,
+    dropletMax: 11,
+    critDropletMin: 11,
+    critDropletMax: 15,
+    maxDropletsPerHit: 22,
+    colors: [0xb81420, 0x8f0d16, 0x6b0810, 0x450509] as readonly number[],
+    spitterColors: [0x8c1740, 0x6e1033, 0x520b26, 0x38071b] as readonly number[],
+    splashTint: 0xa6101b,
+    secondarySplashTint: 0x69070f,
     spitterSplashTint: 0x7d173a,
-    speedMin: 110,
-    speedMax: 245,
-    gravity: 440,
-    lifeMinMs: 180,
-    lifeMaxMs: 320,
-    splashDurationMs: 185,
-    splashStartScale: 0.34,
-    splashEndScale: 0.96,
-    critSplashEndScale: 1.28,
-    splashAlpha: 0.88,
-    coneSpreadRad: 1.15,
+    secondarySpitterSplashTint: 0x4f0c25,
+    mistTint: 0x6e0911,
+    spitterMistTint: 0x570d2b,
+    mistAlpha: 0.44,
+    mistDurationMs: 260,
+    mistStartScale: 0.44,
+    mistEndScale: 1.48,
+    speedMin: 125,
+    speedMax: 275,
+    gravity: 460,
+    lifeMinMs: 220,
+    lifeMaxMs: 390,
+    dropletThicknessMult: 1.48,
+    splashDurationMs: 245,
+    splashStartScale: 0.44,
+    splashEndScale: 1.12,
+    critSplashEndScale: 1.46,
+    splashAlpha: 0.96,
+    secondarySplashAlpha: 0.86,
+    coneSpreadRad: 1.28,
+    baselineMonsterSizePx: 115,
+    minMonsterScale: 0.65,
+    maxMonsterScale: 2.9,
   },
 } as const;
 
@@ -1567,10 +1581,11 @@ export class MainScene extends Phaser.Scene {
         this.spawnEnemyHitBloodSplash(
           impact.x,
           impact.y,
-          impact.isEliteOrBoss ? 'boss' : 'imp',
+          impact.enemyType ?? (impact.isEliteOrBoss ? 'boss' : 'imp'),
           0,
           0,
-          true
+          true,
+          impact.enemyDisplaySize
         );
       }
     });
@@ -2036,9 +2051,9 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // 6. On-hit blood splash splatter burst texture
+    // 6. Thick, viscous on-hit blood splash splatter burst texture
     if (!this.textures.exists('gore_hit_splash')) {
-      const sizeS = 64;
+      const sizeS = 96;
       const halfS = sizeS * 0.5;
       const tex = this.textures.createCanvas('gore_hit_splash', sizeS, sizeS);
       if (tex) {
@@ -2051,13 +2066,14 @@ export class MainScene extends Phaser.Scene {
           return (seed - 1) / 2147483646;
         };
 
-        // Central jagged splash core
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        // Base thick clotted outer blood splat body (rounded organic lobes)
+        ctx.fillStyle = 'rgba(218, 218, 218, 0.96)';
         ctx.beginPath();
-        const spikes = 16;
-        for (let i = 0; i <= spikes; i++) {
-          const a = (i / spikes) * Math.PI * 2;
-          const r = i % 2 === 0 ? 15 + rand() * 8 : 5.5 + rand() * 3.5;
+        const outerLobes = 28;
+        for (let i = 0; i <= outerLobes; i++) {
+          const a = (i / outerLobes) * Math.PI * 2;
+          const wave = Math.sin(a * 7 + 0.4) * 5.2 + Math.cos(a * 4 - 0.8) * 3.8;
+          const r = 19.5 + wave + rand() * 5.2;
           const px = halfS + Math.cos(a) * r;
           const py = halfS + Math.sin(a) * r;
           if (i === 0) ctx.moveTo(px, py);
@@ -2066,18 +2082,54 @@ export class MainScene extends Phaser.Scene {
         ctx.closePath();
         ctx.fill();
 
-        // Radial splash streaks & droplets around core
-        for (let i = 0; i < 11; i++) {
-          const a = (i / 11) * Math.PI * 2 + rand() * 0.4;
-          const dist = 16 + rand() * 11;
+        // Heavy radial blood splatter arms & bulbous droplets connected to the core
+        for (let i = 0; i < 14; i++) {
+          const a = (i / 14) * Math.PI * 2 + (rand() - 0.5) * 0.28;
+          const reach = 21 + rand() * 14;
+          const width = 4.6 + rand() * 3.8;
+          ctx.save();
+          ctx.translate(halfS, halfS);
+          ctx.rotate(a);
+          ctx.fillStyle = i % 3 === 0 ? 'rgba(255, 255, 255, 0.98)' : 'rgba(225, 225, 225, 0.94)';
+          ctx.beginPath();
+          ctx.moveTo(8, -width * 0.65);
+          ctx.quadraticCurveTo(reach * 0.65, -width * 0.48, reach, 0);
+          ctx.quadraticCurveTo(reach * 0.65, width * 0.48, 8, width * 0.65);
+          ctx.closePath();
+          ctx.fill();
+
+          // Rounded heavy splash tip glob
+          ctx.beginPath();
+          ctx.arc(reach, 0, width * 0.58, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Dense bright arterial inner core for thick layered depth
+        ctx.fillStyle = 'rgba(255, 255, 255, 1.0)';
+        ctx.beginPath();
+        ctx.arc(halfS, halfS, 14.5, 0, Math.PI * 2);
+        ctx.fill();
+        for (let c = 0; c < 6; c++) {
+          const ca = (c / 6) * Math.PI * 2 + rand() * 0.5;
+          const cd = 6 + rand() * 7;
+          ctx.beginPath();
+          ctx.arc(halfS + Math.cos(ca) * cd, halfS + Math.sin(ca) * cd, 5.5 + rand() * 4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        // Chunky satellite blood globs & directional streaks around core
+        for (let i = 0; i < 18; i++) {
+          const a = (i / 18) * Math.PI * 2 + rand() * 0.35;
+          const dist = 25 + rand() * 16;
           const sx = halfS + Math.cos(a) * dist;
           const sy = halfS + Math.sin(a) * dist;
           ctx.save();
           ctx.translate(sx, sy);
           ctx.rotate(a);
-          ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.88)' : 'rgba(225, 210, 210, 0.72)';
+          ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.95)' : 'rgba(218, 206, 206, 0.88)';
           ctx.beginPath();
-          ctx.ellipse(0, 0, 3.6 + rand() * 3.2, 1.5 + rand() * 1.4, 0, 0, Math.PI * 2);
+          ctx.ellipse(0, 0, 4.4 + rand() * 3.8, 2.2 + rand() * 2.0, 0, 0, Math.PI * 2);
           ctx.fill();
           ctx.restore();
         }
@@ -2617,7 +2669,8 @@ export class MainScene extends Phaser.Scene {
     enemyType: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss',
     impactVx: number,
     impactVy: number,
-    isCrit: boolean
+    isCrit: boolean,
+    enemyDisplaySize?: number
   ) {
     const goreSetting = gameManager.getGoreLevel();
     if (goreSetting === 'off') {
@@ -2625,32 +2678,74 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
+    const hCfg = GORE.hitSplash;
+    const fallbackSize =
+      enemyType === 'boss'
+        ? 315
+        : enemyType === 'brute'
+          ? 145
+          : enemyType === 'imp'
+            ? 120
+            : enemyType === 'spitter'
+              ? 92
+              : 74;
+    const resolvedSize =
+      enemyDisplaySize && enemyDisplaySize > 0 ? enemyDisplaySize : fallbackSize;
+    const sizeScale = Phaser.Math.Clamp(
+      resolvedSize / hCfg.baselineMonsterSizePx,
+      hCfg.minMonsterScale,
+      hCfg.maxMonsterScale
+    );
+
+    // Play wet blood splash SFX scaled dynamically with monster size & crit impact
+    soundManager.playBloodSplash(sizeScale, isCrit);
+
     const isLowGore = goreSetting === 'low';
     const maxLiveDroplets = isLowGore
       ? Math.floor(GORE.maxDroplets * GORE.lowSettingMultiplier)
       : GORE.maxDroplets;
-    const hCfg = GORE.hitSplash;
     const isSpitter = enemyType === 'spitter';
-
-    // 1. Pooled blood splash pop at impact point (NORMAL blend, respects darkness layer)
-    const splash = this.acquireGoreParticle(maxLiveDroplets);
-    this.goreParticleSeq += 1;
 
     const hasDir = impactVx * impactVx + impactVy * impactVy > 4;
     const baseAngle = hasDir ? Math.atan2(impactVy, impactVx) : Math.random() * Math.PI * 2;
-    const endScale = isCrit ? hCfg.critSplashEndScale : hCfg.splashEndScale;
+    const dirX = Math.cos(baseAngle);
+    const dirY = Math.sin(baseAngle);
+
+    // 1. Dense crimson blood cloud mist behind splash for thick volume
+    this.spawnGoreMist(
+      x + dirX * (6 * sizeScale),
+      y + dirY * (6 * sizeScale),
+      'mist',
+      isSpitter ? hCfg.spitterMistTint : hCfg.mistTint,
+      isLowGore ? hCfg.mistAlpha * 0.72 : hCfg.mistAlpha,
+      hCfg.mistDurationMs,
+      hCfg.mistStartScale * sizeScale,
+      hCfg.mistEndScale * sizeScale,
+      dirX * (28 * sizeScale),
+      dirY * (28 * sizeScale),
+      0,
+      maxLiveDroplets
+    );
+
+    // 2. Primary thick pooled blood splash burst (NORMAL blend, scaled by monster size)
+    const splash = this.acquireGoreParticle(maxLiveDroplets);
+    this.goreParticleSeq += 1;
+
+    const baseEndScale = isCrit ? hCfg.critSplashEndScale : hCfg.splashEndScale;
+    const startScale = hCfg.splashStartScale * sizeScale;
+    const endScale = baseEndScale * sizeScale;
 
     splash.kind = 'splash';
     splash.active = true;
     splash.seq = this.goreParticleSeq;
-    splash.vx = hasDir ? Math.cos(baseAngle) * 26 : 0;
-    splash.vy = hasDir ? Math.sin(baseAngle) * 26 : 0;
+    splash.vx = hasDir ? dirX * (32 * Math.min(1.8, sizeScale)) : 0;
+    splash.vy = hasDir ? dirY * (32 * Math.min(1.8, sizeScale)) : 0;
     splash.gravity = 0;
     splash.life = 0;
-    splash.maxLife = hCfg.splashDurationMs;
+    splash.maxLife = Math.round(hCfg.splashDurationMs * (0.92 + Math.min(0.35, sizeScale * 0.1)));
     splash.baseAlpha = hCfg.splashAlpha;
-    splash.startScaleX = hCfg.splashStartScale;
-    splash.startScaleY = hCfg.splashStartScale;
+    splash.startScaleX = startScale;
+    splash.startScaleY = startScale;
     splash.endScale = endScale;
     splash.rotSpeed = 0;
 
@@ -2658,21 +2753,61 @@ export class MainScene extends Phaser.Scene {
     splash.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
     splash.sprite.setDepth(GORE.dropletDepth);
     splash.sprite.setPosition(x, y);
-    splash.sprite.setRotation(baseAngle + Phaser.Math.FloatBetween(-0.6, 0.6));
-    splash.sprite.setScale(hCfg.splashStartScale);
+    splash.sprite.setRotation(baseAngle + Phaser.Math.FloatBetween(-0.55, 0.55));
+    splash.sprite.setScale(startScale);
     splash.sprite.setTint(isSpitter ? hCfg.spitterSplashTint : hCfg.splashTint);
     splash.sprite.setAlpha(hCfg.splashAlpha);
     splash.sprite.setVisible(true);
     splash.sprite.setActive(true);
 
-    // 2. Spray directional pooled crimson droplets outward from hit
+    // 3. Secondary layered clotted crimson splash lobe for thicker 3D volume
+    if (!isLowGore || isCrit || sizeScale >= 1.2) {
+      const overlay = this.acquireGoreParticle(maxLiveDroplets);
+      this.goreParticleSeq += 1;
+      const offsetDist = 9 * sizeScale;
+
+      overlay.kind = 'splash';
+      overlay.active = true;
+      overlay.seq = this.goreParticleSeq;
+      overlay.vx = dirX * (58 * Math.min(1.9, sizeScale));
+      overlay.vy = dirY * (58 * Math.min(1.9, sizeScale));
+      overlay.gravity = 0;
+      overlay.life = 0;
+      overlay.maxLife = Math.round(hCfg.splashDurationMs * 1.12);
+      overlay.baseAlpha = hCfg.secondarySplashAlpha;
+      overlay.startScaleX = startScale * 0.85;
+      overlay.startScaleY = startScale * 0.85;
+      overlay.endScale = endScale * 0.88;
+      overlay.rotSpeed = 0;
+
+      overlay.sprite.setTexture('gore_hit_splash');
+      overlay.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+      overlay.sprite.setDepth(GORE.dropletDepth);
+      overlay.sprite.setPosition(x + dirX * offsetDist, y + dirY * offsetDist);
+      overlay.sprite.setRotation(baseAngle + Phaser.Math.FloatBetween(0.7, 1.5));
+      overlay.sprite.setScale(startScale * 0.85);
+      overlay.sprite.setTint(
+        isSpitter ? hCfg.secondarySpitterSplashTint : hCfg.secondarySplashTint
+      );
+      overlay.sprite.setAlpha(hCfg.secondarySplashAlpha);
+      overlay.sprite.setVisible(true);
+      overlay.sprite.setActive(true);
+    }
+
+    // 4. Spray heavier, size-scaled directional crimson droplets outward from hit
     const rawDropCount = isCrit
       ? Phaser.Math.Between(hCfg.critDropletMin, hCfg.critDropletMax)
       : Phaser.Math.Between(hCfg.dropletMin, hCfg.dropletMax);
+    const sizeScaledCount = Math.min(
+      hCfg.maxDropletsPerHit,
+      Math.round(rawDropCount * (0.72 + 0.36 * sizeScale))
+    );
     const dropCount = isLowGore
-      ? Math.max(1, Math.round(rawDropCount * GORE.lowSettingMultiplier))
-      : rawDropCount;
+      ? Math.max(2, Math.round(sizeScaledCount * GORE.lowSettingMultiplier))
+      : sizeScaledCount;
     const colors = isSpitter ? hCfg.spitterColors : hCfg.colors;
+    const dropletScaleFactor = hCfg.dropletThicknessMult * (0.76 + 0.3 * sizeScale);
+    const speedScale = 0.84 + 0.18 * sizeScale;
 
     for (let i = 0; i < dropCount; i++) {
       const p = this.acquireGoreParticle(maxLiveDroplets);
@@ -2681,10 +2816,11 @@ export class MainScene extends Phaser.Scene {
       const angle = hasDir
         ? baseAngle + Phaser.Math.FloatBetween(-hCfg.coneSpreadRad, hCfg.coneSpreadRad)
         : Math.random() * Math.PI * 2;
-      const speed = Phaser.Math.FloatBetween(
-        hCfg.speedMin,
-        isCrit ? hCfg.speedMax * 1.2 : hCfg.speedMax
-      );
+      const speed =
+        Phaser.Math.FloatBetween(
+          hCfg.speedMin,
+          isCrit ? hCfg.speedMax * 1.24 : hCfg.speedMax
+        ) * speedScale;
       const vx = Math.cos(angle) * speed;
       const vy = Math.sin(angle) * speed;
 
@@ -2696,10 +2832,10 @@ export class MainScene extends Phaser.Scene {
       p.gravity = hCfg.gravity;
       p.life = 0;
       p.maxLife = Phaser.Math.Between(hCfg.lifeMinMs, hCfg.lifeMaxMs);
-      p.baseAlpha = GORE.bloodBurst.alpha;
-      p.startScaleX = Phaser.Math.FloatBetween(0.38, 0.62);
-      p.startScaleY = Phaser.Math.FloatBetween(0.28, 0.46);
-      p.endScale = GORE.bloodBurst.minEndScaleFactor;
+      p.baseAlpha = 0.98;
+      p.startScaleX = Phaser.Math.FloatBetween(0.46, 0.76) * dropletScaleFactor;
+      p.startScaleY = Phaser.Math.FloatBetween(0.36, 0.58) * dropletScaleFactor;
+      p.endScale = GORE.bloodBurst.minEndScaleFactor * (0.85 + 0.15 * sizeScale);
       p.rotSpeed = 0;
 
       const stretchX = p.startScaleX + speed * GORE.bloodBurst.stretchVelocityFactor;
@@ -5704,8 +5840,17 @@ export class MainScene extends Phaser.Scene {
     this.recentDamageLog.push({ timeMs: this.time.now, amount: damage });
     soundManager.playEnemyHit(isCrit);
 
-    // Blood splash on enemy hit (falls back to light sparks if Gore is Off)
-    this.spawnEnemyHitBloodSplash(enemy.x, enemy.y, edata.type, knockbackX, knockbackY, isCrit);
+    // Blood splash on enemy hit scaled to monster size (falls back to light sparks if Gore is Off)
+    const enemyDisplaySize = (enemy.displayWidth + enemy.displayHeight) * 0.5;
+    this.spawnEnemyHitBloodSplash(
+      enemy.x,
+      enemy.y,
+      edata.type,
+      knockbackX,
+      knockbackY,
+      isCrit,
+      enemyDisplaySize
+    );
 
     // fx_lightning_sheet: chain lightning between enemies (stretched in X, 0.25s per hit)
     if (canChain && Math.random() < 0.65) {
@@ -5734,6 +5879,8 @@ export class MainScene extends Phaser.Scene {
         x: enemy.x,
         y: enemy.y,
         isEliteOrBoss: isHeavyEnemy,
+        enemyType: edata.type,
+        enemyDisplaySize,
       });
     } else {
       enemy.setTint(0xffffff);
