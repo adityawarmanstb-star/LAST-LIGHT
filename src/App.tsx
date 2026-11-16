@@ -15,6 +15,7 @@ import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
 import { PauseModal } from './components/PauseModal';
 import { DifficultyModal } from './components/DifficultyModal';
+import { BossIntroModal } from './components/BossIntroModal';
 import { LoadingScreen } from './components/LoadingScreen';
 import { DarkFantasyTouchFx } from './components/DarkFantasyTouchFx';
 import { gameManager } from './game/GameManager';
@@ -26,9 +27,11 @@ import { preloadAllGameAssets } from './game/assetPreloader';
 import {
   ActiveDynamicChallenge,
   BossInfo,
+  BossIntroInfo,
   DynamicChallengeOffer,
   EventWarningInfo,
   GameDifficultyId,
+  GoreLevel,
   RelicId,
   RelicSetId,
   RunStats,
@@ -59,6 +62,7 @@ export default function App() {
   const [masterVolume, setMasterVolume] = useState<number>(soundManager.getMasterVolume());
   const [musicVolume, setMusicVolume] = useState<number>(soundManager.getMusicVolume());
   const [sfxVolume, setSfxVolume] = useState<number>(soundManager.getSfxVolume());
+  const [goreLevel, setGoreLevel] = useState<GoreLevel>(() => gameManager.getGoreLevel());
 
   // In-run state
   const [hp, setHp] = useState<number>(100);
@@ -89,6 +93,7 @@ export default function App() {
   // Modals
   const [levelUpOptions, setLevelUpOptions] = useState<UpgradeOption[] | null>(null);
   const [levelUpChallenge, setLevelUpChallenge] = useState<DynamicChallengeOffer | null>(null);
+  const [bossIntro, setBossIntro] = useState<BossIntroInfo | null>(null);
   const [runSummary, setRunSummary] = useState<RunStats | null>(null);
   const [loadingOverlay, setLoadingOverlay] = useState<{
     visible: boolean;
@@ -109,6 +114,10 @@ export default function App() {
   const needsTapAudioResumeRef = useRef<boolean>(false);
   const gameStateRef = useRef(gameState);
   gameStateRef.current = gameState;
+  const levelUpOptionsRef = useRef(levelUpOptions);
+  levelUpOptionsRef.current = levelUpOptions;
+  const bossIntroRef = useRef(bossIntro);
+  bossIntroRef.current = bossIntro;
   const lobbyTabRef = useRef(lobbyTab);
   lobbyTabRef.current = lobbyTab;
   const showSettingsRef = useRef(showSettings);
@@ -152,6 +161,7 @@ export default function App() {
 
     const unsubGameOver = gameManager.onGameOver((stats) => {
       setEventWarning(null);
+      setBossIntro(null);
       setRunSummary(stats);
       gameManager.setGameState('GAME_OVER');
       setGameState('GAME_OVER');
@@ -159,6 +169,10 @@ export default function App() {
 
     const unsubBoss = gameManager.onBossUpdate((bossData) => {
       setBoss(bossData);
+    });
+
+    const unsubBossIntro = gameManager.onBossIntro((introData) => {
+      setBossIntro(introData);
     });
 
     const unsubEventWarning = gameManager.onEventWarning((warning) => {
@@ -198,6 +212,7 @@ export default function App() {
       unsubLevelUp();
       unsubGameOver();
       unsubBoss();
+      unsubBossIntro();
       unsubEventWarning();
       unsubTogglePause();
       unsubLoadProgress();
@@ -410,6 +425,7 @@ export default function App() {
     setGameState('PLAYING');
     setLevelUpOptions(null);
     setLevelUpChallenge(null);
+    setBossIntro(null);
     setRunSummary(null);
     setBoss(null);
     setEventWarning(null);
@@ -473,6 +489,11 @@ export default function App() {
     setSfxVolume(val);
   };
 
+  const handleGoreLevelChange = (level: GoreLevel) => {
+    gameManager.setGoreLevel(level);
+    setGoreLevel(level);
+  };
+
   const handleOpenSettings = () => {
     soundManager.playUiClick();
     if (gameState === 'PLAYING') {
@@ -505,8 +526,8 @@ export default function App() {
     } else if (gameState === 'PAUSED') {
       gameManager.setGameState('PLAYING');
       setGameState('PLAYING');
-      // If level-up card selection is active, physics stay paused until card choice, but audio resumes
-      if (!levelUpOptions && isSceneReady && scene) {
+      // If level-up card selection or boss intro pause is active, physics stay paused until resolved, but audio resumes
+      if (!levelUpOptions && !bossIntroRef.current && isSceneReady && scene) {
         scene.resumeGame();
       } else {
         soundManager.resumeAudio();
@@ -518,6 +539,7 @@ export default function App() {
   const handleRestartGame = () => {
     soundManager.playUiClick();
     setLevelUpOptions(null);
+    setBossIntro(null);
     handleStartGame();
   };
 
@@ -529,6 +551,7 @@ export default function App() {
     }
     setLoadingOverlay((prev) => ({ ...prev, visible: false }));
     setLevelUpOptions(null);
+    setBossIntro(null);
     setLobbyTab(tab);
     setLobbyShopSubTab(shopSubTab);
     gameManager.setGameState('TITLE');
@@ -559,6 +582,19 @@ export default function App() {
     const scene = gameManager.activeScene as MainScene | null;
     if (scene && scene.sys?.isActive()) {
       scene.applyUpgrade(option, acceptChallenge);
+    }
+  };
+
+  const handleDismissBossIntro = () => {
+    setBossIntro(null);
+    const scene = gameManager.activeScene as MainScene | null;
+    if (
+      scene &&
+      scene.sys?.isActive() &&
+      gameStateRef.current === 'PLAYING' &&
+      !levelUpOptionsRef.current
+    ) {
+      scene.endBossIntroPause();
     }
   };
 
@@ -646,7 +682,7 @@ export default function App() {
         />
       )}
 
-      {/* Modal: Settings (Audio only) */}
+      {/* Modal: Settings (Audio & Gore) */}
       <SettingsModal
         isOpen={showSettings && !showHowToPlay}
         onClose={() => setShowSettings(false)}
@@ -654,10 +690,12 @@ export default function App() {
         musicVolume={musicVolume}
         sfxVolume={sfxVolume}
         isMuted={isMuted}
+        goreLevel={goreLevel}
         onMasterVolumeChange={handleMasterVolumeChange}
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
         onToggleMute={handleToggleMute}
+        onGoreLevelChange={handleGoreLevelChange}
       />
 
       {/* Modal: Difficulty Selection before entering arena */}
@@ -682,6 +720,15 @@ export default function App() {
           options={levelUpOptions}
           challengeOffer={levelUpChallenge}
           onSelectUpgrade={handleSelectUpgrade}
+        />
+      )}
+
+      {/* Modal: Dramatic Boss Arrival Intro */}
+      {bossIntro && gameState === 'PLAYING' && !levelUpOptions && (
+        <BossIntroModal
+          bossIntro={bossIntro}
+          paused={gameState !== 'PLAYING' || Boolean(levelUpOptions)}
+          onDismiss={handleDismissBossIntro}
         />
       )}
 

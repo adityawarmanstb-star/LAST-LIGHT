@@ -67,6 +67,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onOpenSettings,
 }) => {
   const [activeTab, setActiveTab] = useState<LobbyTabId>(initialTab);
+  const [pressedTabId, setPressedTabId] = useState<LobbyTabId | null>(null);
   const [shopSubTab, setShopSubTab] = useState<ShopSubTab>(initialShopSubTab);
   const [bgLoadError, setBgLoadError] = useState(false);
   const [bankCoins, setBankCoins] = useState<number>(() => getSavedCoins());
@@ -257,7 +258,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
       </div>
 
       {/* Portrait Mobile-First Multi-Page Stage */}
-      <div className="relative z-10 w-full max-w-[460px] h-full flex flex-col justify-between items-center mx-auto pb-[100px] sm:pb-[104px]">
+      <div className="relative z-10 w-full max-w-[460px] h-full flex flex-col justify-between items-center mx-auto pb-[94px] sm:pb-[98px]">
         {/* PERSISTENT TOP HEADER across all 5 menu pages */}
         <header
           className="w-full shrink-0 px-2.5 sm:px-3 pt-[max(10px,env(safe-area-inset-top))] pb-1.5 flex items-center justify-between gap-1.5"
@@ -391,7 +392,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         {/* PERSISTENT BOTTOM NAVIGATION BAR docked flush to bottom:0, left:0, right:0 */}
         <nav
           aria-label="Lobby Navigation"
-          className="fixed bottom-0 left-0 right-0 z-30 mx-auto w-full max-w-[460px] h-[98px] sm:h-[104px]"
+          className="fixed bottom-0 left-0 right-0 z-30 mx-auto w-full max-w-[460px] h-[92px] sm:h-[96px]"
         >
           {!navBarSrc && (
             <div
@@ -409,33 +410,78 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             />
           )}
 
-          <div className="relative z-10 w-full h-full grid grid-cols-5 items-end px-1.5 pb-1.5 gap-0.5">
+          <div className="relative z-10 w-full h-full grid grid-cols-5 items-center px-[3%]">
             {navTabs.map((tab) => {
               const isActive = activeTab === tab.id;
+              const isPressed = pressedTabId === tab.id;
+              const slotInsetClass = tab.isHome
+                ? 'left-[9%] right-[9%] top-[32.5%] bottom-[19%] rounded-[4px]'
+                : 'left-[12%] right-[12%] top-[32%] bottom-[17%] rounded-[5px]';
+
               return (
                 <button
                   key={tab.id}
                   type="button"
                   aria-current={isActive ? 'page' : undefined}
-                  onClick={() => switchTab(tab.id)}
-                  className="relative flex flex-col items-center justify-end h-full pb-0.5 px-0 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
+                  onPointerDown={() => setPressedTabId(tab.id)}
+                  onPointerUp={() => setPressedTabId(null)}
+                  onPointerLeave={() => setPressedTabId(null)}
+                  onPointerCancel={() => setPressedTabId(null)}
+                  onClick={() => {
+                    setPressedTabId(null);
+                    switchTab(tab.id);
+                  }}
+                  className={`relative flex flex-col items-center justify-center h-full w-full px-0.5 touch-manipulation transition-transform duration-150 ease-out cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b] active:-translate-y-2 active:scale-[1.07] ${
+                    tab.isHome ? 'pt-1 pb-1.5' : 'pt-3.5 pb-1'
+                  } ${
+                    isPressed
+                      ? '-translate-y-2 scale-[1.08]'
+                      : isActive
+                        ? '-translate-y-0.5 scale-100'
+                        : 'translate-y-0 scale-100'
+                  }`}
                 >
-                  <div
-                    className={`relative flex items-center justify-center transition-transform duration-150 ${
-                      isActive ? '-translate-y-2' : ''
-                    }`}
-                  >
+                  {/* 3D Dark-Fantasy Crimson Plaque inside recessed iron cutout when selected */}
+                  {isActive && (
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute z-0 overflow-hidden nav-slot-3d-blood ${slotInsetClass}`}
+                    >
+                      <span className="absolute top-0 inset-x-1.5 h-[1px] bg-gradient-to-r from-transparent via-[#ffaa88]/80 to-transparent" />
+                      <span className="absolute inset-[2px] rounded-[3px] border border-[#f2a93b]/25 pointer-events-none" />
+                      <span className="absolute top-1 left-1 w-[3px] h-[3px] rounded-full bg-gradient-to-br from-[#f2c464] to-[#5e2918] shadow-[0_1px_1px_rgba(0,0,0,0.95)]" />
+                      <span className="absolute top-1 right-1 w-[3px] h-[3px] rounded-full bg-gradient-to-br from-[#f2c464] to-[#5e2918] shadow-[0_1px_1px_rgba(0,0,0,0.95)]" />
+                      <span className="absolute bottom-1 left-1 w-[3px] h-[3px] rounded-full bg-gradient-to-br from-[#f2c464] to-[#5e2918] shadow-[0_1px_1px_rgba(0,0,0,0.95)]" />
+                      <span className="absolute bottom-1 right-1 w-[3px] h-[3px] rounded-full bg-gradient-to-br from-[#f2c464] to-[#5e2918] shadow-[0_1px_1px_rgba(0,0,0,0.95)]" />
+                    </span>
+                  )}
+
+                  {/* Subtle dark-crimson highlight while touching an unselected slot */}
+                  {!isActive && isPressed && (
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none absolute z-0 nav-slot-3d-blood-press ${slotInsetClass}`}
+                    />
+                  )}
+
+                  <div className="relative z-10 flex items-center justify-center">
                     <Icon
                       id={tab.iconId}
-                      size={isActive ? 44 : 36}
+                      size={tab.isHome ? 36 : 28}
                       alt={tab.label}
-                      className={isActive ? '' : 'opacity-85 hover:opacity-100'}
+                      className={`${
+                        tab.isHome ? 'w-9 h-9 object-contain' : 'w-7 h-7 object-contain'
+                      } transition-all duration-150 ${
+                        isActive || isPressed
+                          ? 'brightness-115 drop-shadow-[0_2px_6px_rgba(242,169,59,0.65)]'
+                          : 'opacity-85 hover:opacity-100'
+                      }`}
                     />
 
                     {tab.badge !== undefined && tab.badge > 0 && (
                       <span
                         aria-label={`${tab.badge} unclaimed`}
-                        className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-[#b3121a] border border-[#f2a93b] font-mono-numbers text-[10px] font-bold text-[#fae8b8] flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.95)]"
+                        className="absolute -top-1 -right-2 min-w-[17px] h-[17px] px-1 rounded-full bg-[#b3121a] border border-[#f2a93b] font-mono-numbers text-[10px] font-bold text-[#fae8b8] flex items-center justify-center shadow-[0_2px_6px_rgba(0,0,0,0.95)]"
                       >
                         {tab.badge}
                       </span>
@@ -443,10 +489,16 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   </div>
 
                   <span
-                    className={`mt-0.5 font-display font-bold text-[10px] uppercase tracking-[-0.02em] whitespace-nowrap leading-none ${
+                    className={`relative z-10 mt-1 font-display font-bold uppercase whitespace-nowrap leading-none transition-colors duration-150 ${
+                      tab.label.length > 9
+                        ? 'text-[8px] sm:text-[9px] tracking-normal'
+                        : 'text-[10px] tracking-wider'
+                    } ${
                       isActive
-                        ? 'text-[#f2c464] drop-shadow-[0_1px_4px_rgba(0,0,0,1)]'
-                        : 'text-[#a6adb8]'
+                        ? 'text-[#fae8b8] drop-shadow-[0_1px_4px_rgba(0,0,0,1)]'
+                        : isPressed
+                          ? 'text-[#f2c464] drop-shadow-[0_1px_4px_rgba(0,0,0,1)]'
+                          : 'text-[#a6adb8]'
                     }`}
                     style={{ textShadow: '0 1px 2px rgba(0,0,0,0.98)' }}
                   >

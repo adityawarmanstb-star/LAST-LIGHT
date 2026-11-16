@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Droplet,
   Music,
   Sparkles,
   Volume2,
@@ -8,6 +9,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { soundManager } from '../game/audio';
+import { GoreLevel } from '../game/types';
 import { IronButton } from './ForgedIronFrame';
 import { IronCard } from './IronCard';
 
@@ -18,11 +20,19 @@ interface SettingsModalProps {
   musicVolume: number;
   sfxVolume: number;
   isMuted: boolean;
+  goreLevel: GoreLevel;
   onMasterVolumeChange: (val: number) => void;
   onMusicVolumeChange: (val: number) => void;
   onSfxVolumeChange: (val: number) => void;
   onToggleMute: () => void;
+  onGoreLevelChange: (level: GoreLevel) => void;
 }
+
+const GORE_OPTIONS: Array<{ id: GoreLevel; label: string; hint: string }> = [
+  { id: 'off', label: 'Off', hint: 'No blood or floor stains; keeps hit sparks' },
+  { id: 'low', label: 'Low', hint: 'Halved particles & floor stains' },
+  { id: 'normal', label: 'Normal', hint: 'Full enemy death blood & floor stains' },
+];
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   isOpen,
@@ -31,10 +41,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   musicVolume,
   sfxVolume,
   isMuted,
+  goreLevel,
   onMasterVolumeChange,
   onMusicVolumeChange,
   onSfxVolumeChange,
   onToggleMute,
+  onGoreLevelChange,
 }) => {
   if (!isOpen) return null;
 
@@ -79,10 +91,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 id="settings-modal-title"
                 className="text-xl font-display font-bold tracking-wider text-[#e8dcc2]"
               >
-                AUDIO SETTINGS
+                SETTINGS
               </h2>
               <p className="font-body text-xs text-[#b5a589]">
-                Master, music &amp; sound effects
+                Audio volumes &amp; combat gore effects
               </p>
             </div>
           </div>
@@ -252,6 +264,50 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 <Sparkles className="w-3.5 h-3.5 text-[#c98f3a]" />
                 <span>Gem</span>
               </IronButton>
+            </div>
+          </div>
+
+          <div className="h-px bg-[#3a3f47]/70 w-full" />
+
+          {/* Gore Level Row */}
+          <div className="flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <Droplet className="w-4 h-4 text-[#b32b32]" />
+                <span className="font-body text-sm font-bold text-[#e8dcc2]">Gore</span>
+              </div>
+              <span className="font-body text-xs text-[#9c8e72]">
+                {GORE_OPTIONS.find((opt) => opt.id === goreLevel)?.hint}
+              </span>
+            </div>
+
+            <div
+              role="radiogroup"
+              aria-label="Gore level"
+              className="grid grid-cols-3 gap-2"
+            >
+              {GORE_OPTIONS.map((option) => {
+                const selected = goreLevel === option.id;
+                return (
+                  <IronButton
+                    key={option.id}
+                    seed={`settings-gore-${option.id}`}
+                    dripCount={selected && option.id !== 'off' ? 1 : 0}
+                    variant={selected ? 'blood' : 'default'}
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => {
+                      soundManager.playUiClick();
+                      onGoreLevelChange(option.id);
+                    }}
+                    className="min-h-[46px] px-3 text-xs font-display font-bold whitespace-nowrap"
+                  >
+                    <span className={selected ? 'text-[#f6e8d2]' : 'text-[#9c8e72]'}>
+                      {option.label}
+                    </span>
+                  </IronButton>
+                );
+              })}
             </div>
           </div>
         </div>

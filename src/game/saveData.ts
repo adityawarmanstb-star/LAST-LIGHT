@@ -4,6 +4,7 @@ import {
   DailyMissionsState,
   DailyStreakState,
   GameDifficultyId,
+  GoreLevel,
   RelicId,
 } from './types';
 import { sanitizeDifficultyId } from './difficulty';
@@ -34,6 +35,7 @@ export interface SaveSettingsData {
   resolutionMode: ResolutionQualityMode;
   upscalerEnabled: boolean;
   frameGenEnabled: boolean;
+  gore: GoreLevel;
 }
 
 export interface SaveDataV1 {
@@ -66,6 +68,7 @@ const DEFAULT_SETTINGS: SaveSettingsData = {
   resolutionMode: 'auto',
   upscalerEnabled: true,
   frameGenEnabled: true,
+  gore: 'normal',
 };
 
 function createDefaultSaveData(): SaveDataV1 {
@@ -137,6 +140,13 @@ function sanitizeResolutionMode(value: unknown): ResolutionQualityMode {
     return value;
   }
   return 'auto';
+}
+
+function sanitizeGoreLevel(value: unknown): GoreLevel {
+  if (value === 'off' || value === 'low' || value === 'normal') {
+    return value;
+  }
+  return 'normal';
 }
 
 function sanitizeUpgrades(raw: unknown): Record<string, number> {
@@ -371,6 +381,7 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
       resolutionMode: sanitizeResolutionMode(rawSettings.resolutionMode),
       upscalerEnabled: safeBoolean(rawSettings.upscalerEnabled, defaults.settings.upscalerEnabled),
       frameGenEnabled: safeBoolean(rawSettings.frameGenEnabled, defaults.settings.frameGenEnabled),
+      gore: sanitizeGoreLevel(rawSettings.gore),
     },
     dailyMissions: sanitizeDailyMissions(obj.dailyMissions),
     dailyStreak: sanitizeDailyStreak(obj.dailyStreak),

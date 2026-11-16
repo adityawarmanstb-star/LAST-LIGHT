@@ -27,6 +27,7 @@ import {
   ActiveDynamicChallenge,
   BossInfo,
   DynamicChallengeOffer,
+  GoreLevel,
   PlayerStats,
   RunStats,
   UpgradeOption,
@@ -278,6 +279,144 @@ export const LIGHT = {
 } as const;
 
 // =========================================================================
+// ENEMY DEATH GORE, BLOOD BURST, DECALS & VARIANT FX CONSTANTS
+// =========================================================================
+export const GORE = {
+  maxDroplets: 150,
+  maxDecals: 50,
+  lowSettingMultiplier: 0.5,
+  dropletDepth: 25,
+  decalDepth: 2,
+  vignetteDepth: 29,
+  bloodBurst: {
+    minCount: 10,
+    maxCount: 16,
+    colors: [0x6b0f15, 0x560c11, 0x470a0f, 0x3a0a0e] as readonly number[],
+    spitterColors: [0x5e122b, 0x4d0e26, 0x3d0a1f, 0x33081a] as readonly number[],
+    speedMin: 120,
+    speedMax: 320,
+    gravity: 500,
+    lifeMinMs: 350,
+    lifeMaxMs: 600,
+    stretchBaseX: 0.55,
+    stretchVelocityFactor: 0.0022,
+    stretchBaseY: 0.42,
+    shrinkStartRatio: 0.55,
+    minEndScaleFactor: 0.25,
+    alpha: 0.94,
+  },
+  mist: {
+    minCount: 1,
+    maxCount: 2,
+    bloodColor: 0x5c0d13,
+    spitterColor: 0x57112c,
+    alpha: 0.25,
+    durationMs: 400,
+    startScale: 0.45,
+    endScale: 1.55,
+    speedMin: 18,
+    speedMax: 52,
+  },
+  decal: {
+    variants: 4,
+    textureSize: 96,
+    satelliteMin: 6,
+    satelliteMax: 10,
+    alpha: 0.75,
+    fadeDurationMs: 8000,
+    bloodTint: 0xffffff,
+    spitterTint: 0xd8a8ec,
+    baseScale: 0.72,
+    eliteScaleMult: 1.28,
+    bossScaleMult: 2.1,
+  },
+  variants: {
+    brute: {
+      chipMin: 8,
+      chipMax: 12,
+      chipColors: [0x6b7280, 0x525866, 0x7c8494, 0x444954] as readonly number[],
+      chipSpeedMin: 110,
+      chipSpeedMax: 280,
+      chipGravity: 540,
+      chipLifeMinMs: 320,
+      chipLifeMaxMs: 560,
+      chipScaleMin: 0.65,
+      chipScaleMax: 1.15,
+      emberMin: 6,
+      emberMax: 8,
+      emberColors: [0xf2a93b, 0xff8c2a] as readonly number[],
+      emberSpeedMin: 120,
+      emberSpeedMax: 270,
+      emberScaleMin: 0.14,
+      emberScaleMax: 0.30,
+      emberLifeMs: 420,
+      dustCount: 1,
+      dustColor: 0x717682,
+      dustAlpha: 0.28,
+      dustDurationMs: 420,
+      dustStartScale: 0.55,
+      dustEndScale: 1.75,
+    },
+    wisp: {
+      mistMin: 2,
+      mistMax: 3,
+      mistColor: 0x5de4ff,
+      mistAlpha: 0.32,
+      mistDurationMs: 460,
+      riseVyMin: -95,
+      riseVyMax: -45,
+      riseAccelY: -45,
+      driftVxRange: 38,
+      startScale: 0.42,
+      endScale: 1.5,
+    },
+    boss: {
+      dropletMultiplier: 3,
+      maxDropletsPerKill: 40,
+      mistMin: 4,
+      mistMax: 6,
+      mistAlpha: 0.36,
+      mistDurationMs: 580,
+      mistEndScale: 2.3,
+      vignetteAlpha: 0.10,
+      vignetteDurationMs: 650,
+    },
+  },
+  fxDeathExplosion: {
+    alpha: 0.3,
+    scaleMultiplier: 0.6,
+  },
+  hitSplash: {
+    dropletMin: 3,
+    dropletMax: 5,
+    critDropletMin: 6,
+    critDropletMax: 8,
+    colors: [0x8f1119, 0x6b0f15, 0x470a0f] as readonly number[],
+    spitterColors: [0x751335, 0x5e122b, 0x3d0a1f] as readonly number[],
+    splashTint: 0x9c141d,
+    spitterSplashTint: 0x7d173a,
+    speedMin: 110,
+    speedMax: 245,
+    gravity: 440,
+    lifeMinMs: 180,
+    lifeMaxMs: 320,
+    splashDurationMs: 185,
+    splashStartScale: 0.34,
+    splashEndScale: 0.96,
+    critSplashEndScale: 1.28,
+    splashAlpha: 0.88,
+    coneSpreadRad: 1.15,
+  },
+} as const;
+
+const GORE_DECAL_KEYS = [
+  'gore_decal_0',
+  'gore_decal_1',
+  'gore_decal_2',
+  'gore_decal_3',
+] as const;
+
+// =========================================================================
 // TUNABLE DIFFICULTY CURVE DATA TABLE
 // Runs are easy until 2:00, ramp up through 5:00, and become very hard around 8:00.
 // Easily tune spawn rate, enemy HP multiplier, and enemy types per minute here.
@@ -442,6 +581,34 @@ interface Particle {
   active: boolean;
 }
 
+type GoreParticleKind = 'droplet' | 'mist' | 'chip' | 'wisp_mist' | 'splash';
+
+interface GoreParticle {
+  sprite: Phaser.GameObjects.Image;
+  kind: GoreParticleKind;
+  vx: number;
+  vy: number;
+  gravity: number;
+  life: number;
+  maxLife: number;
+  baseAlpha: number;
+  startScaleX: number;
+  startScaleY: number;
+  endScale: number;
+  rotSpeed: number;
+  active: boolean;
+  seq: number;
+}
+
+interface GoreDecal {
+  sprite: Phaser.GameObjects.Image;
+  life: number;
+  maxLife: number;
+  baseAlpha: number;
+  active: boolean;
+  seq: number;
+}
+
 interface EnemyData {
   type: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss';
   hp: number;
@@ -539,6 +706,14 @@ export class MainScene extends Phaser.Scene {
   // Pools
   private particlePool: Particle[] = [];
   private readonly MAX_PARTICLES = 200;
+  private goreParticlePool: GoreParticle[] = [];
+  private goreDecalPool: GoreDecal[] = [];
+  private goreParticleSeq: number = 0;
+  private goreDecalSeq: number = 0;
+  private goreLowDecalCounter: number = 0;
+  private bossVignetteSprite: Phaser.GameObjects.Image | null = null;
+  private bossVignetteTimerMs: number = 0;
+  private unsubGore: (() => void) | null = null;
 
   // Enemy Projectile, Player Projectile, Pickup, Enemy & Ghost Trail Pools
   private enemyProjectilePool: Phaser.Physics.Arcade.Sprite[] = [];
@@ -667,6 +842,7 @@ export class MainScene extends Phaser.Scene {
 
   // State flags & 90Hz/4K Performance Engine hooks
   private isGamePaused: boolean = false;
+  private isBossIntroPaused: boolean = false;
   private isWaitingForLoading: boolean = false;
   private hitstopTimer: number = 0;
   private isHitstopPausedPhysics: boolean = false;
@@ -687,6 +863,7 @@ export class MainScene extends Phaser.Scene {
   init() {
     this.isDead = false;
     this.isGamePaused = false;
+    this.isBossIntroPaused = false;
     this.isWaitingForLoading = false;
     this.simTimeMs = 0;
     this.nextSpawnTime = 1000;
@@ -698,6 +875,15 @@ export class MainScene extends Phaser.Scene {
     }
     this.unsubCritImpact?.();
     this.unsubCritImpact = null;
+    this.unsubGore?.();
+    this.unsubGore = null;
+    this.goreParticlePool = [];
+    this.goreDecalPool = [];
+    this.goreParticleSeq = 0;
+    this.goreDecalSeq = 0;
+    this.goreLowDecalCounter = 0;
+    this.bossVignetteSprite = null;
+    this.bossVignetteTimerMs = 0;
     this.isInvulnerable = false;
     this.invulnTimerMs = 0;
     this.isMoving = false;
@@ -936,8 +1122,10 @@ export class MainScene extends Phaser.Scene {
     this.projectilesGroup = this.physics.add.group();
     this.pickupsGroup = this.physics.add.group();
 
-    // 3. Object Pools: 200 Particles (ADD blend mode) & Floating Combat Text
+    // 3. Object Pools: 200 Particles (ADD blend mode), Gore Pools (NORMAL blend mode) & Floating Combat Text
+    this.ensureGoreTextures();
     this.initParticlePool();
+    this.initGorePools();
     this.initFloatingTextPool();
 
     // 4. Initialize Player Stats from Meta Progression & BALANCE starting HP
@@ -1260,6 +1448,16 @@ export class MainScene extends Phaser.Scene {
     this.lightVignette.disableInteractive();
     this.atmosphereOverlay = new AtmosphereOverlay(this);
 
+    this.bossVignetteSprite = this.add
+      .image(width / 2 + zeroOffset.x, height / 2 + zeroOffset.y, 'gore_boss_vignette')
+      .setDepth(GORE.vignetteDepth)
+      .setScrollFactor(0)
+      .setDisplaySize(width, height)
+      .setBlendMode(Phaser.BlendModes.NORMAL)
+      .setAlpha(0)
+      .setVisible(false);
+    this.bossVignetteSprite.disableInteractive();
+
     // Lantern glow pulse tween (alpha 0.6 <-> 1.0)
     this.tweens.add({
       targets: this.lanternPulse,
@@ -1353,17 +1551,28 @@ export class MainScene extends Phaser.Scene {
         this.physics.pause();
       }
 
-      this.spawnParticleBurst(
-        impact.x,
-        impact.y,
-        impact.isEliteOrBoss ? 14 : 9,
-        'fx_ring',
-        110,
-        280,
-        0.14,
-        0.28,
-        impact.flashTintNumber
-      );
+      if (gameManager.getGoreLevel() === 'off') {
+        this.spawnParticleBurst(
+          impact.x,
+          impact.y,
+          impact.isEliteOrBoss ? 14 : 9,
+          'fx_ring',
+          110,
+          280,
+          0.14,
+          0.28,
+          impact.flashTintNumber
+        );
+      } else {
+        this.spawnEnemyHitBloodSplash(
+          impact.x,
+          impact.y,
+          impact.isEliteOrBoss ? 'boss' : 'imp',
+          0,
+          0,
+          true
+        );
+      }
     });
 
     // Keep cameras, floor TileSprite, and GPU upscaler synced across Dynamic Resolution / 4K setting changes
@@ -1378,6 +1587,10 @@ export class MainScene extends Phaser.Scene {
       if (this.lightVignette && this.lightVignette.scene) {
         const z = getScrollZeroOffset(this.cameras.main);
         this.lightVignette.setPosition(z.x, z.y);
+      }
+      if (this.bossVignetteSprite && this.bossVignetteSprite.scene) {
+        const z = getScrollZeroOffset(this.cameras.main);
+        this.bossVignetteSprite.setPosition(LOGICAL_WIDTH / 2 + z.x, LOGICAL_HEIGHT / 2 + z.y);
       }
       this.upscaleFilter = attachUpscaleSharpFilter(
         this,
@@ -1438,6 +1651,9 @@ export class MainScene extends Phaser.Scene {
       this.unsubCritImpact = null;
       this.unsubGraphics?.();
       this.unsubGraphics = null;
+      this.unsubGore?.();
+      this.unsubGore = null;
+      this.bossVignetteSprite = null;
       if (this.mainResizeHandler) {
         this.scale.off('resize', this.mainResizeHandler);
         this.mainResizeHandler = null;
@@ -1453,6 +1669,10 @@ export class MainScene extends Phaser.Scene {
       if (gameManager.activeScene === this) {
         gameManager.activeScene = null;
       }
+    });
+
+    this.unsubGore = gameManager.onGoreChange((nextLevel) => {
+      this.handleGoreLevelChanged(nextLevel);
     });
   }
 
@@ -1620,6 +1840,984 @@ export class MainScene extends Phaser.Scene {
   }
 
   // -------------------------------------------------------------
+  // Enemy Death Gore System (Pooled, NORMAL Blend, Zero Per-Frame Alloc)
+  // -------------------------------------------------------------
+  private ensureGoreTextures() {
+    // 1. Elongated blood droplet texture pointing along +X
+    if (!this.textures.exists('gore_droplet')) {
+      const tex = this.textures.createCanvas('gore_droplet', 24, 12);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, 24, 12);
+        const grad = ctx.createRadialGradient(16, 6, 1, 13, 6, 11);
+        grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+        grad.addColorStop(0.6, 'rgba(245, 240, 240, 0.92)');
+        grad.addColorStop(1, 'rgba(220, 210, 210, 0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.moveTo(22, 6);
+        ctx.quadraticCurveTo(18, 1.5, 11, 2.5);
+        ctx.quadraticCurveTo(3, 4.2, 1, 6);
+        ctx.quadraticCurveTo(3, 7.8, 11, 9.5);
+        ctx.quadraticCurveTo(18, 10.5, 22, 6);
+        ctx.closePath();
+        ctx.fill();
+        tex.refresh();
+      }
+    }
+
+    // 2. Angular stone chip texture for Stone Brute deaths
+    if (!this.textures.exists('gore_stone_chip')) {
+      const tex = this.textures.createCanvas('gore_stone_chip', 14, 14);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, 14, 14);
+        ctx.fillStyle = '#e5e7eb';
+        ctx.beginPath();
+        ctx.moveTo(2, 5);
+        ctx.lineTo(7, 1);
+        ctx.lineTo(12, 4);
+        ctx.lineTo(11, 11);
+        ctx.lineTo(5, 13);
+        ctx.lineTo(1, 9);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+        ctx.beginPath();
+        ctx.moveTo(2, 5);
+        ctx.lineTo(7, 1);
+        ctx.lineTo(9, 6);
+        ctx.lineTo(4, 7);
+        ctx.closePath();
+        ctx.fill();
+        tex.refresh();
+      }
+    }
+
+    // 3. Soft mist / dust puff texture
+    if (!this.textures.exists('gore_mist_puff')) {
+      const tex = this.textures.createCanvas('gore_mist_puff', 64, 64);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, 64, 64);
+        const g1 = ctx.createRadialGradient(32, 32, 2, 32, 32, 30);
+        g1.addColorStop(0, 'rgba(255, 255, 255, 0.92)');
+        g1.addColorStop(0.45, 'rgba(255, 255, 255, 0.48)');
+        g1.addColorStop(0.8, 'rgba(255, 255, 255, 0.14)');
+        g1.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = g1;
+        ctx.fillRect(0, 0, 64, 64);
+        tex.refresh();
+      }
+    }
+
+    // 4. Four distinct splat decal textures (irregular dark crimson blob + 6-10 satellite droplets + specular edge)
+    const size = GORE.decal.textureSize;
+    const half = size * 0.5;
+    for (let v = 0; v < GORE.decal.variants; v++) {
+      const key = GORE_DECAL_KEYS[v];
+      if (this.textures.exists(key)) continue;
+      const tex = this.textures.createCanvas(key, size, size);
+      if (!tex) continue;
+      const ctx = tex.getContext();
+      ctx.clearRect(0, 0, size, size);
+
+      // Deterministic pseudo-random helper per variant so stains look organic & consistent across boots
+      let seed = (v + 1) * 9301 + 49297;
+      const rand = () => {
+        seed = (seed * 16807) % 2147483647;
+        return (seed - 1) / 2147483646;
+      };
+
+      // Irregular multi-lobe dark crimson central pool
+      ctx.fillStyle = '#47090e';
+      ctx.beginPath();
+      const lobes = 14;
+      for (let i = 0; i <= lobes; i++) {
+        const a = (i / lobes) * Math.PI * 2;
+        const nextA = ((i + 0.5) / lobes) * Math.PI * 2;
+        const r = 13 + Math.sin(a * 3 + v * 1.4) * 4.5 + Math.cos(a * 5 - v) * 2.5 + rand() * 3.5;
+        const cr = r + 3.2;
+        const px = half + Math.cos(a) * r;
+        const py = half + Math.sin(a) * r;
+        if (i === 0) {
+          ctx.moveTo(px, py);
+        } else {
+          const cpx = half + Math.cos(nextA) * cr;
+          const cpy = half + Math.sin(nextA) * cr;
+          ctx.quadraticCurveTo(cpx, cpy, px, py);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Deeper dried center core
+      ctx.fillStyle = '#36060a';
+      ctx.beginPath();
+      ctx.ellipse(half + (rand() - 0.5) * 4, half + (rand() - 0.5) * 4, 9.5, 7.5, v * 0.7, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Fresh wet crimson edge layer
+      ctx.fillStyle = 'rgba(107, 15, 21, 0.78)';
+      for (let l = 0; l < 4; l++) {
+        const la = (l / 4) * Math.PI * 2 + v * 0.6;
+        const dist = 7 + rand() * 5;
+        ctx.beginPath();
+        ctx.ellipse(
+          half + Math.cos(la) * dist,
+          half + Math.sin(la) * dist,
+          5 + rand() * 3.5,
+          3.5 + rand() * 2.5,
+          la,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+
+      // 6-10 satellite droplets radiating from main splat
+      const satCount =
+        GORE.decal.satelliteMin +
+        (v % (GORE.decal.satelliteMax - GORE.decal.satelliteMin + 1));
+      for (let s = 0; s < satCount; s++) {
+        const sa = (s / satCount) * Math.PI * 2 + rand() * 0.55;
+        const sdist = 18 + rand() * 19;
+        const sx = half + Math.cos(sa) * sdist;
+        const sy = half + Math.sin(sa) * sdist;
+        const srX = 2.0 + rand() * 2.8;
+        const srY = 1.4 + rand() * 1.8;
+
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(sa);
+        ctx.fillStyle = s % 2 === 0 ? '#5c0c12' : '#42080d';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, srX, srY, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Tiny lighter specular glints on larger satellite droplets
+        if (s < 3) {
+          ctx.fillStyle = 'rgba(164, 40, 48, 0.65)';
+          ctx.beginPath();
+          ctx.arc(-srX * 0.25, -srY * 0.25, 0.85, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+
+      // Tiny lighter specular edge on upper-left rim of main blob
+      ctx.strokeStyle = 'rgba(176, 44, 54, 0.55)';
+      ctx.lineWidth = 1.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(half - 1.5, half - 1.5, 11.5, Math.PI * 0.95, Math.PI * 1.48);
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(half + 2.5, half - 2.5, 6.2, Math.PI * 1.15, Math.PI * 1.55);
+      ctx.stroke();
+
+      tex.refresh();
+    }
+
+    // 5. Boss death brief 10% darkening vignette texture
+    if (!this.textures.exists('gore_boss_vignette')) {
+      const sizeV = 256;
+      const tex = this.textures.createCanvas('gore_boss_vignette', sizeV, sizeV);
+      if (tex) {
+        const ctx = tex.getContext();
+        const halfV = sizeV * 0.5;
+        const grad = ctx.createRadialGradient(halfV, halfV, halfV * 0.35, halfV, halfV, halfV);
+        grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        grad.addColorStop(0.65, 'rgba(6, 2, 5, 0.55)');
+        grad.addColorStop(1, 'rgba(4, 1, 4, 1)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, sizeV, sizeV);
+        tex.refresh();
+      }
+    }
+
+    // 6. On-hit blood splash splatter burst texture
+    if (!this.textures.exists('gore_hit_splash')) {
+      const sizeS = 64;
+      const halfS = sizeS * 0.5;
+      const tex = this.textures.createCanvas('gore_hit_splash', sizeS, sizeS);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, sizeS, sizeS);
+
+        let seed = 7919;
+        const rand = () => {
+          seed = (seed * 16807) % 2147483647;
+          return (seed - 1) / 2147483646;
+        };
+
+        // Central jagged splash core
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.92)';
+        ctx.beginPath();
+        const spikes = 16;
+        for (let i = 0; i <= spikes; i++) {
+          const a = (i / spikes) * Math.PI * 2;
+          const r = i % 2 === 0 ? 15 + rand() * 8 : 5.5 + rand() * 3.5;
+          const px = halfS + Math.cos(a) * r;
+          const py = halfS + Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Radial splash streaks & droplets around core
+        for (let i = 0; i < 11; i++) {
+          const a = (i / 11) * Math.PI * 2 + rand() * 0.4;
+          const dist = 16 + rand() * 11;
+          const sx = halfS + Math.cos(a) * dist;
+          const sy = halfS + Math.sin(a) * dist;
+          ctx.save();
+          ctx.translate(sx, sy);
+          ctx.rotate(a);
+          ctx.fillStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.88)' : 'rgba(225, 210, 210, 0.72)';
+          ctx.beginPath();
+          ctx.ellipse(0, 0, 3.6 + rand() * 3.2, 1.5 + rand() * 1.4, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+
+        tex.refresh();
+      }
+    }
+  }
+
+  private initGorePools() {
+    this.goreParticlePool = [];
+    for (let i = 0; i < GORE.maxDroplets; i++) {
+      const sprite = this.add.image(0, 0, 'gore_droplet');
+      sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+      sprite.setDepth(GORE.dropletDepth);
+      sprite.setVisible(false);
+      sprite.setActive(false);
+      sprite.disableInteractive();
+      this.goreParticlePool.push({
+        sprite,
+        kind: 'droplet',
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+        life: 0,
+        maxLife: 1,
+        baseAlpha: 1,
+        startScaleX: 1,
+        startScaleY: 1,
+        endScale: 1,
+        rotSpeed: 0,
+        active: false,
+        seq: 0,
+      });
+    }
+
+    this.goreDecalPool = [];
+    for (let i = 0; i < GORE.maxDecals; i++) {
+      const sprite = this.add.image(0, 0, GORE_DECAL_KEYS[0]);
+      sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+      sprite.setDepth(GORE.decalDepth);
+      sprite.setVisible(false);
+      sprite.setActive(false);
+      sprite.disableInteractive();
+      this.goreDecalPool.push({
+        sprite,
+        life: 0,
+        maxLife: GORE.decal.fadeDurationMs,
+        baseAlpha: GORE.decal.alpha,
+        active: false,
+        seq: 0,
+      });
+    }
+  }
+
+  private handleGoreLevelChanged(nextLevel: GoreLevel) {
+    if (nextLevel === 'off') {
+      for (let i = 0; i < this.goreParticlePool.length; i++) {
+        const p = this.goreParticlePool[i];
+        p.active = false;
+        p.sprite.setVisible(false);
+        p.sprite.setActive(false);
+      }
+      for (let i = 0; i < this.goreDecalPool.length; i++) {
+        const d = this.goreDecalPool[i];
+        d.active = false;
+        d.sprite.setVisible(false);
+        d.sprite.setActive(false);
+      }
+      this.bossVignetteTimerMs = 0;
+      if (this.bossVignetteSprite) {
+        this.bossVignetteSprite.setAlpha(0).setVisible(false);
+      }
+      return;
+    }
+
+    if (nextLevel === 'low') {
+      const maxLowParticles = Math.floor(GORE.maxDroplets * GORE.lowSettingMultiplier);
+      let activeParticles = 0;
+      for (let i = 0; i < this.goreParticlePool.length; i++) {
+        if (this.goreParticlePool[i].active) activeParticles++;
+      }
+      while (activeParticles > maxLowParticles) {
+        let oldestIdx = -1;
+        let oldestSeq = Number.MAX_SAFE_INTEGER;
+        for (let i = 0; i < this.goreParticlePool.length; i++) {
+          const p = this.goreParticlePool[i];
+          if (p.active && p.seq < oldestSeq) {
+            oldestSeq = p.seq;
+            oldestIdx = i;
+          }
+        }
+        if (oldestIdx === -1) break;
+        const victim = this.goreParticlePool[oldestIdx];
+        victim.active = false;
+        victim.sprite.setVisible(false);
+        victim.sprite.setActive(false);
+        activeParticles--;
+      }
+
+      const maxLowDecals = Math.floor(GORE.maxDecals * GORE.lowSettingMultiplier);
+      let activeDecals = 0;
+      for (let i = 0; i < this.goreDecalPool.length; i++) {
+        if (this.goreDecalPool[i].active) activeDecals++;
+      }
+      while (activeDecals > maxLowDecals) {
+        let oldestIdx = -1;
+        let oldestSeq = Number.MAX_SAFE_INTEGER;
+        for (let i = 0; i < this.goreDecalPool.length; i++) {
+          const d = this.goreDecalPool[i];
+          if (d.active && d.seq < oldestSeq) {
+            oldestSeq = d.seq;
+            oldestIdx = i;
+          }
+        }
+        if (oldestIdx === -1) break;
+        const victim = this.goreDecalPool[oldestIdx];
+        victim.active = false;
+        victim.sprite.setVisible(false);
+        victim.sprite.setActive(false);
+        activeDecals--;
+      }
+    }
+  }
+
+  private acquireGoreParticle(maxActiveCap: number): GoreParticle {
+    let activeCount = 0;
+    let freeSlot: GoreParticle | null = null;
+    let oldestSlot = this.goreParticlePool[0];
+    let oldestSeq = Number.MAX_SAFE_INTEGER;
+
+    for (let i = 0; i < this.goreParticlePool.length; i++) {
+      const p = this.goreParticlePool[i];
+      if (p.active) {
+        activeCount++;
+        if (p.seq < oldestSeq) {
+          oldestSeq = p.seq;
+          oldestSlot = p;
+        }
+      } else if (!freeSlot) {
+        freeSlot = p;
+      }
+    }
+
+    if (activeCount >= maxActiveCap || !freeSlot) {
+      return oldestSlot;
+    }
+    return freeSlot;
+  }
+
+  private acquireGoreDecal(maxActiveCap: number): GoreDecal {
+    let activeCount = 0;
+    let freeSlot: GoreDecal | null = null;
+    let oldestSlot = this.goreDecalPool[0];
+    let oldestSeq = Number.MAX_SAFE_INTEGER;
+
+    for (let i = 0; i < this.goreDecalPool.length; i++) {
+      const d = this.goreDecalPool[i];
+      if (d.active) {
+        activeCount++;
+        if (d.seq < oldestSeq) {
+          oldestSeq = d.seq;
+          oldestSlot = d;
+        }
+      } else if (!freeSlot) {
+        freeSlot = d;
+      }
+    }
+
+    if (activeCount >= maxActiveCap || !freeSlot) {
+      return oldestSlot;
+    }
+    return freeSlot;
+  }
+
+  private spawnGoreDroplet(
+    x: number,
+    y: number,
+    tint: number,
+    speedMin: number,
+    speedMax: number,
+    gravity: number,
+    lifeMinMs: number,
+    lifeMaxMs: number,
+    maxActiveCap: number
+  ) {
+    const p = this.acquireGoreParticle(maxActiveCap);
+    this.goreParticleSeq += 1;
+
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Phaser.Math.FloatBetween(speedMin, speedMax);
+    const vx = Math.cos(angle) * speed;
+    const vy = Math.sin(angle) * speed - Phaser.Math.FloatBetween(20, 75);
+
+    p.kind = 'droplet';
+    p.active = true;
+    p.seq = this.goreParticleSeq;
+    p.vx = vx;
+    p.vy = vy;
+    p.gravity = gravity;
+    p.life = 0;
+    p.maxLife = Phaser.Math.Between(lifeMinMs, lifeMaxMs);
+    p.baseAlpha = GORE.bloodBurst.alpha;
+    p.startScaleX = Phaser.Math.FloatBetween(0.45, 0.72);
+    p.startScaleY = Phaser.Math.FloatBetween(0.34, 0.52);
+    p.endScale = GORE.bloodBurst.minEndScaleFactor;
+    p.rotSpeed = 0;
+
+    const stretchX = p.startScaleX + speed * GORE.bloodBurst.stretchVelocityFactor;
+    p.sprite.setTexture('gore_droplet');
+    p.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+    p.sprite.setDepth(GORE.dropletDepth);
+    p.sprite.setPosition(x, y);
+    p.sprite.setRotation(Math.atan2(vy, vx));
+    p.sprite.setScale(stretchX, p.startScaleY);
+    p.sprite.setTint(tint);
+    p.sprite.setAlpha(p.baseAlpha);
+    p.sprite.setVisible(true);
+    p.sprite.setActive(true);
+  }
+
+  private spawnGoreStoneChip(
+    x: number,
+    y: number,
+    tint: number,
+    maxActiveCap: number
+  ) {
+    const cfg = GORE.variants.brute;
+    const p = this.acquireGoreParticle(maxActiveCap);
+    this.goreParticleSeq += 1;
+
+    const angle = Math.random() * Math.PI * 2;
+    const speed = Phaser.Math.FloatBetween(cfg.chipSpeedMin, cfg.chipSpeedMax);
+    const sc = Phaser.Math.FloatBetween(cfg.chipScaleMin, cfg.chipScaleMax);
+
+    p.kind = 'chip';
+    p.active = true;
+    p.seq = this.goreParticleSeq;
+    p.vx = Math.cos(angle) * speed;
+    p.vy = Math.sin(angle) * speed - Phaser.Math.FloatBetween(40, 110);
+    p.gravity = cfg.chipGravity;
+    p.life = 0;
+    p.maxLife = Phaser.Math.Between(cfg.chipLifeMinMs, cfg.chipLifeMaxMs);
+    p.baseAlpha = 0.95;
+    p.startScaleX = sc;
+    p.startScaleY = sc;
+    p.endScale = 0.25;
+    p.rotSpeed = Phaser.Math.FloatBetween(-10, 10);
+
+    p.sprite.setTexture('gore_stone_chip');
+    p.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+    p.sprite.setDepth(GORE.dropletDepth);
+    p.sprite.setPosition(x, y);
+    p.sprite.setRotation(Math.random() * Math.PI * 2);
+    p.sprite.setScale(sc);
+    p.sprite.setTint(tint);
+    p.sprite.setAlpha(p.baseAlpha);
+    p.sprite.setVisible(true);
+    p.sprite.setActive(true);
+  }
+
+  private spawnGoreMist(
+    x: number,
+    y: number,
+    kind: 'mist' | 'wisp_mist',
+    tint: number,
+    alpha: number,
+    durationMs: number,
+    startScale: number,
+    endScale: number,
+    vx: number,
+    vy: number,
+    gravity: number,
+    maxActiveCap: number
+  ) {
+    const p = this.acquireGoreParticle(maxActiveCap);
+    this.goreParticleSeq += 1;
+
+    p.kind = kind;
+    p.active = true;
+    p.seq = this.goreParticleSeq;
+    p.vx = vx;
+    p.vy = vy;
+    p.gravity = gravity;
+    p.life = 0;
+    p.maxLife = durationMs;
+    p.baseAlpha = alpha;
+    p.startScaleX = startScale;
+    p.startScaleY = startScale;
+    p.endScale = endScale;
+    p.rotSpeed = Phaser.Math.FloatBetween(-1.2, 1.2);
+
+    p.sprite.setTexture('gore_mist_puff');
+    p.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+    p.sprite.setDepth(GORE.dropletDepth);
+    p.sprite.setPosition(x, y);
+    p.sprite.setRotation(Math.random() * Math.PI * 2);
+    p.sprite.setScale(startScale);
+    p.sprite.setTint(tint);
+    p.sprite.setAlpha(alpha);
+    p.sprite.setVisible(true);
+    p.sprite.setActive(true);
+  }
+
+  private spawnFloorDecal(
+    x: number,
+    y: number,
+    scale: number,
+    tint: number,
+    maxActiveDecals: number
+  ) {
+    const d = this.acquireGoreDecal(maxActiveDecals);
+    this.goreDecalSeq += 1;
+
+    const variantKey = GORE_DECAL_KEYS[(Math.random() * GORE_DECAL_KEYS.length) | 0];
+    d.active = true;
+    d.seq = this.goreDecalSeq;
+    d.life = 0;
+    d.maxLife = GORE.decal.fadeDurationMs;
+    d.baseAlpha = GORE.decal.alpha;
+
+    d.sprite.setTexture(variantKey);
+    d.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+    d.sprite.setDepth(GORE.decalDepth);
+    d.sprite.setPosition(x, y);
+    d.sprite.setRotation(Math.random() * Math.PI * 2);
+    d.sprite.setScale(scale);
+    if (tint === 0xffffff) {
+      d.sprite.clearTint();
+    } else {
+      d.sprite.setTint(tint);
+    }
+    d.sprite.setAlpha(d.baseAlpha);
+    d.sprite.setVisible(true);
+    d.sprite.setActive(true);
+  }
+
+  private spawnEnemyDeathGore(
+    x: number,
+    y: number,
+    enemyType: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss',
+    enemyScale: number,
+    isElite: boolean
+  ) {
+    const goreSetting = gameManager.getGoreLevel();
+    if (goreSetting === 'off') return;
+
+    const isLowGore = goreSetting === 'low';
+    const countMult = isLowGore ? GORE.lowSettingMultiplier : 1;
+    const maxLiveDroplets = isLowGore
+      ? Math.floor(GORE.maxDroplets * GORE.lowSettingMultiplier)
+      : GORE.maxDroplets;
+    const maxLiveDecals = isLowGore
+      ? Math.floor(GORE.maxDecals * GORE.lowSettingMultiplier)
+      : GORE.maxDecals;
+
+    // 1. Stone Brute variant: gray stone chips + 6-8 amber ember sparks + gray dust puff (no blood)
+    if (enemyType === 'brute') {
+      const bCfg = GORE.variants.brute;
+      const chipCount = Math.max(
+        1,
+        Math.round(Phaser.Math.Between(bCfg.chipMin, bCfg.chipMax) * countMult)
+      );
+      for (let i = 0; i < chipCount; i++) {
+        const chipColor = bCfg.chipColors[i % bCfg.chipColors.length];
+        this.spawnGoreStoneChip(x, y, chipColor, maxLiveDroplets);
+      }
+
+      const emberTotal = Math.max(
+        1,
+        Math.round(Phaser.Math.Between(bCfg.emberMin, bCfg.emberMax) * countMult)
+      );
+      const halfEmber = Math.ceil(emberTotal * 0.5);
+      const restEmber = emberTotal - halfEmber;
+      this.spawnParticleBurst(
+        x,
+        y,
+        halfEmber,
+        'fx_spark',
+        bCfg.emberSpeedMin,
+        bCfg.emberSpeedMax,
+        bCfg.emberScaleMin,
+        bCfg.emberScaleMax,
+        bCfg.emberColors[0],
+        bCfg.emberLifeMs
+      );
+      if (restEmber > 0) {
+        this.spawnParticleBurst(
+          x,
+          y,
+          restEmber,
+          'fx_spark',
+          bCfg.emberSpeedMin,
+          bCfg.emberSpeedMax,
+          bCfg.emberScaleMin,
+          bCfg.emberScaleMax,
+          bCfg.emberColors[1],
+          bCfg.emberLifeMs
+        );
+      }
+
+      const dustCount = isLowGore ? 1 : bCfg.dustCount;
+      for (let i = 0; i < dustCount; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const spd = Phaser.Math.FloatBetween(10, 32);
+        this.spawnGoreMist(
+          x + Phaser.Math.FloatBetween(-8, 8),
+          y + Phaser.Math.FloatBetween(-6, 6),
+          'mist',
+          bCfg.dustColor,
+          bCfg.dustAlpha,
+          bCfg.dustDurationMs,
+          bCfg.dustStartScale,
+          bCfg.dustEndScale,
+          Math.cos(a) * spd,
+          Math.sin(a) * spd,
+          0,
+          maxLiveDroplets
+        );
+      }
+      return;
+    }
+
+    // 2. Wisp variant: cyan mist that rises and dissolves (no blood)
+    if (enemyType === 'wisp') {
+      const wCfg = GORE.variants.wisp;
+      const mistCount = Math.max(
+        1,
+        Math.round(Phaser.Math.Between(wCfg.mistMin, wCfg.mistMax) * countMult)
+      );
+      for (let i = 0; i < mistCount; i++) {
+        this.spawnGoreMist(
+          x + Phaser.Math.FloatBetween(-10, 10),
+          y + Phaser.Math.FloatBetween(-8, 8),
+          'wisp_mist',
+          wCfg.mistColor,
+          wCfg.mistAlpha,
+          wCfg.mistDurationMs,
+          wCfg.startScale,
+          wCfg.endScale,
+          Phaser.Math.FloatBetween(-wCfg.driftVxRange, wCfg.driftVxRange),
+          Phaser.Math.FloatBetween(wCfg.riseVyMin, wCfg.riseVyMax),
+          wCfg.riseAccelY,
+          maxLiveDroplets
+        );
+      }
+      return;
+    }
+
+    // 3. Blood variants: imp, spitter, elites, boss
+    const isBoss = enemyType === 'boss';
+    const isSpitter = enemyType === 'spitter';
+    const colors = isSpitter ? GORE.bloodBurst.spitterColors : GORE.bloodBurst.colors;
+
+    const baseDrops = Phaser.Math.Between(GORE.bloodBurst.minCount, GORE.bloodBurst.maxCount);
+    let dropCount = isBoss
+      ? Math.min(GORE.variants.boss.maxDropletsPerKill, baseDrops * GORE.variants.boss.dropletMultiplier)
+      : baseDrops;
+    dropCount = Math.max(1, Math.round(dropCount * countMult));
+
+    const spawnSpread = isBoss ? 22 : isElite ? 10 : 5;
+    for (let i = 0; i < dropCount; i++) {
+      const color = colors[(Math.random() * colors.length) | 0];
+      const ox = x + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread);
+      const oy = y + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread);
+      this.spawnGoreDroplet(
+        ox,
+        oy,
+        color,
+        GORE.bloodBurst.speedMin,
+        isBoss ? GORE.bloodBurst.speedMax * 1.15 : GORE.bloodBurst.speedMax,
+        GORE.bloodBurst.gravity,
+        GORE.bloodBurst.lifeMinMs,
+        GORE.bloodBurst.lifeMaxMs,
+        maxLiveDroplets
+      );
+    }
+
+    // Soft mist puffs
+    const mistColor = isSpitter ? GORE.mist.spitterColor : GORE.mist.bloodColor;
+    const rawMistCount = isBoss
+      ? Phaser.Math.Between(GORE.variants.boss.mistMin, GORE.variants.boss.mistMax)
+      : Phaser.Math.Between(GORE.mist.minCount, GORE.mist.maxCount);
+    const mistCount = Math.max(1, Math.round(rawMistCount * countMult));
+    const mistAlpha = isBoss ? GORE.variants.boss.mistAlpha : GORE.mist.alpha;
+    const mistDuration = isBoss ? GORE.variants.boss.mistDurationMs : GORE.mist.durationMs;
+    const mistEndScale = isBoss ? GORE.variants.boss.mistEndScale : GORE.mist.endScale;
+
+    for (let i = 0; i < mistCount; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const spd = Phaser.Math.FloatBetween(GORE.mist.speedMin, GORE.mist.speedMax);
+      this.spawnGoreMist(
+        x + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread),
+        y + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread),
+        'mist',
+        mistColor,
+        mistAlpha,
+        mistDuration,
+        isBoss ? 0.65 : GORE.mist.startScale,
+        mistEndScale,
+        Math.cos(a) * spd,
+        Math.sin(a) * spd,
+        0,
+        maxLiveDroplets
+      );
+    }
+
+    // Floor stain decal (Low halves decal frequency & cap; Boss always stamps)
+    let stampDecal = true;
+    if (isLowGore && !isBoss) {
+      this.goreLowDecalCounter = (this.goreLowDecalCounter + 1) & 1;
+      stampDecal = this.goreLowDecalCounter === 1;
+    }
+    if (stampDecal) {
+      const scaleFactor = enemyScale > 0 ? Math.min(1.4, Math.max(0.75, enemyScale / 0.48)) : 1;
+      const variantMult = isBoss
+        ? GORE.decal.bossScaleMult
+        : isElite
+          ? GORE.decal.eliteScaleMult
+          : 1;
+      const decalScale = GORE.decal.baseScale * scaleFactor * variantMult;
+      const decalTint = isSpitter ? GORE.decal.spitterTint : GORE.decal.bloodTint;
+      this.spawnFloorDecal(x, y + 6, decalScale, decalTint, maxLiveDecals);
+    }
+
+    // Boss death brief 10% darkening vignette
+    if (isBoss && this.bossVignetteSprite) {
+      this.bossVignetteTimerMs = GORE.variants.boss.vignetteDurationMs;
+      this.bossVignetteSprite.setAlpha(GORE.variants.boss.vignetteAlpha);
+      this.bossVignetteSprite.setVisible(true);
+    }
+  }
+
+  private spawnEnemyHitBloodSplash(
+    x: number,
+    y: number,
+    enemyType: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss',
+    impactVx: number,
+    impactVy: number,
+    isCrit: boolean
+  ) {
+    const goreSetting = gameManager.getGoreLevel();
+    if (goreSetting === 'off') {
+      this.spawnSparkHitEffect(x, y);
+      return;
+    }
+
+    const isLowGore = goreSetting === 'low';
+    const maxLiveDroplets = isLowGore
+      ? Math.floor(GORE.maxDroplets * GORE.lowSettingMultiplier)
+      : GORE.maxDroplets;
+    const hCfg = GORE.hitSplash;
+    const isSpitter = enemyType === 'spitter';
+
+    // 1. Pooled blood splash pop at impact point (NORMAL blend, respects darkness layer)
+    const splash = this.acquireGoreParticle(maxLiveDroplets);
+    this.goreParticleSeq += 1;
+
+    const hasDir = impactVx * impactVx + impactVy * impactVy > 4;
+    const baseAngle = hasDir ? Math.atan2(impactVy, impactVx) : Math.random() * Math.PI * 2;
+    const endScale = isCrit ? hCfg.critSplashEndScale : hCfg.splashEndScale;
+
+    splash.kind = 'splash';
+    splash.active = true;
+    splash.seq = this.goreParticleSeq;
+    splash.vx = hasDir ? Math.cos(baseAngle) * 26 : 0;
+    splash.vy = hasDir ? Math.sin(baseAngle) * 26 : 0;
+    splash.gravity = 0;
+    splash.life = 0;
+    splash.maxLife = hCfg.splashDurationMs;
+    splash.baseAlpha = hCfg.splashAlpha;
+    splash.startScaleX = hCfg.splashStartScale;
+    splash.startScaleY = hCfg.splashStartScale;
+    splash.endScale = endScale;
+    splash.rotSpeed = 0;
+
+    splash.sprite.setTexture('gore_hit_splash');
+    splash.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+    splash.sprite.setDepth(GORE.dropletDepth);
+    splash.sprite.setPosition(x, y);
+    splash.sprite.setRotation(baseAngle + Phaser.Math.FloatBetween(-0.6, 0.6));
+    splash.sprite.setScale(hCfg.splashStartScale);
+    splash.sprite.setTint(isSpitter ? hCfg.spitterSplashTint : hCfg.splashTint);
+    splash.sprite.setAlpha(hCfg.splashAlpha);
+    splash.sprite.setVisible(true);
+    splash.sprite.setActive(true);
+
+    // 2. Spray directional pooled crimson droplets outward from hit
+    const rawDropCount = isCrit
+      ? Phaser.Math.Between(hCfg.critDropletMin, hCfg.critDropletMax)
+      : Phaser.Math.Between(hCfg.dropletMin, hCfg.dropletMax);
+    const dropCount = isLowGore
+      ? Math.max(1, Math.round(rawDropCount * GORE.lowSettingMultiplier))
+      : rawDropCount;
+    const colors = isSpitter ? hCfg.spitterColors : hCfg.colors;
+
+    for (let i = 0; i < dropCount; i++) {
+      const p = this.acquireGoreParticle(maxLiveDroplets);
+      this.goreParticleSeq += 1;
+
+      const angle = hasDir
+        ? baseAngle + Phaser.Math.FloatBetween(-hCfg.coneSpreadRad, hCfg.coneSpreadRad)
+        : Math.random() * Math.PI * 2;
+      const speed = Phaser.Math.FloatBetween(
+        hCfg.speedMin,
+        isCrit ? hCfg.speedMax * 1.2 : hCfg.speedMax
+      );
+      const vx = Math.cos(angle) * speed;
+      const vy = Math.sin(angle) * speed;
+
+      p.kind = 'droplet';
+      p.active = true;
+      p.seq = this.goreParticleSeq;
+      p.vx = vx;
+      p.vy = vy;
+      p.gravity = hCfg.gravity;
+      p.life = 0;
+      p.maxLife = Phaser.Math.Between(hCfg.lifeMinMs, hCfg.lifeMaxMs);
+      p.baseAlpha = GORE.bloodBurst.alpha;
+      p.startScaleX = Phaser.Math.FloatBetween(0.38, 0.62);
+      p.startScaleY = Phaser.Math.FloatBetween(0.28, 0.46);
+      p.endScale = GORE.bloodBurst.minEndScaleFactor;
+      p.rotSpeed = 0;
+
+      const stretchX = p.startScaleX + speed * GORE.bloodBurst.stretchVelocityFactor;
+      p.sprite.setTexture('gore_droplet');
+      p.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+      p.sprite.setDepth(GORE.dropletDepth);
+      p.sprite.setPosition(x, y);
+      p.sprite.setRotation(Math.atan2(vy, vx));
+      p.sprite.setScale(stretchX, p.startScaleY);
+      p.sprite.setTint(colors[(Math.random() * colors.length) | 0]);
+      p.sprite.setAlpha(p.baseAlpha);
+      p.sprite.setVisible(true);
+      p.sprite.setActive(true);
+    }
+  }
+
+  private updateGore(delta: number) {
+    const dt = delta * 0.001;
+
+    // 1. Update pooled gore particles (blood droplets, splash bursts, stone chips, mist puffs, wisp mist)
+    for (let i = 0; i < this.goreParticlePool.length; i++) {
+      const p = this.goreParticlePool[i];
+      if (!p.active) continue;
+
+      p.life += delta;
+      if (p.life >= p.maxLife) {
+        p.active = false;
+        p.sprite.setVisible(false);
+        p.sprite.setActive(false);
+        continue;
+      }
+
+      const progress = p.life / p.maxLife;
+      if (p.kind === 'splash') {
+        p.sprite.x += p.vx * dt;
+        p.sprite.y += p.vy * dt;
+        const easeOut = 1 - (1 - progress) * (1 - progress);
+        const sc = p.startScaleX + (p.endScale - p.startScaleX) * easeOut;
+        p.sprite.setScale(sc);
+        p.sprite.setAlpha(p.baseAlpha * (1 - progress * progress));
+      } else if (p.kind === 'droplet') {
+        p.vy += p.gravity * dt;
+        p.sprite.x += p.vx * dt;
+        p.sprite.y += p.vy * dt;
+
+        const speed = Math.sqrt(p.vx * p.vx + p.vy * p.vy);
+        p.sprite.rotation = Math.atan2(p.vy, p.vx);
+
+        let shrinkMult = 1;
+        if (progress > GORE.bloodBurst.shrinkStartRatio) {
+          const shrinkT =
+            (progress - GORE.bloodBurst.shrinkStartRatio) /
+            (1 - GORE.bloodBurst.shrinkStartRatio);
+          shrinkMult = 1 - shrinkT * (1 - GORE.bloodBurst.minEndScaleFactor);
+        }
+        const stretchX = (p.startScaleX + speed * GORE.bloodBurst.stretchVelocityFactor) * shrinkMult;
+        p.sprite.setScale(stretchX, p.startScaleY * shrinkMult);
+
+        const fadeMult = progress > 0.45 ? 1 - (progress - 0.45) / 0.55 : 1;
+        p.sprite.setAlpha(p.baseAlpha * fadeMult);
+      } else if (p.kind === 'chip') {
+        p.vy += p.gravity * dt;
+        p.sprite.x += p.vx * dt;
+        p.sprite.y += p.vy * dt;
+        p.sprite.rotation += p.rotSpeed * dt;
+        const shrinkMult = progress > 0.6 ? 1 - (progress - 0.6) / 0.4 : 1;
+        p.sprite.setScale(p.startScaleX * shrinkMult);
+        p.sprite.setAlpha(p.baseAlpha * (1 - progress * progress));
+      } else {
+        // 'mist' or 'wisp_mist'
+        const damp = Math.pow(0.94, delta / 16.6667);
+        p.vx *= damp;
+        if (p.kind === 'wisp_mist') {
+          p.vy += p.gravity * dt;
+        } else {
+          p.vy *= damp;
+        }
+        p.sprite.x += p.vx * dt;
+        p.sprite.y += p.vy * dt;
+        p.sprite.rotation += p.rotSpeed * dt;
+        const sc = p.startScaleX + (p.endScale - p.startScaleX) * progress;
+        p.sprite.setScale(sc);
+        p.sprite.setAlpha(p.baseAlpha * (1 - progress));
+      }
+    }
+
+    // 2. Update pooled floor stain decals (fade out over 8 seconds)
+    for (let i = 0; i < this.goreDecalPool.length; i++) {
+      const d = this.goreDecalPool[i];
+      if (!d.active) continue;
+
+      d.life += delta;
+      if (d.life >= d.maxLife) {
+        d.active = false;
+        d.sprite.setVisible(false);
+        d.sprite.setActive(false);
+        continue;
+      }
+
+      const progress = d.life / d.maxLife;
+      d.sprite.setAlpha(d.baseAlpha * (1 - progress));
+    }
+
+    // 3. Update brief boss death darkening vignette
+    if (this.bossVignetteTimerMs > 0 && this.bossVignetteSprite) {
+      this.bossVignetteTimerMs -= delta;
+      if (this.bossVignetteTimerMs <= 0) {
+        this.bossVignetteTimerMs = 0;
+        this.bossVignetteSprite.setAlpha(0);
+        this.bossVignetteSprite.setVisible(false);
+      } else {
+        const t = this.bossVignetteTimerMs / GORE.variants.boss.vignetteDurationMs;
+        this.bossVignetteSprite.setAlpha(GORE.variants.boss.vignetteAlpha * t);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------
   // Skill & Impact Effect Pool (Capped at 40 active effects, ADD blend mode)
   // -------------------------------------------------------------
   private initEffectPool() {
@@ -1677,6 +2875,7 @@ export class MainScene extends Phaser.Scene {
     item.sprite.anims.stop();
     item.sprite.setVisible(false);
     item.sprite.setActive(false);
+    item.sprite.setAlpha(1);
     item.sprite.clearTint();
     item.inUse = false;
   }
@@ -1766,12 +2965,13 @@ export class MainScene extends Phaser.Scene {
         break;
     }
 
-    const sc = (enemyScale || 0.45) * 2.0;
+    const sc = (enemyScale || 0.45) * 2.0 * GORE.fxDeathExplosion.scaleMultiplier;
 
     item.sprite.setPosition(x, y);
     item.sprite.setOrigin(0.5, 0.5);
     item.sprite.setRotation(Phaser.Math.FloatBetween(0, Math.PI * 2));
     item.sprite.setScale(sc);
+    item.sprite.setAlpha(GORE.fxDeathExplosion.alpha);
     item.sprite.setBlendMode(Phaser.BlendModes.ADD);
     item.sprite.setDepth(27);
     item.sprite.setTint(accentColor);
@@ -2305,8 +3505,9 @@ export class MainScene extends Phaser.Scene {
     // 9. Update Pickups Magnet & 12s Gem Expiry
     this.updatePickups(delta);
 
-    // 10. Update Particles
+    // 10. Update Particles & Enemy Death Gore/Decals
     this.updateParticles(delta);
+    this.updateGore(delta);
 
     // 11. Update Floating Combat Text Pool
     this.updateFloatingTexts(delta);
@@ -2861,7 +4062,6 @@ export class MainScene extends Phaser.Scene {
             enemy.setData('lastBladeHit', now);
             this.damageEnemy(enemy, dmg, false, Math.cos(angle) * 120, Math.sin(angle) * 120);
             soundManager.playBladeSlash();
-            this.spawnSparkHitEffect(bx, by);
           }
         }
       }
@@ -4322,7 +5522,7 @@ export class MainScene extends Phaser.Scene {
     if (this.activeBoss || this.isDead || !this.sys?.isActive() || !this.player?.active) return;
     this.bossSpawned = true;
 
-    soundManager.playBossWarning();
+    soundManager.playBossSiren();
     soundManager.playBoss();
 
     const angle = Math.random() * Math.PI * 2;
@@ -4405,13 +5605,27 @@ export class MainScene extends Phaser.Scene {
       }
     });
 
+    const bossDisplayName = tier > 1 ? `The Void Titan Tier ${tier}` : 'The Void Titan';
+
     gameManager.emitBossUpdate({
-      name: tier > 1 ? `The Void Titan Tier ${tier}` : 'The Void Titan',
+      name: bossDisplayName,
       currentHp: bossHp,
       maxHp: bossHp,
       active: true,
       recommendedLevel,
       enraged: false,
+    });
+
+    // Clear any lingering wave banner so BossIntroModal owns the warning moment cleanly
+    gameManager.emitEventWarning(null);
+    this.beginBossIntroPause();
+    gameManager.emitBossIntro({
+      name: bossDisplayName,
+      tier,
+      currentHp: bossHp,
+      maxHp: bossHp,
+      recommendedLevel,
+      damage: bossDmg,
     });
   }
 
@@ -4462,8 +5676,10 @@ export class MainScene extends Phaser.Scene {
 
     this.damageEnemy(enemy, pdata.damage, pdata.isCrit, kx, ky);
 
-    // Hit sparks
-    this.spawnParticleBurst(proj.x, proj.y, 6, 'fx_spark', 80, 200, 0.15, 0.35);
+    // Light hit sparks only when Gore is Off (otherwise blood splash renders inside damageEnemy)
+    if (gameManager.getGoreLevel() === 'off') {
+      this.spawnParticleBurst(proj.x, proj.y, 6, 'fx_spark', 80, 200, 0.15, 0.35);
+    }
 
     pdata.pierce--;
     if (pdata.pierce <= 0) {
@@ -4488,8 +5704,8 @@ export class MainScene extends Phaser.Scene {
     this.recentDamageLog.push({ timeMs: this.time.now, amount: damage });
     soundManager.playEnemyHit(isCrit);
 
-    // fx_spark_sheet: on every enemy hit at hit position, random rotation, scale 0.5-1
-    this.spawnSparkHitEffect(enemy.x, enemy.y);
+    // Blood splash on enemy hit (falls back to light sparks if Gore is Off)
+    this.spawnEnemyHitBloodSplash(enemy.x, enemy.y, edata.type, knockbackX, knockbackY, isCrit);
 
     // fx_lightning_sheet: chain lightning between enemies (stretched in X, 0.25s per hit)
     if (canChain && Math.random() < 0.65) {
@@ -4568,11 +5784,11 @@ export class MainScene extends Phaser.Scene {
     }
     this.comboMultiplier = Math.min(SPAWN_TIMELINE.combo.maxMultiplier, mult);
 
-    // fx_death_sheet: on enemy death, tinted with enemy accent color, scaled to ~2x enemy size
+    // fx_death_sheet: faint glow on enemy death (30% alpha, 60% scale)
     this.spawnDeathEffect(enemy.x, enemy.y, edata.type, enemy.scale);
 
-    // Death particle burst
-    this.spawnParticleBurst(enemy.x, enemy.y, 10, 'fx_spark', 100, 240, 0.2, 0.4);
+    // Enemy death gore, variant chips/embers/mist & floor stain decals
+    this.spawnEnemyDeathGore(enemy.x, enemy.y, edata.type, enemy.scale, Boolean(edata.isElite));
 
     // Drop XP Gem (+50% during Darkness Falls event; Elites scatter extra bonus XP orbs)
     const xpMult =
@@ -5182,8 +6398,10 @@ export class MainScene extends Phaser.Scene {
     }
     this.pendingOfferedChallenge = null;
 
-    // Unpause game completely (restoring timers/tweens/anims/DarknessScene if paused during level-up)
-    this.resumeGame();
+    // Unpause game completely unless BossIntroModal is currently holding the dramatic pause
+    if (!this.isBossIntroPaused) {
+      this.resumeGame();
+    }
     if (this.pendingBloodFogTier > 0) {
       const waveTier = this.pendingBloodFogTier;
       this.pendingBloodFogTier = 0;
@@ -5642,6 +6860,30 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  // Dramatic brief freeze on boss arrival (keeps boss roar & boss music playing)
+  public beginBossIntroPause() {
+    if (!this.sys?.isActive() || this.isDead) return;
+    if (this.levelUpSlowMoTimer !== null) {
+      window.clearTimeout(this.levelUpSlowMoTimer);
+      this.levelUpSlowMoTimer = null;
+    }
+    this.time.timeScale = 1.0;
+    this.isBossIntroPaused = true;
+    this.isGamePaused = true;
+    this.hitstopTimer = 0;
+    this.isHitstopPausedPhysics = false;
+    this.physics.pause();
+    this.time.paused = true;
+    this.tweens.pauseAll();
+    this.anims.pauseAll();
+  }
+
+  public endBossIntroPause() {
+    this.isBossIntroPaused = false;
+    if (!this.sys?.isActive() || this.isDead || this.isWaitingForLoading) return;
+    this.resumeGame();
+  }
+
   // Comprehensive pause / resume (physics, timers, tweens, animations, darkness, audio)
   public pauseGame() {
     if (!this.sys?.isActive()) return;
@@ -5673,6 +6915,7 @@ export class MainScene extends Phaser.Scene {
       window.clearTimeout(this.levelUpSlowMoTimer);
       this.levelUpSlowMoTimer = null;
     }
+    this.isBossIntroPaused = false;
     this.time.timeScale = 1.0;
     this.isGamePaused = false;
     this.physics.resume();

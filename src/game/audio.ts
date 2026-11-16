@@ -120,6 +120,7 @@ class AudioManager {
   private lastSfxTimes: Partial<Record<SfxKey, number>> = {};
   private readonly THROTTLE_MS = 60;
   private lastDeathKnellMs: number = 0;
+  private lastBossSirenMs: number = 0;
   private lastUiClickMs: number = 0;
   private uiNoiseBuffer: AudioBuffer | null = null;
 
@@ -844,6 +845,155 @@ class AudioManager {
         osc.start(now);
         osc.stop(now + n.dur + 0.03);
       }
+    } catch {
+      // fail silently
+    }
+  }
+
+  /**
+   * Plays a gripping, cavernous dark-fantasy warning siren when a Boss spawns.
+   */
+  public playBossSiren() {
+    if (this.isMuted || this.isPaused) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastBossSirenMs < 1500) return;
+
+    this.initCtx(false);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx && this.ctx.state === 'running' && !this.isMuted && !this.isPaused) {
+            this.lastBossSirenMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+            this.triggerBossSirenNodes();
+          }
+        })
+        .catch(() => {
+          // ignore
+        });
+      return;
+    }
+
+    this.lastBossSirenMs = nowMs;
+    this.triggerBossSirenNodes();
+  }
+
+  private triggerBossSirenNodes() {
+    if (!this.ctx || !this.sfxGain) return;
+
+    const ctx = this.ctx;
+    const now = ctx.currentTime;
+    const duration = 2.15;
+
+    try {
+      const cleanupTargets: AudioNode[] = [];
+      const stoppables: OscillatorNode[] = [];
+
+      const sirenBus = ctx.createGain();
+      sirenBus.gain.setValueAtTime(0.001, now);
+      sirenBus.gain.linearRampToValueAtTime(0.46, now + 0.08);
+      sirenBus.gain.setValueAtTime(0.46, now + 1.65);
+      sirenBus.gain.exponentialRampToValueAtTime(0.0008, now + duration);
+
+      // Resonant dark-fantasy filter shapes the siren so it sounds ominous, never harsh
+      const sirenFilter = ctx.createBiquadFilter();
+      sirenFilter.type = 'lowpass';
+      sirenFilter.Q.setValueAtTime(4.2, now);
+      sirenFilter.frequency.setValueAtTime(340, now);
+      sirenFilter.frequency.exponentialRampToValueAtTime(1450, now + 0.55);
+      sirenFilter.frequency.exponentialRampToValueAtTime(420, now + 1.05);
+      sirenFilter.frequency.exponentialRampToValueAtTime(1550, now + 1.55);
+      sirenFilter.frequency.exponentialRampToValueAtTime(240, now + duration);
+
+      sirenFilter.connect(sirenBus);
+      sirenBus.connect(this.sfxGain);
+      cleanupTargets.push(sirenFilter, sirenBus);
+
+      // Cavernous echo return for dread scale
+      const echoDelay = ctx.createDelay(1.0);
+      echoDelay.delayTime.setValueAtTime(0.24, now);
+      const echoLp = ctx.createBiquadFilter();
+      echoLp.type = 'lowpass';
+      echoLp.frequency.setValueAtTime(860, now);
+      const echoFeedback = ctx.createGain();
+      echoFeedback.gain.setValueAtTime(0.28, now);
+      const echoWet = ctx.createGain();
+      echoWet.gain.setValueAtTime(0.36, now);
+
+      sirenBus.connect(echoDelay);
+      echoDelay.connect(echoLp);
+      echoLp.connect(echoWet);
+      echoWet.connect(this.sfxGain);
+      echoLp.connect(echoFeedback);
+      echoFeedback.connect(echoDelay);
+      cleanupTargets.push(echoDelay, echoLp, echoFeedback, echoWet);
+
+      // Two detuned dual-swell dread siren voices + low octave brass growl
+      const voices: Array<{ type: OscillatorType; ratio: number; gainVal: number }> = [
+        { type: 'sawtooth', ratio: 1.0, gainVal: 0.42 },
+        { type: 'sawtooth', ratio: 1.008, gainVal: 0.34 },
+        { type: 'triangle', ratio: 0.5, gainVal: 0.52 },
+      ];
+
+      for (const v of voices) {
+        const osc = ctx.createOscillator();
+        osc.type = v.type;
+        osc.frequency.setValueAtTime(185 * v.ratio, now);
+        // Swell 1
+        osc.frequency.exponentialRampToValueAtTime(420 * v.ratio, now + 0.55);
+        osc.frequency.exponentialRampToValueAtTime(220 * v.ratio, now + 1.05);
+        // Swell 2 (higher, more urgent)
+        osc.frequency.exponentialRampToValueAtTime(465 * v.ratio, now + 1.55);
+        osc.frequency.exponentialRampToValueAtTime(160 * v.ratio, now + duration);
+
+        const g = ctx.createGain();
+        g.gain.setValueAtTime(v.gainVal, now);
+
+        osc.connect(g);
+        g.connect(sirenFilter);
+        osc.start(now);
+        osc.stop(now + duration + 0.05);
+        stoppables.push(osc);
+        cleanupTargets.push(osc, g);
+      }
+
+      // Sub-bass pressure rumble underneath the siren
+      const subOsc = ctx.createOscillator();
+      subOsc.type = 'sine';
+      subOsc.frequency.setValueAtTime(74, now);
+      subOsc.frequency.exponentialRampToValueAtTime(46, now + duration);
+
+      const subGain = ctx.createGain();
+      subGain.gain.setValueAtTime(0.001, now);
+      subGain.gain.linearRampToValueAtTime(0.38, now + 0.12);
+      subGain.gain.exponentialRampToValueAtTime(0.0008, now + duration);
+
+      subOsc.connect(subGain);
+      subGain.connect(this.sfxGain);
+      subOsc.start(now);
+      subOsc.stop(now + duration + 0.05);
+      stoppables.push(subOsc);
+      cleanupTargets.push(subOsc, subGain);
+
+      window.setTimeout(() => {
+        for (const s of stoppables) {
+          try {
+            s.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+        for (const node of cleanupTargets) {
+          try {
+            node.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+      }, Math.ceil((duration + 0.65) * 1000));
     } catch {
       // fail silently
     }

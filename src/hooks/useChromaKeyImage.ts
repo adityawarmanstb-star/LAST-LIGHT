@@ -4,7 +4,7 @@ export const UI_ASSETS = {
   bgDungeon: './assets/ui/bg_dungeon.webp',
   btnPlay: './assets/ui/btn_play.webp',
   panelIronCard: './assets/ui/panel_iron_card.webp',
-  navBarBg: './assets/ui/nav_bar_bg.webp',
+  navBarBg: './assets/aistudio/bottom_nav_frame_ab4c5386.png',
   gameTitleLogo: './assets/ui/game_title_logo.webp',
   loadingSplash: './assets/ui/loading_splash.webp',
   appIcon: './assets/ui/app_icon.png',

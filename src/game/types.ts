@@ -1,4 +1,5 @@
 export type GameDifficultyId = 'baby' | 'pro' | 'hacker';
+export type GoreLevel = 'off' | 'low' | 'normal';
 
 export type RelicId =
   | 'lodestone_heart'
@@ -135,6 +136,16 @@ export interface BossInfo {
   active: boolean;
   recommendedLevel?: number;
   enraged?: boolean;
+}
+
+export interface BossIntroInfo {
+  name: string;
+  tier: number;
+  currentHp: number;
+  maxHp: number;
+  recommendedLevel: number;
+  damage: number;
+  seq: number;
 }
 
 export interface EventWarningInfo {

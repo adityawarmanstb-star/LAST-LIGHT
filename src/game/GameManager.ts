@@ -1,10 +1,12 @@
 import {
   ActiveDynamicChallenge,
   BossInfo,
+  BossIntroInfo,
   DebugStats,
   DynamicChallengeOffer,
   EventWarningInfo,
   GameDifficultyId,
+  GoreLevel,
   RelicId,
   RelicSetId,
   RunStats,
@@ -83,6 +85,7 @@ type LevelUpCallback = (
 ) => void;
 type GameOverCallback = (stats: RunStats) => void;
 type BossCallback = (boss: BossInfo | null) => void;
+type BossIntroCallback = (intro: BossIntroInfo | null) => void;
 type EventWarningCallback = (warning: EventWarningInfo | null) => void;
 type PauseToggleCallback = () => void;
 type PauseStateCallback = (isPaused: boolean) => void;
@@ -92,12 +95,14 @@ type GraphicsCallback = (config: GraphicsConfig) => void;
 type CritImpactCallback = (impact: CritImpactPayload) => void;
 type LoadProgressCallback = (payload: LoadProgressPayload) => void;
 type GameStateCallback = (state: GameScreenState) => void;
+type GoreCallback = (level: GoreLevel) => void;
 
 class GameManager {
   private statsListeners: StatsCallback[] = [];
   private levelUpListeners: LevelUpCallback[] = [];
   private gameOverListeners: GameOverCallback[] = [];
   private bossListeners: BossCallback[] = [];
+  private bossIntroListeners: BossIntroCallback[] = [];
   private eventWarningListeners: EventWarningCallback[] = [];
   private pauseToggleListeners: PauseToggleCallback[] = [];
   private pauseStateListeners: PauseStateCallback[] = [];
@@ -107,8 +112,10 @@ class GameManager {
   private critImpactListeners: CritImpactCallback[] = [];
   private loadProgressListeners: LoadProgressCallback[] = [];
   private gameStateListeners: GameStateCallback[] = [];
+  private goreListeners: GoreCallback[] = [];
   private lastCritImpactMs: number = 0;
   private critImpactSeq: number = 0;
+  private bossIntroSeq: number = 0;
 
   private gameState: GameScreenState = 'TITLE';
   private lastObservedHp: number = 100;
@@ -122,6 +129,7 @@ class GameManager {
   public joystickVector = { x: 0, y: 0 };
   private brightness: number = saveDataStore.read().settings.brightness;
   private selectedDifficulty: GameDifficultyId = saveDataStore.read().difficulty;
+  private goreLevel: GoreLevel = saveDataStore.read().settings.gore;
   private qualityTier: QualityTier = 'high';
   private graphicsConfig: GraphicsConfig = (() => {
     const s = saveDataStore.read().settings;
@@ -250,6 +258,26 @@ class GameManager {
     };
   }
 
+  public getGoreLevel(): GoreLevel {
+    return this.goreLevel;
+  }
+
+  public setGoreLevel(level: GoreLevel) {
+    if (this.goreLevel === level) return;
+    this.goreLevel = level;
+    saveDataStore.update((draft) => {
+      draft.settings.gore = level;
+    });
+    this.goreListeners.forEach((l) => l(level));
+  }
+
+  public onGoreChange(cb: GoreCallback) {
+    this.goreListeners.push(cb);
+    return () => {
+      this.goreListeners = this.goreListeners.filter((l) => l !== cb);
+    };
+  }
+
   public onStatsUpdate(cb: StatsCallback) {
     this.statsListeners.push(cb);
     return () => {
@@ -304,6 +332,26 @@ class GameManager {
 
   public emitBossUpdate(boss: BossInfo | null) {
     this.bossListeners.forEach((l) => l(boss));
+  }
+
+  public onBossIntro(cb: BossIntroCallback) {
+    this.bossIntroListeners.push(cb);
+    return () => {
+      this.bossIntroListeners = this.bossIntroListeners.filter((l) => l !== cb);
+    };
+  }
+
+  public emitBossIntro(intro: Omit<BossIntroInfo, 'seq'> | null) {
+    if (!intro) {
+      this.bossIntroListeners.forEach((l) => l(null));
+      return;
+    }
+    this.bossIntroSeq += 1;
+    const payload: BossIntroInfo = {
+      ...intro,
+      seq: this.bossIntroSeq,
+    };
+    this.bossIntroListeners.forEach((l) => l(payload));
   }
 
   public onEventWarning(cb: EventWarningCallback) {
