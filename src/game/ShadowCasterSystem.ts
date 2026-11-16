@@ -913,7 +913,7 @@ export class ShadowCasterSystem {
         isBoss
           ? 64
           : edata.type === 'brute'
-            ? 34
+            ? 56
             : edata.type === 'spitter'
               ? 30
               : edata.type === 'imp'
@@ -923,14 +923,14 @@ export class ShadowCasterSystem {
         isBoss
           ? 74
           : edata.type === 'brute'
-            ? 38
+            ? 64
             : edata.type === 'spitter'
               ? 24
               : edata.type === 'imp'
                 ? 26
                 : 16;
-      const baseShadowLen = isBoss ? 145 : edata.type === 'brute' ? 84 : 56;
-      const scaleFactor = enemy.scaleX / (isBoss ? 0.95 : edata.type === 'brute' ? 0.52 : 0.4);
+      const baseShadowLen = isBoss ? 145 : edata.type === 'brute' ? 128 : 56;
+      const scaleFactor = enemy.scaleX / (isBoss ? 0.95 : edata.type === 'brute' ? 0.96 : 0.4);
       const clampedScale = Math.min(1.4, scaleFactor);
       const footX = enemy.x;
       const footY = enemy.y + footOffset;

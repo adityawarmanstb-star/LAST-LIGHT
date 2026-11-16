@@ -137,7 +137,7 @@ export const SPAWN_TIMELINE = {
 // =========================================================================
 export const STAND_STILL_DELAY_MS = 80;
 export const ORBIT_BLADES_NEED_STANDING = false;
-export const BOSS_RECOMMENDED_LEVEL = 60;
+export const BOSS_RECOMMENDED_LEVEL = 20;
 
 // =========================================================================
 // HORDE FRENZY & BLOOD FOG EVENT CONSTANTS
@@ -2718,7 +2718,8 @@ export class MainScene extends Phaser.Scene {
       stampDecal = this.goreLowDecalCounter === 1;
     }
     if (stampDecal) {
-      const scaleFactor = enemyScale > 0 ? Math.min(1.4, Math.max(0.75, enemyScale / 0.48)) : 1;
+      const baseScaleRef = 0.48;
+      const scaleFactor = enemyScale > 0 ? Math.min(1.4, Math.max(0.75, enemyScale / baseScaleRef)) : 1;
       const variantMult = isBoss
         ? GORE.decal.bossScaleMult
         : isElite
@@ -2757,7 +2758,7 @@ export class MainScene extends Phaser.Scene {
       enemyType === 'boss'
         ? 315
         : enemyType === 'brute'
-          ? 145
+          ? 250
           : enemyType === 'imp'
             ? 120
             : enemyType === 'spitter'
@@ -4808,32 +4809,7 @@ export class MainScene extends Phaser.Scene {
             }
           }
 
-          // Periodic Void Minion Summons so kiting remains dangerous
-          const summonCooldown = isEnraged ? 6500 : 9000;
-          const lastSummon = (enemy.getData('lastBossSummon') as number) || 0;
-          if (
-            time - lastSummon > summonCooldown &&
-            this.enemiesGroup.countActive(true) < SPAWN_TIMELINE.maxActiveEnemies
-          ) {
-            enemy.setData('lastBossSummon', time);
-            const { hpMult, speedMult, dmgMult } = this.getTimelineScaling();
-            const minionCount = isEnraged ? 5 : 4;
-            for (let s = 0; s < minionCount; s++) {
-              const sAngle = angle + (s * Math.PI * 2) / minionCount;
-              const sx = enemy.x + Math.cos(sAngle) * 110;
-              const sy = enemy.y + Math.sin(sAngle) * 110;
-              const minionType = s % 3 === 0 ? 'spitter' : 'imp';
-              this.spawnEnemyAt(
-                sx,
-                sy,
-                minionType,
-                hpMult * 1.45,
-                dmgMult * 1.2,
-                speedMult * 1.15
-              );
-            }
-            this.spawnParticleBurst(enemy.x, enemy.y, 18, 'fx_ring', 90, 220, 0.2, 0.4, 0xe5303a);
-          }
+          // Periodic minion summons paused during boss fight so player can focus on fighting the boss
 
           // Throttled boss update to UI (max ~10Hz instead of 60Hz React re-renders)
           if (forceBossEmit || time - this.lastBossEmitMs >= 100) {
@@ -4843,7 +4819,7 @@ export class MainScene extends Phaser.Scene {
               currentHp: Math.max(0, Math.round(edata.hp)),
               maxHp: edata.maxHp,
               active: true,
-              recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 15,
+              recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 10,
               enraged: isEnraged,
             });
           }
@@ -4852,7 +4828,7 @@ export class MainScene extends Phaser.Scene {
       }
 
       if (this.shadowSystem && edata.type !== 'wisp' && edata.type !== 'boss') {
-        this.shadowSystem.resolvePillarPushout(enemy, 16);
+        this.shadowSystem.resolvePillarPushout(enemy, edata.type === 'brute' ? 28 : 16);
       }
     }
   }
@@ -5267,6 +5243,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private handleTimelineEvents() {
+    if (this.activeBoss && this.activeBoss.active) return;
     if (this.pendingEvent) return;
     if (this.runTime - this.lastEventTriggerTimeSec < SPAWN_TIMELINE.events.minEventSpacingSec) {
       return;
@@ -5468,7 +5445,7 @@ export class MainScene extends Phaser.Scene {
         this.scheduleTimelineEvent(
           `recurring_${cycleIdx}`,
           `VOID TITAN TIER ${tier}`,
-          `Abyssal juggernaut rises · Rec. Lv. ${BOSS_RECOMMENDED_LEVEL + (tier - 1) * 15}`,
+          `Abyssal juggernaut rises · Rec. Lv. ${BOSS_RECOMMENDED_LEVEL + (tier - 1) * 10}`,
           () => {
             this.spawnBoss(tier);
           }
@@ -5478,6 +5455,12 @@ export class MainScene extends Phaser.Scene {
   }
 
   private handleEnemySpawning(time: number) {
+    // Pause all regular waves and timeline spawns while a Boss is active so player can focus on the Boss
+    if (this.activeBoss && this.activeBoss.active) {
+      this.nextSpawnTime = time + 1200;
+      return;
+    }
+
     this.handleTimelineEvents();
 
     const isBloodFog = this.bloodFogTimerMs > 0;
@@ -5662,13 +5645,14 @@ export class MainScene extends Phaser.Scene {
         baseHp = 280;
         baseSpeed = 44;
         baseDmg = 28;
-        scale = 0.52;
+        scale = 0.96;
         break;
     }
 
     if (options?.isElite) {
-      scale *=
+      const eliteMult =
         options.scaleMultiplierOverride ?? SPAWN_TIMELINE.events.firstElite.scaleMultiplier;
+      scale *= type === 'brute' ? Math.min(1.18, eliteMult) : eliteMult;
     }
 
     const hp = Math.max(1, Math.round(baseHp * hpMultiplier));
@@ -5691,8 +5675,8 @@ export class MainScene extends Phaser.Scene {
         enemyBody.setSize(130, 110);
         enemyBody.setOffset(105, 45);
       } else if (type === 'brute') {
-        enemyBody.setSize(160, 140);
-        enemyBody.setOffset(70, 42);
+        enemyBody.setSize(144, 128);
+        enemyBody.setOffset(78, 46);
       } else if (type === 'spitter') {
         enemyBody.setSize(100, 180);
         enemyBody.setOffset(42, 45);
@@ -5749,6 +5733,9 @@ export class MainScene extends Phaser.Scene {
   public spawnBoss(tier: number = 1) {
     if (this.activeBoss || this.isDead || !this.sys?.isActive() || !this.player?.active) return;
     this.bossSpawned = true;
+    // Cancel any queued non-boss wave event and defer next regular wave until boss is defeated
+    this.pendingEvent = null;
+    this.nextSpawnTime = this.simTimeMs + 1500;
 
     soundManager.playBossSiren();
     soundManager.playBoss();
@@ -5757,7 +5744,7 @@ export class MainScene extends Phaser.Scene {
     const x = this.player.x + Math.cos(angle) * 450;
     const y = this.player.y + Math.sin(angle) * 450;
 
-    this.cameraController.shakeFromBossProximity(x, y, this.player.x, this.player.y, 0.018, 600, 900);
+    this.triggerBossIntroShake(800, 0.025);
 
     const boss = this.enemiesGroup.create(x, y, 'boss_idle_sheet') as Phaser.Physics.Arcade.Sprite;
     boss.setDepth(24);
@@ -5769,13 +5756,13 @@ export class MainScene extends Phaser.Scene {
       bossBody.setOffset(125, 26);
     }
 
-    const { hpMult, speedMult, dmgMult } = this.getTimelineScaling();
-    // Raid-scale Boss HP & damage calibrated for Recommended Level 60 builds + difficulty preset
-    const bossHp = Math.round(120000 * hpMult * Math.pow(1.85, tier - 1));
+    const { hpMult, speedMult } = this.getTimelineScaling();
+    // Focused duel Boss HP calibrated for ~30-55s fights across Baby/Pro/Hacker difficulties
+    const bossHp = Math.round(7200 * hpMult * Math.pow(1.6, tier - 1));
     const bossDmg = Math.round(
       48 * (1 + (tier - 1) * 0.35) * this.difficultyPreset.enemyDmgMult
     );
-    const recommendedLevel = BOSS_RECOMMENDED_LEVEL + (tier - 1) * 15;
+    const recommendedLevel = BOSS_RECOMMENDED_LEVEL + (tier - 1) * 10;
 
     const edata: EnemyData = {
       type: 'boss',
@@ -6102,6 +6089,7 @@ export class MainScene extends Phaser.Scene {
     // Boss defeat clears boss HUD & switches back to intense/gameplay music so survival run continues
     if (edata.type === 'boss') {
       this.activeBoss = null;
+      this.nextSpawnTime = this.simTimeMs + 1500;
       gameManager.emitBossUpdate(null);
       soundManager.playLevelUp();
       if (this.runTime >= SPAWN_TIMELINE.feel.intenseMusicTimeSec) {
@@ -6114,6 +6102,11 @@ export class MainScene extends Phaser.Scene {
       enemy.off(Phaser.Animations.Events.ANIMATION_UPDATE);
       enemy.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
       enemy.destroy();
+      if (this.pendingBloodFogTier > 0) {
+        const waveTier = this.pendingBloodFogTier;
+        this.pendingBloodFogTier = 0;
+        this.triggerBloodFogWave(waveTier);
+      }
       return;
     }
 
@@ -6121,6 +6114,11 @@ export class MainScene extends Phaser.Scene {
   }
 
   private triggerBloodFogWave(tier: number): void {
+    // Defer Blood Fog surge wave while Boss is active so waves stay paused during Boss fights
+    if (this.activeBoss && this.activeBoss.active) {
+      this.pendingBloodFogTier = Math.max(this.pendingBloodFogTier, tier);
+      return;
+    }
     const t = Math.max(1, tier);
     this.bloodFogTier = t;
     const mods = this.getBloodFogModifiers(t);
@@ -7221,6 +7219,11 @@ export class MainScene extends Phaser.Scene {
     this.time.paused = true;
     this.tweens.pauseAll();
     this.anims.pauseAll();
+  }
+
+  public triggerBossIntroShake(durationMs: number = 340, intensity: number = 0.014) {
+    if (!this.sys?.isActive() || this.isDead || !this.cameraController) return;
+    this.cameraController.triggerShake(durationMs, intensity, true);
   }
 
   public endBossIntroPause() {

@@ -999,8 +999,8 @@ export class DarknessScene extends Phaser.Scene {
               let markScale = 1.0;
 
               if (edata.type === 'brute') {
-                offsetY = 34;
-                markScale = 1.25;
+                offsetY = 52;
+                markScale = 1.4;
               } else if (edata.type === 'spitter') {
                 offsetY = 30;
                 markScale = 1.08;

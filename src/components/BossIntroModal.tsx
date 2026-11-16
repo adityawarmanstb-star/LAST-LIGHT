@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { BossIntroInfo } from '../game/types';
+import { gameManager } from '../game/GameManager';
 import { Icon } from './Icon';
 import { haptics } from '../mobile/haptics';
 
@@ -63,11 +64,16 @@ export const BossIntroModal: React.FC<BossIntroModalProps> = ({
     };
   }, [paused, bossIntro.seq, triggerDismiss]);
 
-  // Repeating blood-edge-impact pulse beat on the ui_warning banner
+  // Repeating blood-edge-impact pulse & aftershock shake on the ui_warning banner
   useEffect(() => {
     if (paused) return;
     const intervalId = window.setInterval(() => {
       setPulseBeat((prev) => prev + 1);
+      haptics.tap('light');
+      const scene = gameManager.activeScene as {
+        triggerBossIntroShake?: (durationMs?: number, intensity?: number) => void;
+      } | null;
+      scene?.triggerBossIntroShake?.(340, 0.014);
     }, WARNING_PULSE_INTERVAL_MS);
 
     return () => {
@@ -89,6 +95,11 @@ export const BossIntroModal: React.FC<BossIntroModalProps> = ({
   }, [paused, triggerDismiss]);
 
   const safeMaxHp = Math.max(1, Math.round(bossIntro.maxHp));
+  const shakeClass = paused
+    ? ''
+    : pulseBeat === 0
+      ? 'boss-intro-camera-shake'
+      : 'boss-intro-aftershock';
 
   return (
     <div
@@ -102,77 +113,83 @@ export const BossIntroModal: React.FC<BossIntroModalProps> = ({
         background: 'rgba(18, 2, 5, 0.24)',
       }}
     >
-      {/* Screen-edge crimson alert vignette */}
+      {/* Camera shake stage wrapper (initial heavy quake + pulse aftershocks) */}
       <div
-        key={`boss-screen-impact-${bossIntro.seq}-${pulseBeat}`}
-        aria-hidden="true"
-        className="blood-edge-impact pointer-events-none fixed inset-0"
-        style={
-          {
-            '--splatter-opacity': '0.72',
-            boxShadow: 'inset 0 0 115px rgba(229, 48, 58, 0.68)',
-          } as React.CSSProperties
-        }
-      />
-
-      {/* Transparent Red WARNING!! Pop-up Banner */}
-      <div className="boss-intro-enter relative z-10 w-full max-w-xl px-2">
+        key={`boss-shake-stage-${bossIntro.seq}-${pulseBeat}`}
+        className={`relative w-full h-full flex items-center justify-center ${shakeClass}`}
+      >
+        {/* Oversized screen-edge crimson alert vignette so camera shake never reveals edge gaps */}
         <div
-          className="relative w-full overflow-hidden rounded-xl border-y-2 border-[#ff3b47]/85 px-5 py-4 sm:px-8 sm:py-5 flex flex-col items-center justify-center text-center gap-1.5"
-          style={{
-            background:
-              'linear-gradient(90deg, rgba(110, 10, 18, 0.28) 0%, rgba(185, 16, 26, 0.52) 50%, rgba(110, 10, 18, 0.28) 100%)',
-            backdropFilter: 'blur(4px)',
-            WebkitBackdropFilter: 'blur(4px)',
-            boxShadow:
-              '0 0 36px rgba(229, 48, 58, 0.55), inset 0 0 26px rgba(229, 48, 58, 0.36)',
-          }}
-        >
-          {/* Pulsing crimson outer glow */}
+          key={`boss-screen-impact-${bossIntro.seq}-${pulseBeat}`}
+          aria-hidden="true"
+          className="blood-edge-impact pointer-events-none fixed -inset-5"
+          style={
+            {
+              '--splatter-opacity': '0.78',
+              boxShadow: 'inset 0 0 125px rgba(229, 48, 58, 0.72)',
+            } as React.CSSProperties
+          }
+        />
+
+        {/* Transparent Red WARNING!! Pop-up Banner */}
+        <div className="boss-intro-enter relative z-10 w-full max-w-xl px-2">
           <div
-            aria-hidden="true"
-            className="boss-danger-pulse pointer-events-none absolute inset-0 rounded-xl"
+            className="relative w-full overflow-hidden rounded-xl border-y-2 border-[#ff3b47]/85 px-5 py-4 sm:px-8 sm:py-5 flex flex-col items-center justify-center text-center gap-1.5"
             style={{
-              boxShadow: 'inset 0 0 30px rgba(255, 62, 74, 0.65)',
+              background:
+                'linear-gradient(90deg, rgba(110, 10, 18, 0.28) 0%, rgba(185, 16, 26, 0.52) 50%, rgba(110, 10, 18, 0.28) 100%)',
+              backdropFilter: 'blur(4px)',
+              WebkitBackdropFilter: 'blur(4px)',
+              boxShadow:
+                '0 0 36px rgba(229, 48, 58, 0.55), inset 0 0 26px rgba(229, 48, 58, 0.36)',
             }}
-          />
+          >
+            {/* Pulsing crimson outer glow */}
+            <div
+              aria-hidden="true"
+              className="boss-danger-pulse pointer-events-none absolute inset-0 rounded-xl"
+              style={{
+                boxShadow: 'inset 0 0 30px rgba(255, 62, 74, 0.65)',
+              }}
+            />
 
-          {/* Urgent blood-edge-impact pulse overlay on the UI_WARNING banner */}
-          <div
-            key={`boss-warning-impact-${bossIntro.seq}-${pulseBeat}`}
-            aria-hidden="true"
-            className="blood-edge-impact pointer-events-none absolute inset-0 rounded-xl"
-            style={
-              {
-                '--splatter-opacity': '0.94',
-                background:
-                  'radial-gradient(ellipse at center, rgba(229, 48, 58, 0.12) 32%, rgba(229, 48, 58, 0.54) 100%)',
-                boxShadow: 'inset 0 0 34px rgba(255, 52, 66, 0.9)',
-              } as React.CSSProperties
-            }
-          />
+            {/* Urgent blood-edge-impact pulse overlay on the UI_WARNING banner */}
+            <div
+              key={`boss-warning-impact-${bossIntro.seq}-${pulseBeat}`}
+              aria-hidden="true"
+              className="blood-edge-impact pointer-events-none absolute inset-0 rounded-xl"
+              style={
+                {
+                  '--splatter-opacity': '0.94',
+                  background:
+                    'radial-gradient(ellipse at center, rgba(229, 48, 58, 0.12) 32%, rgba(229, 48, 58, 0.54) 100%)',
+                  boxShadow: 'inset 0 0 34px rgba(255, 52, 66, 0.9)',
+                } as React.CSSProperties
+              }
+            />
 
-          {/* Banner Headline Row with ui_warning icons */}
-          <div className="relative z-10 flex items-center justify-center gap-3 sm:gap-4">
-            <Icon id="ui_warning" size={32} className="shrink-0 drop-shadow-[0_0_10px_rgba(255,60,70,0.85)]" />
-            <h2
-              id="boss-intro-title"
-              className="font-blood text-2xl sm:text-4xl font-black tracking-[0.22em] uppercase text-[#ff4d57] drop-shadow-[0_2px_12px_rgba(229,48,58,0.95)]"
-            >
-              WARNING!!
-            </h2>
-            <Icon id="ui_warning" size={32} className="shrink-0 drop-shadow-[0_0_10px_rgba(255,60,70,0.85)]" />
-          </div>
+            {/* Banner Headline Row with ui_warning icons */}
+            <div className="relative z-10 flex items-center justify-center gap-3 sm:gap-4">
+              <Icon id="ui_warning" size={32} className="shrink-0 drop-shadow-[0_0_10px_rgba(255,60,70,0.85)]" />
+              <h2
+                id="boss-intro-title"
+                className="font-blood text-2xl sm:text-4xl font-black tracking-[0.22em] uppercase text-[#ff4d57] drop-shadow-[0_2px_12px_rgba(229,48,58,0.95)]"
+              >
+                WARNING!!
+              </h2>
+              <Icon id="ui_warning" size={32} className="shrink-0 drop-shadow-[0_0_10px_rgba(255,60,70,0.85)]" />
+            </div>
 
-          {/* Slim unboxed boss name & HP line */}
-          <div className="relative z-10 flex flex-wrap items-center justify-center gap-x-2 text-xs sm:text-sm font-display font-bold tracking-[0.08em] text-[#ffe8ea]">
-            <span>{bossIntro.name}</span>
-            <span aria-hidden="true" className="text-[#ff8a92]">
-              ·
-            </span>
-            <span className="font-mono-numbers tabular-nums text-[#ffd2d5]">
-              {safeMaxHp.toLocaleString()} HP
-            </span>
+            {/* Slim unboxed boss name & HP line */}
+            <div className="relative z-10 flex flex-wrap items-center justify-center gap-x-2 text-xs sm:text-sm font-display font-bold tracking-[0.08em] text-[#ffe8ea]">
+              <span>{bossIntro.name}</span>
+              <span aria-hidden="true" className="text-[#ff8a92]">
+                ·
+              </span>
+              <span className="font-mono-numbers tabular-nums text-[#ffd2d5]">
+                {safeMaxHp.toLocaleString()} HP
+              </span>
+            </div>
           </div>
         </div>
       </div>
