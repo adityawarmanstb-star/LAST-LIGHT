@@ -9,6 +9,7 @@ import {
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
   getWebGlMaxTextureSize,
+  isAndroidOrMobileDevice,
   performanceRuntime,
   resolveRenderScale,
 } from './PerformanceEngine';
@@ -36,6 +37,8 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
 
   const sharedCtx = soundManager.getOrCreateContext();
   const gfx = gameManager.getGraphicsConfig();
+  const isMobile = isAndroidOrMobileDevice();
+  const effectiveTargetFps = isMobile ? Math.min(60, gfx.targetFps) : gfx.targetFps;
   const initialScale = resolveRenderScale(gfx.resolutionMode, 4096);
   performanceRuntime.currentConfig = { ...gfx };
   performanceRuntime.currentRenderScale = initialScale;
@@ -50,23 +53,23 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
     height: bufferH,
     backgroundColor: '#08090d',
     fps: {
-      target: gfx.targetFps,
+      target: effectiveTargetFps,
       min: 30,
       smoothStep: false,
       deltaHistory: 0,
     },
     render: {
       powerPreference: 'high-performance',
-      antialias: true,
+      antialias: !isMobile,
       antialiasGL: false,
       roundPixels: false,
       pixelArt: false,
       transparent: false,
       stencil: false,
-      batchSize: 4096,
+      batchSize: isMobile ? 2048 : 4096,
       maxTextures: -1,
       autoMobileTextures: false,
-      mipmapFilter: 'LINEAR_MIPMAP_LINEAR',
+      mipmapFilter: isMobile ? 'LINEAR' : 'LINEAR_MIPMAP_LINEAR',
       mipmapRegeneration: false,
       desynchronized: false,
     },
@@ -79,7 +82,7 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       default: 'arcade',
       arcade: {
         gravity: { x: 0, y: 0 },
-        fps: 120,
+        fps: isMobile ? 60 : 120,
         fixedStep: false,
         debug: false,
       },

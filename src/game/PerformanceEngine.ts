@@ -121,9 +121,14 @@ export function resolveRenderScale(
       break;
     case 'auto':
     default: {
-      // On Android/mobile WebView, cap auto scale at 1.5 (810x1440) to protect WebGL GPU memory & frame pacing
-      const autoCap = isAndroidOrMobileDevice() ? 1.5 : 2.0;
-      desired = gameManager.getQualityTier() === 'low' ? 1.0 : Math.min(autoCap, Math.max(1, dpr));
+      // On Android/mobile WebView, cap auto scale at 1.25 (675x1200) to keep fill-rate light & silky
+      const isMobile = isAndroidOrMobileDevice();
+      const autoCap = isMobile ? 1.25 : 2.0;
+      desired = isMobile
+        ? Math.min(autoCap, Math.max(1, dpr))
+        : gameManager.getQualityTier() === 'low'
+          ? 1.0
+          : Math.min(autoCap, Math.max(1, dpr));
       break;
     }
   }
@@ -183,14 +188,22 @@ export function attachUpscaleSharpFilter(
     // Higher sharpening intensity when upscaling from sub-4K buffer; subtle crisp sheen at native 4K
     const sharpness = renderScale >= 3.5 ? 0.42 : renderScale >= 2.5 ? 0.58 : 0.74;
 
+    const resolutionMode = gameManager.getGraphicsConfig().resolutionMode;
+    const effectiveEnabled =
+      enabled && !(isAndroidOrMobileDevice() && (resolutionMode === 'auto' || resolutionMode === 'performance'));
+
     if (existing) {
       existing.sharpness = sharpness;
-      existing.setActive(enabled);
+      existing.setActive(effectiveEnabled);
       return existing;
     }
 
+    if (!effectiveEnabled) {
+      return null;
+    }
+
     const controller = new UpscaleSharpFilterController(camera, sharpness);
-    controller.setActive(enabled);
+    controller.setActive(true);
     camera.filters.external.add(controller);
     return controller;
   } catch (err) {
@@ -327,11 +340,14 @@ export class PerformanceRuntime {
     const emAlpha = 1 - Math.pow(0.9, safeDelta / 16.6667);
     this.avgFrameMs = this.avgFrameMs * (1 - emAlpha) + safeDelta * emAlpha;
 
-    const targetFps = this.currentConfig.targetFps;
-    const budgetMs = 1000 / targetFps;
-    // Allow brief spikes without downscaling; adapt quality tier if sustained above 1.28x budget
-    const overloaded = this.avgFrameMs > budgetMs * 1.28;
-    const roomy = this.avgFrameMs < budgetMs * 0.9;
+    const isMobile = isAndroidOrMobileDevice();
+    const effectiveTargetFps = isMobile
+      ? Math.min(60, this.currentConfig.targetFps)
+      : this.currentConfig.targetFps;
+    const budgetMs = 1000 / effectiveTargetFps;
+    // Allow normal 60Hz VSync jitter on mobile without falsely dropping to 'low' quality
+    const overloaded = this.avgFrameMs > (isMobile ? Math.max(22.5, budgetMs * 1.35) : budgetMs * 1.28);
+    const roomy = this.avgFrameMs < budgetMs * 1.05;
 
     const result: { nextQualityTier?: 'high' | 'low'; nextRenderScale?: number } = {};
 
@@ -347,13 +363,13 @@ export class PerformanceRuntime {
 
     // Adapt quality tier cleanly with >= 4s cooldown (never resize WebGL backing canvas mid-combat)
     const cooldownElapsed = nowMs - this.lastResAdjustAtMs >= 4000;
-    if (cooldownElapsed && this.lowPerfAccumMs >= 2000) {
+    if (cooldownElapsed && this.lowPerfAccumMs >= 2500) {
       this.lowPerfAccumMs = 0;
       this.lastResAdjustAtMs = nowMs;
       if (gameManager.getQualityTier() !== 'low') {
         result.nextQualityTier = 'low';
       }
-    } else if (cooldownElapsed && this.highHeadroomAccumMs >= 7000) {
+    } else if (cooldownElapsed && this.highHeadroomAccumMs >= 5000) {
       this.highHeadroomAccumMs = 0;
       this.lastResAdjustAtMs = nowMs;
       if (gameManager.getQualityTier() === 'low') {
@@ -366,7 +382,7 @@ export class PerformanceRuntime {
 
   /**
    * Millisecond-based temporal cadence for heavy offscreen RenderTexture redraws
-   * (~60Hz lightmap updates while scroll-compensation runs at full 90/120 FPS).
+   * (~30Hz on Android/mobile with smooth 60Hz scroll compensation; ~60Hz on desktop).
    * Never uses frame or update-call counts.
    */
   public shouldRunTemporalHeavyPass(deltaMs: number, forceImmediate: boolean = false): boolean {
@@ -374,14 +390,15 @@ export class PerformanceRuntime {
       this.temporalLightAccumMs = 0;
       return true;
     }
+    const isMobile = isAndroidOrMobileDevice();
     const isHighRefresh = this.currentConfig.targetFps >= 90;
     const underLoad = this.avgFrameMs > (1000 / Math.max(60, this.currentConfig.targetFps)) * 0.9;
-    if (!isHighRefresh && !underLoad && gameManager.getQualityTier() !== 'low') {
+    if (!isMobile && !isHighRefresh && !underLoad && gameManager.getQualityTier() !== 'low') {
       this.temporalLightAccumMs = 0;
       return true;
     }
     this.temporalLightAccumMs += deltaMs;
-    const intervalMs = gameManager.getQualityTier() === 'low' ? 22 : 16;
+    const intervalMs = isMobile ? 32 : gameManager.getQualityTier() === 'low' ? 24 : 16;
     if (this.temporalLightAccumMs >= intervalMs) {
       this.temporalLightAccumMs %= intervalMs;
       return true;

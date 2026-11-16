@@ -125,7 +125,7 @@ export const VirtualJoystick: React.FC = () => {
     >
       {active && (
         <div
-          className="fixed w-28 h-28 -ml-14 -mt-14 rounded-full border-2 border-[#3a3f47] bg-[#1a1c20]/80 backdrop-blur-xs flex items-center justify-center pointer-events-none shadow-[inset_0_0_16px_rgba(179,18,26,0.25),0_6px_18px_rgba(0,0,0,0.65)]"
+          className="fixed w-28 h-28 -ml-14 -mt-14 rounded-full border-2 border-[#3a3f47] bg-[#14161a]/92 flex items-center justify-center pointer-events-none shadow-[0_6px_18px_rgba(0,0,0,0.65)]"
           style={{ left: touchPos.x, top: touchPos.y }}
         >
           <div

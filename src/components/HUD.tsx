@@ -222,8 +222,7 @@ const HUDComponent: React.FC<HUDProps> = ({
           aria-hidden="true"
           className="fixed inset-0 z-25 pointer-events-none crit-color-flash"
           style={{
-            background: `radial-gradient(ellipse at center, transparent 52%, ${critFlash.flashColorHex}2e 85%, ${critFlash.flashColorHex}55 100%)`,
-            boxShadow: `inset 0 0 ${critFlash.isEliteOrBoss ? 110 : 75}px ${critFlash.flashColorHex}66`,
+            background: `radial-gradient(ellipse at center, transparent 54%, ${critFlash.flashColorHex}38 86%, ${critFlash.flashColorHex}68 100%)`,
           }}
         />
       )}
@@ -235,20 +234,7 @@ const HUDComponent: React.FC<HUDProps> = ({
             className="absolute -inset-12 blood-fog-drift-a"
             style={{
               background:
-                'radial-gradient(circle at 22% 28%, rgba(179, 18, 26, 0.28) 0%, transparent 48%), radial-gradient(circle at 78% 72%, rgba(229, 48, 58, 0.24) 0%, transparent 50%), radial-gradient(ellipse at center, transparent 42%, rgba(92, 8, 14, 0.52) 84%, rgba(179, 18, 26, 0.7) 100%)',
-            }}
-          />
-          <div
-            className="absolute -inset-16 blood-fog-drift-b"
-            style={{
-              background:
-                'radial-gradient(circle at 74% 24%, rgba(179, 18, 26, 0.24) 0%, transparent 46%), radial-gradient(circle at 26% 76%, rgba(145, 12, 20, 0.3) 0%, transparent 52%)',
-            }}
-          />
-          <div
-            className="absolute inset-0"
-            style={{
-              boxShadow: 'inset 0 0 110px rgba(179, 18, 26, 0.58)',
+                'radial-gradient(circle at 22% 28%, rgba(179, 18, 26, 0.28) 0%, transparent 48%), radial-gradient(circle at 78% 72%, rgba(229, 48, 58, 0.24) 0%, transparent 50%), radial-gradient(ellipse at center, transparent 42%, rgba(92, 8, 14, 0.56) 84%, rgba(179, 18, 26, 0.78) 100%)',
             }}
           />
         </div>
@@ -261,8 +247,7 @@ const HUDComponent: React.FC<HUDProps> = ({
           className="fixed inset-0 z-25 pointer-events-none low-hp-vignette"
           style={{
             background:
-              'radial-gradient(ellipse at center, transparent 48%, rgba(58, 10, 14, 0.56) 78%, rgba(179, 18, 26, 0.78) 100%)',
-            boxShadow: 'inset 0 0 95px rgba(229, 48, 58, 0.5)',
+              'radial-gradient(ellipse at center, transparent 48%, rgba(58, 10, 14, 0.56) 78%, rgba(179, 18, 26, 0.82) 100%)',
           }}
         />
       )}
@@ -273,7 +258,8 @@ const HUDComponent: React.FC<HUDProps> = ({
           aria-hidden="true"
           className="fixed inset-0 z-30 pointer-events-none animate-pulse"
           style={{
-            boxShadow: 'inset 0 0 80px rgba(229, 48, 58, 0.65)',
+            background:
+              'radial-gradient(ellipse at center, transparent 62%, rgba(229, 48, 58, 0.45) 100%)',
           }}
         />
       )}

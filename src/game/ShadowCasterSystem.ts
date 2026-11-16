@@ -793,6 +793,10 @@ export class ShadowCasterSystem {
       isLowQuality,
     } = params;
 
+    const isMobile =
+      typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    const liteShadows = isLowQuality || isMobile;
+
     const prevGroundCount = this.activeGroundShadows;
     const prevOverlayCount = this.activeOverlayShadows;
     this.activeGroundShadows = 0;
@@ -807,7 +811,7 @@ export class ShadowCasterSystem {
     pSlot.strength = 1.0;
     pSlot.isPlayer = true;
 
-    const maxTorchCasters = isLowQuality ? 2 : 4;
+    const maxTorchCasters = liteShadows ? 2 : 4;
     let addedTorches = 0;
     for (
       let i = 0;
@@ -880,7 +884,7 @@ export class ShadowCasterSystem {
     const bossY = bossActive ? boss!.y : 0;
     const bossShadowR = bossActive ? 52 : 0;
 
-    const maxShadowsPerEnemy = isLowQuality ? 1 : 2;
+    const maxShadowsPerEnemy = liteShadows ? 1 : 2;
     const margin = 80;
     const minX = camX - margin;
     const maxX = camX + viewW + margin;
@@ -963,17 +967,19 @@ export class ShadowCasterSystem {
         const falloff = Math.max(0, 1 - dist / light.radius);
         const rawScore = falloff * light.strength;
 
-        const occ = computePointShadowOcclusion(
-          light.x,
-          light.y,
-          enemy.x,
-          enemy.y,
-          this.activePillarData,
-          this.activePillarCount,
-          isBoss ? undefined : bossX,
-          isBoss ? undefined : bossY,
-          isBoss ? 0 : bossShadowR
-        );
+        const occ = liteShadows
+          ? 0
+          : computePointShadowOcclusion(
+              light.x,
+              light.y,
+              enemy.x,
+              enemy.y,
+              this.activePillarData,
+              this.activePillarCount,
+              isBoss ? undefined : bossX,
+              isBoss ? undefined : bossY,
+              isBoss ? 0 : bossShadowR
+            );
         const effectiveLit = rawScore * (1 - occ * 0.85);
 
         if (rawScore > bestUnoccludedLit) bestUnoccludedLit = rawScore;
@@ -1017,7 +1023,7 @@ export class ShadowCasterSystem {
       }
       edata.shadowShade = shadeFactor;
 
-      if (!isLowQuality && shadeFactor > 0.25 && enemy.alpha > 0.22) {
+      if (!liteShadows && shadeFactor > 0.25 && enemy.alpha > 0.22) {
         const bandAlpha = Math.min(0.45, shadeFactor * 0.52 * enemy.alpha);
         this.pushOverlayShadow(
           enemy.x,

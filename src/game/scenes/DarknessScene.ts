@@ -7,12 +7,13 @@ import {
   LOGICAL_WIDTH,
   getLogicalScrollX,
   getLogicalScrollY,
+  isAndroidOrMobileDevice,
   performanceRuntime,
   syncLogicalCamera,
   upgradeTextureFiltering,
 } from '../PerformanceEngine';
 
-const RT_OVERSCAN = 20;
+const RT_OVERSCAN = 48;
 
 interface LightSourceSlot {
   x: number;
@@ -107,8 +108,12 @@ export class DarknessScene extends Phaser.Scene {
   }
 
   private computeDesiredRtScale(tier: 'high' | 'low'): number {
+    const isMobile = isAndroidOrMobileDevice();
     if (tier === 'low') {
-      return LIGHT.renderTextureScale * 0.56;
+      return isMobile ? 0.34 : LIGHT.renderTextureScale * 0.56;
+    }
+    if (isMobile) {
+      return 0.42;
     }
     const mode = performanceRuntime.currentConfig.resolutionMode;
     if (mode === 'ultra_4k') {
@@ -148,13 +153,14 @@ export class DarknessScene extends Phaser.Scene {
     const w = LOGICAL_WIDTH;
     const h = LOGICAL_HEIGHT;
 
-    // 2 slow-drifting procedural cool-blue fog layers inside the dark layer (< 12% opacity)
+    const isMobile = isAndroidOrMobileDevice();
+    // Slow-drifting procedural cool-blue fog inside the dark layer (single layer on mobile to halve overdraw)
     this.fogLayer1 = this.add
       .tileSprite(0, 0, w, h, 'fog_procedural')
       .setOrigin(0, 0)
       .setDepth(2)
       .setTint(LIGHT.fog.tint1)
-      .setAlpha(LIGHT.fog.layer1Alpha);
+      .setAlpha(isMobile ? LIGHT.fog.layer1Alpha * 1.25 : LIGHT.fog.layer1Alpha);
     this.stripInteractivity(this.fogLayer1);
 
     this.fogLayer2 = this.add
@@ -163,7 +169,8 @@ export class DarknessScene extends Phaser.Scene {
       .setDepth(3)
       .setTileScale(1.45)
       .setTint(LIGHT.fog.tint2)
-      .setAlpha(LIGHT.fog.layer2Alpha);
+      .setAlpha(LIGHT.fog.layer2Alpha)
+      .setVisible(!isMobile);
     this.stripInteractivity(this.fogLayer2);
 
     // Adaptive RenderTexture resolution with 20px overscan border for glitch-free temporal scroll compensation
@@ -418,32 +425,40 @@ export class DarknessScene extends Phaser.Scene {
         );
       }
 
+      const isMobile = isAndroidOrMobileDevice();
       if (this.fogLayer1 && this.fogLayer2) {
         if (!snap.isGamePaused) {
           const dtSec = delta / 1000;
           const speedBoost = 1 + this.bloodFogBlend * 1.45;
           this.fogLayer1.tilePositionX += LIGHT.fog.speed1X * speedBoost * dtSec;
           this.fogLayer1.tilePositionY += LIGHT.fog.speed1Y * speedBoost * dtSec;
-          this.fogLayer2.tilePositionX += LIGHT.fog.speed2X * speedBoost * dtSec;
-          this.fogLayer2.tilePositionY += LIGHT.fog.speed2Y * speedBoost * dtSec;
+          if (!isMobile) {
+            this.fogLayer2.tilePositionX += LIGHT.fog.speed2X * speedBoost * dtSec;
+            this.fogLayer2.tilePositionY += LIGHT.fog.speed2Y * speedBoost * dtSec;
+          }
         }
 
+        const baseFog1Alpha = isMobile ? LIGHT.fog.layer1Alpha * 1.25 : LIGHT.fog.layer1Alpha;
         if (this.bloodFogBlend > 0.01) {
           this.wasBloodFogTinted = true;
           this.fogLayer1.setTint(lerpHexColor(LIGHT.fog.tint1, 0xc81622, this.bloodFogBlend));
-          this.fogLayer2.setTint(lerpHexColor(LIGHT.fog.tint2, 0xe5303a, this.bloodFogBlend));
           this.fogLayer1.setAlpha(
-            Phaser.Math.Linear(LIGHT.fog.layer1Alpha, 0.22, this.bloodFogBlend)
+            Phaser.Math.Linear(baseFog1Alpha, isMobile ? 0.28 : 0.22, this.bloodFogBlend)
           );
-          this.fogLayer2.setAlpha(
-            Phaser.Math.Linear(LIGHT.fog.layer2Alpha, 0.16, this.bloodFogBlend)
-          );
+          if (!isMobile) {
+            this.fogLayer2.setTint(lerpHexColor(LIGHT.fog.tint2, 0xe5303a, this.bloodFogBlend));
+            this.fogLayer2.setAlpha(
+              Phaser.Math.Linear(LIGHT.fog.layer2Alpha, 0.16, this.bloodFogBlend)
+            );
+          }
         } else if (this.wasBloodFogTinted) {
           this.wasBloodFogTinted = false;
           this.fogLayer1.setTint(LIGHT.fog.tint1);
-          this.fogLayer2.setTint(LIGHT.fog.tint2);
-          this.fogLayer1.setAlpha(LIGHT.fog.layer1Alpha);
-          this.fogLayer2.setAlpha(LIGHT.fog.layer2Alpha);
+          this.fogLayer1.setAlpha(baseFog1Alpha);
+          if (!isMobile) {
+            this.fogLayer2.setTint(LIGHT.fog.tint2);
+            this.fogLayer2.setAlpha(LIGHT.fog.layer2Alpha);
+          }
         }
       }
 
@@ -923,7 +938,7 @@ export class DarknessScene extends Phaser.Scene {
             if (distSq < effR * effR) {
               const dist = Math.sqrt(distSq);
               let litVal = Math.min(1, ((effR - dist) / (effR * 0.35)) * ls.alpha);
-              if (pillarCount > 0 || (hasActiveBoss && !isBossEnemy)) {
+              if (!isMobile && (pillarCount > 0 || (hasActiveBoss && !isBossEnemy))) {
                 const occ = computePointShadowOcclusion(
                   ls.x,
                   ls.y,

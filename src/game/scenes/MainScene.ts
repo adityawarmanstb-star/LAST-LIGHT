@@ -283,6 +283,7 @@ export const LIGHT = {
 // =========================================================================
 export const GORE = {
   maxDroplets: 150,
+  hitSplashPoolSize: 72,
   maxDecals: 50,
   lowSettingMultiplier: 0.5,
   dropletDepth: 25,
@@ -291,8 +292,8 @@ export const GORE = {
   bloodBurst: {
     minCount: 10,
     maxCount: 16,
-    colors: [0x6b0f15, 0x560c11, 0x470a0f, 0x3a0a0e] as readonly number[],
-    spitterColors: [0x5e122b, 0x4d0e26, 0x3d0a1f, 0x33081a] as readonly number[],
+    colors: [0x8c121a, 0x6b0f15, 0x520b10, 0x3a0a0e] as readonly number[],
+    spitterColors: [0x781636, 0x5e122b, 0x470c22, 0x33081a] as readonly number[],
     speedMin: 120,
     speedMax: 320,
     gravity: 500,
@@ -308,8 +309,8 @@ export const GORE = {
   mist: {
     minCount: 1,
     maxCount: 2,
-    bloodColor: 0x5c0d13,
-    spitterColor: 0x57112c,
+    bloodColor: 0x700f16,
+    spitterColor: 0x631332,
     alpha: 0.25,
     durationMs: 400,
     startScale: 0.45,
@@ -392,15 +393,15 @@ export const GORE = {
     critDropletMin: 11,
     critDropletMax: 15,
     maxDropletsPerHit: 22,
-    colors: [0xb81420, 0x8f0d16, 0x6b0810, 0x450509] as readonly number[],
-    spitterColors: [0x8c1740, 0x6e1033, 0x520b26, 0x38071b] as readonly number[],
-    splashTint: 0xa6101b,
-    secondarySplashTint: 0x69070f,
-    spitterSplashTint: 0x7d173a,
-    secondarySpitterSplashTint: 0x4f0c25,
-    mistTint: 0x6e0911,
-    spitterMistTint: 0x570d2b,
-    mistAlpha: 0.44,
+    colors: [0xe01b28, 0xc21420, 0x990c16, 0x6b070e] as readonly number[],
+    spitterColors: [0xb01e52, 0x8a153e, 0x660e2c, 0x47091e] as readonly number[],
+    splashTint: 0xd91624,
+    secondarySplashTint: 0x8c0b14,
+    spitterSplashTint: 0xa31c4c,
+    secondarySpitterSplashTint: 0x630f2e,
+    mistTint: 0x8c0c16,
+    spitterMistTint: 0x6b1035,
+    mistAlpha: 0.46,
     mistDurationMs: 260,
     mistStartScale: 0.44,
     mistEndScale: 1.48,
@@ -585,6 +586,19 @@ interface FloatingText {
   popScale: number;
 }
 
+interface DamageBitmapItem {
+  text: Phaser.GameObjects.BitmapText;
+  inUse: boolean;
+  spawnTime: number;
+  life: number;
+  maxLife: number;
+  vx: number;
+  vy: number;
+  gravity: number;
+  baseScale: number;
+  popScale: number;
+}
+
 interface Particle {
   sprite: Phaser.GameObjects.Sprite;
   vx: number;
@@ -721,8 +735,10 @@ export class MainScene extends Phaser.Scene {
   private particlePool: Particle[] = [];
   private readonly MAX_PARTICLES = 200;
   private goreParticlePool: GoreParticle[] = [];
+  private hitSplashPool: GoreParticle[] = [];
   private goreDecalPool: GoreDecal[] = [];
   private goreParticleSeq: number = 0;
+  private hitSplashSeq: number = 0;
   private goreDecalSeq: number = 0;
   private goreLowDecalCounter: number = 0;
   private bossVignetteSprite: Phaser.GameObjects.Image | null = null;
@@ -757,10 +773,11 @@ export class MainScene extends Phaser.Scene {
   private atmosphereOverlay: AtmosphereOverlay | null = null;
   private shadowSystem: ShadowCasterSystem | null = null;
 
-  // Floating text pool
+  // Floating text & batched damage number pools
   private floatingTexts: FloatingText[] = [];
-  private readonly MAX_FLOATING_TEXTS = 64;
-  private readonly LOW_QUALITY_MAX_FLOATING_TEXTS = 36;
+  private damageNumbers: DamageBitmapItem[] = [];
+  private readonly MAX_FLOATING_CALLOUTS = 18;
+  private readonly MAX_DAMAGE_NUMBERS = 48;
 
   // Run Stats
   private runTime: number = 0;
@@ -868,7 +885,6 @@ export class MainScene extends Phaser.Scene {
   private levelUpPulseSeq: number = 0;
   private lastMissionSecondRecorded: number = 0;
   private simTimeMs: number = 0;
-  private readonly LOW_QUALITY_MAX_PARTICLES = 90;
 
   constructor() {
     super('MainScene');
@@ -892,7 +908,9 @@ export class MainScene extends Phaser.Scene {
     this.unsubGore?.();
     this.unsubGore = null;
     this.goreParticlePool = [];
+    this.hitSplashPool = [];
     this.goreDecalPool = [];
+    this.damageNumbers = [];
     this.goreParticleSeq = 0;
     this.goreDecalSeq = 0;
     this.goreLowDecalCounter = 0;
@@ -1795,9 +1813,8 @@ export class MainScene extends Phaser.Scene {
     tint?: number,
     maxLifeOverrideMs?: number
   ) {
-    const isLowQuality = gameManager.getQualityTier() === 'low';
-    const effectiveCount = isLowQuality ? Math.max(1, Math.round(count * 0.5)) : count;
-    const poolCap = isLowQuality ? this.LOW_QUALITY_MAX_PARTICLES : this.particlePool.length;
+    const effectiveCount = count;
+    const poolCap = this.particlePool.length;
     let spawned = 0;
     for (let i = 0; i < poolCap; i++) {
       const p = this.particlePool[i];
@@ -2166,6 +2183,32 @@ export class MainScene extends Phaser.Scene {
       });
     }
 
+    this.hitSplashPool = [];
+    for (let i = 0; i < GORE.hitSplashPoolSize; i++) {
+      const sprite = this.add.image(0, 0, 'gore_hit_splash');
+      sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+      sprite.setDepth(GORE.dropletDepth);
+      sprite.setVisible(false);
+      sprite.setActive(false);
+      sprite.disableInteractive();
+      this.hitSplashPool.push({
+        sprite,
+        kind: 'splash',
+        vx: 0,
+        vy: 0,
+        gravity: 0,
+        life: 0,
+        maxLife: 1,
+        baseAlpha: 1,
+        startScaleX: 1,
+        startScaleY: 1,
+        endScale: 1,
+        rotSpeed: 0,
+        active: false,
+        seq: 0,
+      });
+    }
+
     this.goreDecalPool = [];
     for (let i = 0; i < GORE.maxDecals; i++) {
       const sprite = this.add.image(0, 0, GORE_DECAL_KEYS[0]);
@@ -2192,6 +2235,12 @@ export class MainScene extends Phaser.Scene {
         p.active = false;
         p.sprite.setVisible(false);
         p.sprite.setActive(false);
+      }
+      for (let i = 0; i < this.hitSplashPool.length; i++) {
+        const s = this.hitSplashPool[i];
+        s.active = false;
+        s.sprite.setVisible(false);
+        s.sprite.setActive(false);
       }
       for (let i = 0; i < this.goreDecalPool.length; i++) {
         const d = this.goreDecalPool[i];
@@ -2263,6 +2312,31 @@ export class MainScene extends Phaser.Scene {
 
     for (let i = 0; i < this.goreParticlePool.length; i++) {
       const p = this.goreParticlePool[i];
+      if (p.active) {
+        activeCount++;
+        if (p.seq < oldestSeq) {
+          oldestSeq = p.seq;
+          oldestSlot = p;
+        }
+      } else if (!freeSlot) {
+        freeSlot = p;
+      }
+    }
+
+    if (activeCount >= maxActiveCap || !freeSlot) {
+      return oldestSlot;
+    }
+    return freeSlot;
+  }
+
+  private acquireHitSplashParticle(maxActiveCap: number): GoreParticle {
+    let activeCount = 0;
+    let freeSlot: GoreParticle | null = null;
+    let oldestSlot = this.hitSplashPool[0];
+    let oldestSeq = Number.MAX_SAFE_INTEGER;
+
+    for (let i = 0; i < this.hitSplashPool.length; i++) {
+      const p = this.hitSplashPool[i];
       if (p.active) {
         activeCount++;
         if (p.seq < oldestSeq) {
@@ -2704,6 +2778,9 @@ export class MainScene extends Phaser.Scene {
     const maxLiveDroplets = isLowGore
       ? Math.floor(GORE.maxDroplets * GORE.lowSettingMultiplier)
       : GORE.maxDroplets;
+    const maxLiveSplashes = isLowGore
+      ? Math.floor(GORE.hitSplashPoolSize * GORE.lowSettingMultiplier)
+      : GORE.hitSplashPoolSize;
     const isSpitter = enemyType === 'spitter';
 
     const hasDir = impactVx * impactVx + impactVy * impactVy > 4;
@@ -2711,25 +2788,36 @@ export class MainScene extends Phaser.Scene {
     const dirX = Math.cos(baseAngle);
     const dirY = Math.sin(baseAngle);
 
-    // 1. Dense crimson blood cloud mist behind splash for thick volume
-    this.spawnGoreMist(
-      x + dirX * (6 * sizeScale),
-      y + dirY * (6 * sizeScale),
-      'mist',
-      isSpitter ? hCfg.spitterMistTint : hCfg.mistTint,
-      isLowGore ? hCfg.mistAlpha * 0.72 : hCfg.mistAlpha,
-      hCfg.mistDurationMs,
-      hCfg.mistStartScale * sizeScale,
-      hCfg.mistEndScale * sizeScale,
-      dirX * (28 * sizeScale),
-      dirY * (28 * sizeScale),
-      0,
-      maxLiveDroplets
-    );
+    // 1. Dense crimson blood cloud mist behind splash (isolated pool so death bursts never steal it)
+    const hitMist = this.acquireHitSplashParticle(maxLiveSplashes);
+    this.hitSplashSeq += 1;
+    hitMist.kind = 'mist';
+    hitMist.active = true;
+    hitMist.seq = this.hitSplashSeq;
+    hitMist.vx = dirX * (28 * sizeScale);
+    hitMist.vy = dirY * (28 * sizeScale);
+    hitMist.gravity = 0;
+    hitMist.life = 0;
+    hitMist.maxLife = hCfg.mistDurationMs;
+    hitMist.baseAlpha = isLowGore ? hCfg.mistAlpha * 0.72 : hCfg.mistAlpha;
+    hitMist.startScaleX = hCfg.mistStartScale * sizeScale;
+    hitMist.startScaleY = hCfg.mistStartScale * sizeScale;
+    hitMist.endScale = hCfg.mistEndScale * sizeScale;
+    hitMist.rotSpeed = Phaser.Math.FloatBetween(-1.2, 1.2);
+    hitMist.sprite.setTexture('gore_mist_puff');
+    hitMist.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+    hitMist.sprite.setDepth(GORE.dropletDepth);
+    hitMist.sprite.setPosition(x + dirX * (6 * sizeScale), y + dirY * (6 * sizeScale));
+    hitMist.sprite.setRotation(Math.random() * Math.PI * 2);
+    hitMist.sprite.setScale(hitMist.startScaleX);
+    hitMist.sprite.setTint(isSpitter ? hCfg.spitterMistTint : hCfg.mistTint);
+    hitMist.sprite.setAlpha(hitMist.baseAlpha);
+    hitMist.sprite.setVisible(true);
+    hitMist.sprite.setActive(true);
 
     // 2. Primary thick pooled blood splash burst (NORMAL blend, scaled by monster size)
-    const splash = this.acquireGoreParticle(maxLiveDroplets);
-    this.goreParticleSeq += 1;
+    const splash = this.acquireHitSplashParticle(maxLiveSplashes);
+    this.hitSplashSeq += 1;
 
     const baseEndScale = isCrit ? hCfg.critSplashEndScale : hCfg.splashEndScale;
     const startScale = hCfg.splashStartScale * sizeScale;
@@ -2737,7 +2825,7 @@ export class MainScene extends Phaser.Scene {
 
     splash.kind = 'splash';
     splash.active = true;
-    splash.seq = this.goreParticleSeq;
+    splash.seq = this.hitSplashSeq;
     splash.vx = hasDir ? dirX * (32 * Math.min(1.8, sizeScale)) : 0;
     splash.vy = hasDir ? dirY * (32 * Math.min(1.8, sizeScale)) : 0;
     splash.gravity = 0;
@@ -2762,13 +2850,13 @@ export class MainScene extends Phaser.Scene {
 
     // 3. Secondary layered clotted crimson splash lobe for thicker 3D volume
     if (!isLowGore || isCrit || sizeScale >= 1.2) {
-      const overlay = this.acquireGoreParticle(maxLiveDroplets);
-      this.goreParticleSeq += 1;
+      const overlay = this.acquireHitSplashParticle(maxLiveSplashes);
+      this.hitSplashSeq += 1;
       const offsetDist = 9 * sizeScale;
 
       overlay.kind = 'splash';
       overlay.active = true;
-      overlay.seq = this.goreParticleSeq;
+      overlay.seq = this.hitSplashSeq;
       overlay.vx = dirX * (58 * Math.min(1.9, sizeScale));
       overlay.vy = dirY * (58 * Math.min(1.9, sizeScale));
       overlay.gravity = 0;
@@ -2852,12 +2940,9 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private updateGore(delta: number) {
-    const dt = delta * 0.001;
-
-    // 1. Update pooled gore particles (blood droplets, splash bursts, stone chips, mist puffs, wisp mist)
-    for (let i = 0; i < this.goreParticlePool.length; i++) {
-      const p = this.goreParticlePool[i];
+  private stepGoreParticleList(list: GoreParticle[], delta: number, dt: number, mistDamp: number) {
+    for (let i = 0; i < list.length; i++) {
+      const p = list[i];
       if (!p.active) continue;
 
       p.life += delta;
@@ -2905,13 +2990,11 @@ export class MainScene extends Phaser.Scene {
         p.sprite.setScale(p.startScaleX * shrinkMult);
         p.sprite.setAlpha(p.baseAlpha * (1 - progress * progress));
       } else {
-        // 'mist' or 'wisp_mist'
-        const damp = Math.pow(0.94, delta / 16.6667);
-        p.vx *= damp;
+        p.vx *= mistDamp;
         if (p.kind === 'wisp_mist') {
           p.vy += p.gravity * dt;
         } else {
-          p.vy *= damp;
+          p.vy *= mistDamp;
         }
         p.sprite.x += p.vx * dt;
         p.sprite.y += p.vy * dt;
@@ -2921,6 +3004,15 @@ export class MainScene extends Phaser.Scene {
         p.sprite.setAlpha(p.baseAlpha * (1 - progress));
       }
     }
+  }
+
+  private updateGore(delta: number) {
+    const dt = delta * 0.001;
+    const mistDamp = Math.pow(0.94, delta / 16.6667);
+
+    // 1. Update pooled hit splashes & gore droplets/chips/mist (isolated pools prevent starvation)
+    this.stepGoreParticleList(this.hitSplashPool, delta, dt, mistDamp);
+    this.stepGoreParticleList(this.goreParticlePool, delta, dt, mistDamp);
 
     // 2. Update pooled floor stain decals (fade out over 8 seconds)
     for (let i = 0; i < this.goreDecalPool.length; i++) {
@@ -6784,9 +6876,79 @@ export class MainScene extends Phaser.Scene {
     return nearest;
   }
 
+  private ensureDamageBitmapFont() {
+    if (this.cache.bitmapFont.exists('damage_bitmap_font')) return;
+
+    const chars = '0123456789!+ ';
+    const cellW = 18;
+    const cellH = 24;
+    if (!this.textures.exists('damage_bitmap_font')) {
+      const tex = this.textures.createCanvas('damage_bitmap_font', cellW * chars.length, cellH);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, cellW * chars.length, cellH);
+        ctx.font = '900 17px Georgia, serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#090b10';
+        ctx.fillStyle = '#ffffff';
+        for (let i = 0; i < chars.length; i++) {
+          const ch = chars[i];
+          if (ch === ' ') continue;
+          const cx = i * cellW + cellW * 0.5;
+          const cy = cellH * 0.52;
+          ctx.strokeText(ch, cx, cy);
+          ctx.fillText(ch, cx, cy);
+        }
+        tex.refresh();
+      }
+    }
+
+    const config: Phaser.Types.GameObjects.BitmapText.RetroFontConfig = {
+      image: 'damage_bitmap_font',
+      width: cellW,
+      height: cellH,
+      chars,
+      charsPerRow: chars.length,
+      'offset.x': 0,
+      'offset.y': 0,
+      'spacing.x': -5,
+      'spacing.y': 0,
+      lineSpacing: 0,
+    };
+    this.cache.bitmapFont.add('damage_bitmap_font', Phaser.GameObjects.RetroFont.Parse(this, config));
+  }
+
   private initFloatingTextPool() {
+    this.ensureDamageBitmapFont();
+
+    this.damageNumbers = [];
+    for (let i = 0; i < this.MAX_DAMAGE_NUMBERS; i++) {
+      const text = this.add.bitmapText(0, 0, 'damage_bitmap_font', '');
+      text.setOrigin(0.5, 0.5);
+      text.setDepth(30);
+      text.setActive(false);
+      text.setVisible(false);
+      text.disableInteractive();
+
+      this.damageNumbers.push({
+        text,
+        inUse: false,
+        spawnTime: 0,
+        life: 0,
+        maxLife: 600,
+        vx: 0,
+        vy: 0,
+        gravity: 95,
+        baseScale: 1,
+        popScale: 1.2,
+      });
+    }
+
     this.floatingTexts = [];
-    for (let i = 0; i < this.MAX_FLOATING_TEXTS; i++) {
+    for (let i = 0; i < this.MAX_FLOATING_CALLOUTS; i++) {
       const text = this.add.text(0, 0, '', {
         fontFamily: 'Almendra, Spectral, Georgia, serif',
         fontStyle: '700',
@@ -6819,13 +6981,8 @@ export class MainScene extends Phaser.Scene {
   private acquireFloatingText(): FloatingText | null {
     if (this.floatingTexts.length === 0) return null;
 
-    const poolCap =
-      gameManager.getQualityTier() === 'low'
-        ? Math.min(this.LOW_QUALITY_MAX_FLOATING_TEXTS, this.floatingTexts.length)
-        : this.floatingTexts.length;
-
     let oldest = this.floatingTexts[0];
-    for (let i = 0; i < poolCap; i++) {
+    for (let i = 0; i < this.floatingTexts.length; i++) {
       const slot = this.floatingTexts[i];
       if (!slot.inUse) {
         return slot;
@@ -6838,8 +6995,25 @@ export class MainScene extends Phaser.Scene {
     return oldest;
   }
 
+  private acquireDamageBitmap(): DamageBitmapItem | null {
+    if (this.damageNumbers.length === 0) return null;
+
+    let oldest = this.damageNumbers[0];
+    for (let i = 0; i < this.damageNumbers.length; i++) {
+      const slot = this.damageNumbers[i];
+      if (!slot.inUse) {
+        return slot;
+      }
+      if (slot.spawnTime < oldest.spawnTime) {
+        oldest = slot;
+      }
+    }
+
+    return oldest;
+  }
+
   private showDamageNumber(x: number, y: number, damage: number, isCrit: boolean) {
-    const slot = this.acquireFloatingText();
+    const slot = this.acquireDamageBitmap();
     if (!slot) return;
 
     const rounded = Math.max(1, Math.round(damage));
@@ -6850,12 +7024,12 @@ export class MainScene extends Phaser.Scene {
     slot.vx = Phaser.Math.FloatBetween(-26, 26);
     slot.vy = isCrit ? -96 : -76;
     slot.gravity = 105;
-    slot.baseScale = isCrit ? 1.18 : 0.88;
-    slot.popScale = isCrit ? 1.52 : 1.1;
+    slot.baseScale = isCrit ? 1.15 : 0.86;
+    slot.popScale = isCrit ? 1.48 : 1.08;
 
     slot.text.setPosition(x + Phaser.Math.FloatBetween(-8, 8), y);
     slot.text.setText(isCrit ? `${rounded}!` : `${rounded}`);
-    slot.text.setColor(isCrit ? '#f2a93b' : '#ffffff');
+    slot.text.setTint(isCrit ? 0xf2a93b : 0xffffff);
     slot.text.setDepth(isCrit ? 31 : 30);
     slot.text.setScale(slot.popScale);
     slot.text.setAlpha(1);
@@ -6865,6 +7039,30 @@ export class MainScene extends Phaser.Scene {
 
   private updateFloatingTexts(delta: number) {
     const dtSec = delta * 0.001;
+    for (let i = 0; i < this.damageNumbers.length; i++) {
+      const item = this.damageNumbers[i];
+      if (!item.inUse) continue;
+
+      item.life += delta;
+      if (item.life >= item.maxLife) {
+        item.inUse = false;
+        item.text.setActive(false);
+        item.text.setVisible(false);
+        continue;
+      }
+
+      item.text.x += item.vx * dtSec;
+      item.text.y += item.vy * dtSec;
+      item.vy += item.gravity * dtSec;
+
+      const popProgress = Math.min(1, item.life / 110);
+      item.text.setScale(Phaser.Math.Linear(item.popScale, item.baseScale, popProgress));
+
+      const lifeProgress = item.life / item.maxLife;
+      const alpha = lifeProgress > 0.62 ? Math.max(0, 1 - (lifeProgress - 0.62) / 0.38) : 1;
+      item.text.setAlpha(alpha);
+    }
+
     for (let i = 0; i < this.floatingTexts.length; i++) {
       const item = this.floatingTexts[i];
       if (!item.inUse) continue;

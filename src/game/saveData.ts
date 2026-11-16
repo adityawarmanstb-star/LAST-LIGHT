@@ -57,6 +57,14 @@ export interface SaveDataV1 {
   difficulty: GameDifficultyId;
 }
 
+function isMobileBrowser(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
+const MOBILE_DEFAULTS = isMobileBrowser();
+const MOBILE_PERF_MIGRATION_FLAG = 'last_light_mobile_perf_v1';
+
 const DEFAULT_SETTINGS: SaveSettingsData = {
   muted: false,
   masterVolume: 0.75,
@@ -64,9 +72,9 @@ const DEFAULT_SETTINGS: SaveSettingsData = {
   sfxVolume: 0.8,
   brightness: 1.0,
   hapticsEnabled: true,
-  targetFps: 90,
+  targetFps: MOBILE_DEFAULTS ? 60 : 90,
   resolutionMode: 'auto',
-  upscalerEnabled: true,
+  upscalerEnabled: !MOBILE_DEFAULTS,
   frameGenEnabled: true,
   gore: 'normal',
 };
@@ -132,7 +140,7 @@ function safeBoolean(value: unknown, fallback: boolean): boolean {
 function sanitizeTargetFps(value: unknown): TargetFpsOption {
   const num = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : NaN;
   if (num === 60 || num === 90 || num === 120) return num;
-  return 90;
+  return MOBILE_DEFAULTS ? 60 : 90;
 }
 
 function sanitizeResolutionMode(value: unknown): ResolutionQualityMode {
@@ -492,13 +500,25 @@ class SaveDataStore {
       if (raw) {
         const parsed = JSON.parse(raw);
         const sanitized = sanitizeSaveData(parsed);
+        if (MOBILE_DEFAULTS && !window.localStorage.getItem(MOBILE_PERF_MIGRATION_FLAG)) {
+          sanitized.settings.targetFps = 60;
+          sanitized.settings.upscalerEnabled = false;
+          window.localStorage.setItem(MOBILE_PERF_MIGRATION_FLAG, '1');
+          this.persist(sanitized);
+        }
         return sanitized;
       }
 
       const migrated = migrateLegacyKeys();
       if (migrated) {
+        if (MOBILE_DEFAULTS) {
+          window.localStorage.setItem(MOBILE_PERF_MIGRATION_FLAG, '1');
+        }
         this.persist(migrated);
         return migrated;
+      }
+      if (MOBILE_DEFAULTS) {
+        window.localStorage.setItem(MOBILE_PERF_MIGRATION_FLAG, '1');
       }
     } catch {
       // Corrupted JSON or inaccessible storage -> fall back safely to defaults
