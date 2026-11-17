@@ -368,7 +368,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({ initialSubTab = 'market' }) 
                             }`}
                           >
                             <Icon id="soul_coin" size={16} />
-                            <span>{nextCost}</span>
+                            <span>{nextCost.toLocaleString()}</span>
                           </button>
                         )}
                       </div>
@@ -598,7 +598,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({ initialSubTab = 'market' }) 
                           }`}
                         >
                           <Icon id="soul_coin" size={16} />
-                          <span>{relic.cost}</span>
+                          <span>{relic.cost.toLocaleString()}</span>
                         </button>
                       )}
                     </div>

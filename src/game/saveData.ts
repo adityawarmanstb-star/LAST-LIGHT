@@ -31,6 +31,7 @@ export interface SaveSettingsData {
   sfxVolume: number;
   brightness: number;
   hapticsEnabled: boolean;
+  screenShakeEnabled: boolean;
   targetFps: TargetFpsOption;
   resolutionMode: ResolutionQualityMode;
   upscalerEnabled: boolean;
@@ -72,6 +73,7 @@ const DEFAULT_SETTINGS: SaveSettingsData = {
   sfxVolume: 0.8,
   brightness: 1.0,
   hapticsEnabled: true,
+  screenShakeEnabled: true,
   targetFps: MOBILE_DEFAULTS ? 60 : 90,
   resolutionMode: 'auto',
   upscalerEnabled: !MOBILE_DEFAULTS,
@@ -385,6 +387,10 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
       sfxVolume: clampFinite(rawSettings.sfxVolume, 0, 1, defaults.settings.sfxVolume),
       brightness: clampFinite(rawSettings.brightness, 0.5, 1.5, defaults.settings.brightness),
       hapticsEnabled: safeBoolean(rawSettings.hapticsEnabled, defaults.settings.hapticsEnabled),
+      screenShakeEnabled: safeBoolean(
+        rawSettings.screenShakeEnabled,
+        defaults.settings.screenShakeEnabled
+      ),
       targetFps: sanitizeTargetFps(rawSettings.targetFps),
       resolutionMode: sanitizeResolutionMode(rawSettings.resolutionMode),
       upscalerEnabled: safeBoolean(rawSettings.upscalerEnabled, defaults.settings.upscalerEnabled),
@@ -571,6 +577,10 @@ class SaveDataStore {
     };
   }
 
+  public readFastRef(): Readonly<SaveDataV1> {
+    return this.cache;
+  }
+
   public update(mutator: (draft: SaveDataV1) => void, writeNow = true): SaveDataV1 {
     const draft = this.read();
     mutator(draft);
@@ -581,7 +591,17 @@ class SaveDataStore {
     return this.read();
   }
 
+  public mutateFast(mutator: (cache: SaveDataV1) => void, writeNow = false): Readonly<SaveDataV1> {
+    mutator(this.cache);
+    if (writeNow) {
+      this.cache = sanitizeSaveData(this.cache);
+      this.persist(this.cache);
+    }
+    return this.cache;
+  }
+
   public flush(): void {
+    this.cache = sanitizeSaveData(this.cache);
     this.persist(this.cache);
   }
 }

@@ -95,11 +95,13 @@ export const BossIntroModal: React.FC<BossIntroModalProps> = ({
   }, [paused, triggerDismiss]);
 
   const safeMaxHp = Math.max(1, Math.round(bossIntro.maxHp));
-  const shakeClass = paused
-    ? ''
-    : pulseBeat === 0
-      ? 'boss-intro-camera-shake'
-      : 'boss-intro-aftershock';
+  const shakeEnabled = gameManager.isScreenShakeEnabled();
+  const shakeClass =
+    paused || !shakeEnabled
+      ? ''
+      : pulseBeat === 0
+        ? 'boss-intro-camera-shake'
+        : 'boss-intro-aftershock';
 
   return (
     <div

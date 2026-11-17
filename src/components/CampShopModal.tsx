@@ -396,7 +396,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
                       >
                         <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
                         <span className={canAfford ? 'text-[#d8c9a8]' : 'text-[#7c7361]'}>
-                          {nextCost}
+                          {nextCost.toLocaleString()}
                         </span>
                       </IronButton>
                     )}
@@ -427,7 +427,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
                   const isSlotUnlocked = slotIdx < maxRelicSlots;
                   const equippedInSlot = isSlotUnlocked ? equippedRelics[slotIdx] ?? null : null;
                   const isNextLockedSlot = !isSlotUnlocked && nextSlotInfo?.nextSlotNumber === slotNumber;
-                  const slotUnlockCost = slotNumber === 3 ? 3 : slotNumber === 4 ? 5 : 0;
+                  const slotUnlockCost = slotNumber === 3 ? 3 : slotNumber === 4 ? 6 : 0;
 
                   if (equippedInSlot) {
                     const rarityMeta = RELIC_RARITY_META[equippedInSlot.rarity];
@@ -734,7 +734,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
                           >
                             <Coins className="w-3.5 h-3.5 text-[#f2a93b]" />
                             <span className={canAfford ? 'text-[#d8c9a8]' : 'text-[#7c7361]'}>
-                              {relic.cost}
+                              {relic.cost.toLocaleString()}
                             </span>
                           </IronButton>
                         )}

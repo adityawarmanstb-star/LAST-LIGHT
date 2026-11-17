@@ -44,6 +44,25 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   const minutes = Math.floor(stats.timeSurvived / 60);
   const seconds = stats.timeSurvived % 60;
   const timeFormatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  const difficultyLabel =
+    stats.difficulty === 'baby'
+      ? 'BABY MODE'
+      : stats.difficulty === 'pro'
+        ? 'PRO MODE'
+        : stats.difficulty === 'hacker'
+          ? 'HACKER MODE'
+          : '';
+  const stageRewardGold =
+    stats.stageRewardGold ??
+    (stats.victory
+      ? stats.difficulty === 'baby'
+        ? 1000
+        : stats.difficulty === 'pro'
+          ? 3000
+          : 10000
+      : 0);
+  const runCoinsCollected =
+    stats.runCoinsCollected ?? Math.max(0, stats.coinsEarned - stageRewardGold);
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -66,7 +85,9 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
         backdropFilter: 'blur(6px)',
         WebkitBackdropFilter: 'blur(6px)',
         background: 'rgba(5, 8, 12, 0.85)',
-        boxShadow: 'inset 0 0 120px rgba(120, 10, 16, 0.35)',
+        boxShadow: stats.victory
+          ? 'inset 0 0 130px rgba(212, 148, 36, 0.28)'
+          : 'inset 0 0 120px rgba(120, 10, 16, 0.35)',
       }}
     >
       <div className="w-[92%] max-w-[400px] max-h-[92vh] flex flex-col">
@@ -75,6 +96,32 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           className="w-full max-h-[92vh] flex flex-col"
           contentClassName="p-5 sm:p-6 flex flex-col items-center text-center max-h-[92vh] overflow-y-auto"
         >
+          {/* Stage 1 Completion Notification Banner */}
+          {stats.victory && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="w-full mb-3.5 px-3.5 py-2.5 rounded-[10px] border border-[#f2a93b]/70 bg-gradient-to-r from-[#261a08]/95 via-[#33220a]/95 to-[#261a08]/95 flex items-center justify-between gap-2.5 shadow-[0_0_18px_rgba(242,169,59,0.28)]"
+            >
+              <div className="flex items-center gap-2 min-w-0 text-left">
+                <Icon id="ui_crown" size={20} className="shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="font-display text-[11px] font-black tracking-[0.16em] text-[#f2c464] uppercase leading-tight">
+                    STAGE {stats.stageCleared ?? 1} COMPLETE!
+                  </span>
+                  <span className="font-body text-[11px] text-[#e6d5b2] truncate">
+                    Boss defeated · Stage cleared
+                  </span>
+                </div>
+              </div>
+              {difficultyLabel && (
+                <span className="shrink-0 px-2 py-0.5 rounded bg-[#140e06] border border-[#f2a93b]/50 font-display text-[9px] font-bold tracking-[0.14em] text-[#f7d88a] uppercase">
+                  {difficultyLabel}
+                </span>
+              )}
+            </div>
+          )}
+
           {/* Header Typography */}
           <div className="w-full flex flex-col items-center mb-4">
             <span
@@ -83,7 +130,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               }`}
               style={{ textShadow: '0 1px 4px rgba(0, 0, 0, 0.95)' }}
             >
-              {stats.victory ? 'VICTORY' : 'FALLEN IN THE DARK'}
+              {stats.victory ? 'VICTORY · STAGE 1 CLEAR' : 'FALLEN IN THE DARK'}
             </span>
 
             <h2
@@ -99,10 +146,10 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                   'drop-shadow(0 2px 0 #140806) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.92))',
               }}
             >
-              {stats.victory ? 'THE DAWN AWAKENS' : 'THE LIGHT FADES'}
+              {stats.victory ? 'STAGE 1 COMPLETE' : 'THE LIGHT FADES'}
             </h2>
 
-            {/* Glowing Crimson Divider Line */}
+            {/* Glowing Divider Line */}
             <div
               aria-hidden="true"
               className="w-4/5 h-[2px] my-2.5 rounded-full"
@@ -118,7 +165,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
 
             <p className="font-body text-sm font-medium text-[#cbbba0] leading-snug">
               {stats.victory
-                ? 'You vanquished the Void Titan and reclaimed the dark.'
+                ? 'You vanquished the Void Titan and reclaimed the Ashfen.'
                 : `Reached Lv. ${stats.levelReached} before the shadows closed in.`}
               {(stats.challengesCompleted ?? 0) > 0 && (
                 <span className="block mt-1 text-[#f2a93b] font-semibold">
@@ -128,6 +175,38 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               )}
             </p>
           </div>
+
+          {/* Dedicated Stage 1 Gold Reward Callout */}
+          {stats.victory && stageRewardGold > 0 && (
+            <IronCard
+              highlight="gold"
+              className="w-full mb-3.5"
+              contentClassName="px-3.5 py-2.5 flex items-center justify-between gap-3"
+            >
+              <div className="flex items-center gap-2.5 min-w-0 text-left">
+                <Icon id="soul_coin" size={24} className="shrink-0" />
+                <div className="flex flex-col min-w-0">
+                  <span className="font-display text-[11px] font-bold tracking-[0.14em] text-[#f2c464] uppercase">
+                    Stage 1 Clear Reward
+                  </span>
+                  <span className="font-body text-[11px] text-[#cbbba0]">
+                    {difficultyLabel || 'Difficulty Bonus'}
+                    {runCoinsCollected > 0
+                      ? ` (+${runCoinsCollected.toLocaleString()} from arena)`
+                      : ''}
+                  </span>
+                </div>
+              </div>
+              <span
+                className="font-display font-black text-lg text-[#ffd978] tabular-nums shrink-0"
+                style={{
+                  textShadow: '0 0 14px rgba(242, 196, 100, 0.55), 0 2px 3px rgba(0, 0, 0, 0.95)',
+                }}
+              >
+                +{stageRewardGold.toLocaleString()} GOLD
+              </span>
+            </IronCard>
+          )}
 
           {/* 3 Side-by-Side Stat Cards using panel_iron_card.png */}
           <div className="grid grid-cols-3 gap-2.5 w-full mb-5">
@@ -178,10 +257,10 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                     '0 0 14px rgba(242, 196, 100, 0.45), 0 2px 3px rgba(0, 0, 0, 0.95)',
                 }}
               >
-                +{stats.coinsEarned}
+                +{stats.coinsEarned.toLocaleString()}
               </div>
               <div className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[#a89a7e] mt-1">
-                COINS
+                GOLD
               </div>
             </IronCard>
           </div>

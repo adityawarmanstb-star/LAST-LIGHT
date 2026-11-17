@@ -65,6 +65,7 @@ export interface CritImpactPayload {
   isEliteOrBoss: boolean;
   enemyType?: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss';
   enemyDisplaySize?: number;
+  attackStyle?: 'bolt' | 'shotgun' | 'spark' | 'ring' | 'blades' | 'lightning' | 'light_burst';
   shakeDurationMs: number;
   shakeIntensity: number;
   hitstopMs: number;
@@ -98,6 +99,7 @@ type CritImpactCallback = (impact: CritImpactPayload) => void;
 type LoadProgressCallback = (payload: LoadProgressPayload) => void;
 type GameStateCallback = (state: GameScreenState) => void;
 type GoreCallback = (level: GoreLevel) => void;
+type ScreenShakeCallback = (enabled: boolean) => void;
 
 class GameManager {
   private statsListeners: StatsCallback[] = [];
@@ -115,6 +117,7 @@ class GameManager {
   private loadProgressListeners: LoadProgressCallback[] = [];
   private gameStateListeners: GameStateCallback[] = [];
   private goreListeners: GoreCallback[] = [];
+  private screenShakeListeners: ScreenShakeCallback[] = [];
   private lastCritImpactMs: number = 0;
   private critImpactSeq: number = 0;
   private bossIntroSeq: number = 0;
@@ -132,6 +135,7 @@ class GameManager {
   private brightness: number = saveDataStore.read().settings.brightness;
   private selectedDifficulty: GameDifficultyId = saveDataStore.read().difficulty;
   private goreLevel: GoreLevel = saveDataStore.read().settings.gore;
+  private screenShakeEnabled: boolean = saveDataStore.read().settings.screenShakeEnabled;
   private qualityTier: QualityTier = 'high';
   private graphicsConfig: GraphicsConfig = (() => {
     const s = saveDataStore.read().settings;
@@ -280,6 +284,26 @@ class GameManager {
     };
   }
 
+  public isScreenShakeEnabled(): boolean {
+    return this.screenShakeEnabled;
+  }
+
+  public setScreenShakeEnabled(enabled: boolean) {
+    if (this.screenShakeEnabled === enabled) return;
+    this.screenShakeEnabled = enabled;
+    saveDataStore.update((draft) => {
+      draft.settings.screenShakeEnabled = enabled;
+    });
+    this.screenShakeListeners.forEach((l) => l(enabled));
+  }
+
+  public onScreenShakeChange(cb: ScreenShakeCallback) {
+    this.screenShakeListeners.push(cb);
+    return () => {
+      this.screenShakeListeners = this.screenShakeListeners.filter((l) => l !== cb);
+    };
+  }
+
   public onStatsUpdate(cb: StatsCallback) {
     this.statsListeners.push(cb);
     return () => {
@@ -403,6 +427,7 @@ class GameManager {
     isEliteOrBoss?: boolean;
     enemyType?: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss';
     enemyDisplaySize?: number;
+    attackStyle?: 'bolt' | 'shotgun' | 'spark' | 'ring' | 'blades' | 'lightning' | 'light_burst';
   }): boolean {
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
     const isEliteOrBoss = Boolean(input.isEliteOrBoss);
@@ -422,6 +447,7 @@ class GameManager {
       isEliteOrBoss,
       enemyType: input.enemyType,
       enemyDisplaySize: input.enemyDisplaySize,
+      attackStyle: input.attackStyle,
       shakeDurationMs: 0,
       shakeIntensity: 0,
       hitstopMs: isHeavyCrit ? 46 : 30,

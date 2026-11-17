@@ -319,17 +319,28 @@ export const GORE = {
     speedMax: 52,
   },
   decal: {
-    variants: 4,
-    textureSize: 96,
-    satelliteMin: 6,
-    satelliteMax: 10,
-    alpha: 0.75,
+    alpha: 0.8,
     fadeDurationMs: 8000,
-    bloodTint: 0xffffff,
-    spitterTint: 0xd8a8ec,
-    baseScale: 0.72,
-    eliteScaleMult: 1.28,
-    bossScaleMult: 2.1,
+    tint: 0xffffff,
+  },
+  bloodPack: {
+    frameSize: 256,
+    burstFrames: 14,
+    burstColumns: 7,
+    burstFps: 22,
+    maxLiveBursts: 36,
+    burstDepth: 25,
+    enemySizeMult: 1.2,
+    bossBurstScale: 2.5,
+    stainAlpha: 0.85,
+    atlasFrameCount: 9,
+    secondaryScaleMin: 0.35,
+    secondaryScaleMax: 0.8,
+    secondaryAlpha: 0.8,
+    secondaryOffsetMin: 16,
+    secondaryOffsetMax: 42,
+    bossSecondaryOffsetMin: 40,
+    bossSecondaryOffsetMax: 92,
   },
   variants: {
     brute: {
@@ -424,12 +435,33 @@ export const GORE = {
   },
 } as const;
 
-const GORE_DECAL_KEYS = [
-  'gore_decal_0',
-  'gore_decal_1',
-  'gore_decal_2',
-  'gore_decal_3',
-] as const;
+const HIT_VFX = {
+  maxSimultaneousHitSparks: 8,
+  dedupeWindowMs: 55,
+  dedupeRadiusSq: 48 * 48,
+  recycleMinAgeMs: 42,
+  densityWindowMs: 90,
+  hitSparkBaseScale: 0.36,
+  critSparkBaseScale: 0.50,
+  maxSparkScale: 0.68,
+  hitSparkAlpha: 0.54,
+  critSparkAlpha: 0.70,
+  minStackedAlphaFactor: 0.44,
+  dropletCountNormal: 2,
+  dropletCountCrit: 4,
+  dropletAlphaNormal: 0.50,
+  dropletAlphaCrit: 0.64,
+  dropletScaleMin: 0.09,
+  dropletScaleMax: 0.17,
+  dropletLifeNormalMs: 165,
+  dropletLifeCritMs: 210,
+  critRingCount: 2,
+  critRingAlpha: 0.44,
+  critShockwaveCountNormal: 3,
+  critShockwaveCountElite: 5,
+  critShockwaveAlpha: 0.40,
+  critShockwaveCooldownMs: 65,
+} as const;
 
 // =========================================================================
 // TUNABLE DIFFICULTY CURVE DATA TABLE
@@ -606,6 +638,7 @@ interface Particle {
   life: number;
   maxLife: number;
   decay: number;
+  baseAlpha: number;
   active: boolean;
 }
 
@@ -637,6 +670,17 @@ interface GoreDecal {
   seq: number;
 }
 
+interface BloodBurstItem {
+  sprite: Phaser.GameObjects.Sprite;
+  x: number;
+  y: number;
+  scale: number;
+  rotation: number;
+  maxLiveDecals: number;
+  active: boolean;
+  seq: number;
+}
+
 interface EnemyData {
   type: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss';
   hp: number;
@@ -663,6 +707,8 @@ interface EnemyData {
   tintResetAtMs?: number;
 }
 
+type AttackSplashStyle = 'bolt' | 'shotgun' | 'spark' | 'ring' | 'blades' | 'lightning' | 'light_burst';
+
 interface ProjectileData {
   vx: number;
   vy: number;
@@ -675,6 +721,7 @@ interface ProjectileData {
   originX?: number;
   originY?: number;
   maxRangeSq?: number;
+  attackStyle?: AttackSplashStyle;
 }
 
 interface TelegraphEntry {
@@ -696,15 +743,17 @@ interface EffectPoolItem {
   sprite: Phaser.GameObjects.Sprite;
   inUse: boolean;
   spawnTime: number;
+  isHitSpark?: boolean;
+  x?: number;
+  y?: number;
   timerEvent?: Phaser.Time.TimerEvent;
 }
 
 export class MainScene extends Phaser.Scene {
   // World & Floor
   private floor!: Phaser.GameObjects.TileSprite;
-  private lightVignette!: Phaser.GameObjects.Graphics;
+  private lightVignetteSprite!: Phaser.GameObjects.Image;
   private lanternGlowSprite!: Phaser.GameObjects.Image;
-  private hadEdgeVignette: boolean = false;
 
   // Player
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -719,11 +768,14 @@ export class MainScene extends Phaser.Scene {
   private isAttacking: boolean = false;
   private muzzleFiredThisAttack: boolean = false;
   private isDead: boolean = false;
+  private isVictoryEnded: boolean = false;
   private isInvulnerable: boolean = false;
   private readonly PLAYER_SCALE: number = 100 / 218;
 
   // Weapons State
   private weapons: Record<string, WeaponState> = {};
+  private weaponsSnapshot: WeaponState[] = [];
+  private lastWeaponsSig: number = -1;
   private multishotLevel: number = 0;
   private orbitingBlades: Phaser.GameObjects.Sprite[] = [];
   private bladeAngle: number = 0;
@@ -731,26 +783,52 @@ export class MainScene extends Phaser.Scene {
   private nextSparkBurst: number = 4000;
   private nextShotgunBlast: number = 1500;
 
-  // Pools
+  // Pools & Round-Robin Cursors (O(1) acquisition, zero per-frame allocations)
   private particlePool: Particle[] = [];
+  private particlePoolCursor: number = 0;
   private readonly MAX_PARTICLES = 200;
   private goreParticlePool: GoreParticle[] = [];
   private hitSplashPool: GoreParticle[] = [];
   private goreDecalPool: GoreDecal[] = [];
+  private bloodBurstPool: BloodBurstItem[] = [];
   private goreParticleSeq: number = 0;
   private hitSplashSeq: number = 0;
   private goreDecalSeq: number = 0;
-  private goreLowDecalCounter: number = 0;
+  private bloodBurstSeq: number = 0;
   private bossVignetteSprite: Phaser.GameObjects.Image | null = null;
   private bossVignetteTimerMs: number = 0;
   private unsubGore: (() => void) | null = null;
 
   // Enemy Projectile, Player Projectile, Pickup, Enemy & Ghost Trail Pools
   private enemyProjectilePool: Phaser.Physics.Arcade.Sprite[] = [];
-  private enemyTrailPool: Phaser.GameObjects.Sprite[] = [];
+  private enemyTrailPool: Array<{
+    sprite: Phaser.GameObjects.Sprite;
+    active: boolean;
+    elapsedMs: number;
+    durationMs: number;
+    startScale: number;
+  }> = [];
+  private enemyTrailCursor: number = 0;
+  private expandingRingPool: Array<{
+    sprite: Phaser.GameObjects.Sprite;
+    active: boolean;
+    elapsedMs: number;
+    durationMs: number;
+    startScale: number;
+    endScale: number;
+    startAlpha: number;
+  }> = [];
+  private expandingRingCursor: number = 0;
   private playerProjectilePool: Phaser.Physics.Arcade.Sprite[] = [];
   private pickupPool: Phaser.Physics.Arcade.Sprite[] = [];
   private enemyPool: Phaser.Physics.Arcade.Sprite[] = [];
+  private enemyProjCursor: number = 0;
+  private playerProjCursor: number = 0;
+  private pickupCursor: number = 0;
+  private enemyCursor: number = 0;
+  private enemiesScratch: Phaser.Physics.Arcade.Sprite[] = [];
+  private projsScratch: Phaser.Physics.Arcade.Sprite[] = [];
+  private pickupsScratch: Phaser.Physics.Arcade.Sprite[] = [];
   private readonly MAX_ENEMY_PROJECTILES = 24;
   private readonly MAX_ENEMY_PROJECTILE_POOL = 64;
   private readonly MAX_PLAYER_PROJECTILES = 140;
@@ -761,6 +839,9 @@ export class MainScene extends Phaser.Scene {
   // Skill & Impact Effect Pool (Cap at 40 active effects)
   private effectPool: EffectPoolItem[] = [];
   private readonly MAX_ACTIVE_EFFECTS = 40;
+  private recentHitSplashWindowStartMs: number = 0;
+  private recentHitSplashCount: number = 0;
+  private lastCritShockwaveAtMs: number = 0;
   private levelUpSlowMoTimer: number | null = null;
 
   // Groups
@@ -814,9 +895,9 @@ export class MainScene extends Phaser.Scene {
   private dashDirY: number = 0;
   private dashTrailAccumMs: number = 0;
 
-  // Graphics overlays for telegraphs & elite auras
+  // Graphics overlays for telegraphs & GPU elite aura sprites
   private telegraphGraphics!: Phaser.GameObjects.Graphics;
-  private eliteAuraGraphics!: Phaser.GameObjects.Graphics;
+  private eliteAuraPool: Phaser.GameObjects.Image[] = [];
   private telegraphs: TelegraphEntry[] = [];
 
   // Invulnerability, Pressure, Combo, Feel & Events
@@ -910,12 +991,16 @@ export class MainScene extends Phaser.Scene {
     this.goreParticlePool = [];
     this.hitSplashPool = [];
     this.goreDecalPool = [];
+    this.bloodBurstPool = [];
     this.damageNumbers = [];
     this.goreParticleSeq = 0;
+    this.hitSplashSeq = 0;
     this.goreDecalSeq = 0;
-    this.goreLowDecalCounter = 0;
+    this.bloodBurstSeq = 0;
     this.bossVignetteSprite = null;
     this.bossVignetteTimerMs = 0;
+    this.isDead = false;
+    this.isVictoryEnded = false;
     this.isInvulnerable = false;
     this.invulnTimerMs = 0;
     this.isMoving = false;
@@ -946,6 +1031,7 @@ export class MainScene extends Phaser.Scene {
       SPAWN_TIMELINE.events.bossFirstTimeSec + SPAWN_TIMELINE.events.recurringCycleSec;
     this.recurringCycleCount = 0;
     this.pendingEvent = null;
+    soundManager.unduckMusic(0);
     this.bossSpawned = false;
     this.activeBoss = null;
     this.hasCrossfadedToIntense = false;
@@ -985,7 +1071,6 @@ export class MainScene extends Phaser.Scene {
     this.pickupPool = [];
     this.enemyPool = [];
     this.lastBossEmitMs = 0;
-    this.hadEdgeVignette = false;
     this.floatingTexts = [];
     this.atmosphereOverlay = null;
     this.shadowSystem = null;
@@ -1110,6 +1195,17 @@ export class MainScene extends Phaser.Scene {
       frameWidth: 128,
       frameHeight: 128,
     });
+
+    // Load Attached Blood Pack Assets (burst sheet 256x256x14, burst stain, 9-frame decals atlas)
+    this.load.spritesheet('blood_burst_sheet', './assets/aistudio/blood_burst_sheet_71be5646.png', {
+      frameWidth: GORE.bloodPack.frameSize,
+      frameHeight: GORE.bloodPack.frameSize,
+    });
+    this.load.image('blood_burst_stain', './assets/aistudio/blood_burst_stain_dba05e4d.png');
+    this.load.spritesheet('blood_decals_atlas', './assets/aistudio/blood_decals_atlas_9700fcd9.png', {
+      frameWidth: GORE.bloodPack.frameSize,
+      frameHeight: GORE.bloodPack.frameSize,
+    });
   }
 
   create() {
@@ -1156,6 +1252,7 @@ export class MainScene extends Phaser.Scene {
 
     // 3. Object Pools: 200 Particles (ADD blend mode), Gore Pools (NORMAL blend mode) & Floating Combat Text
     this.ensureGoreTextures();
+    this.ensureWeaponVfxTextures();
     this.initParticlePool();
     this.initGorePools();
     this.initFloatingTextPool();
@@ -1293,6 +1390,17 @@ export class MainScene extends Phaser.Scene {
       repeat: -1,
     });
 
+    // blood_burst_sheet: 256x256, 14 frames (7 cols x 2 rows), 22 fps, play ONCE, NORMAL blend
+    this.anims.create({
+      key: 'blood_burst_anim',
+      frames: this.anims.generateFrameNumbers('blood_burst_sheet', {
+        start: 0,
+        end: GORE.bloodPack.burstFrames - 1,
+      }),
+      frameRate: GORE.bloodPack.burstFps,
+      repeat: 0,
+    });
+
     // 9. Initialize Effect, Enemy Projectile & Trail Pools
     this.initEffectPool();
     this.initEnemyProjectilePool();
@@ -1374,11 +1482,111 @@ export class MainScene extends Phaser.Scene {
       g.destroy();
     }
 
-    // Ground telegraph & elite red glow aura layers
+    // Ground telegraph graphics & pre-baked GPU elite aura sprite pool
     this.telegraphGraphics = this.add.graphics().setDepth(16);
     this.telegraphGraphics.disableInteractive();
-    this.eliteAuraGraphics = this.add.graphics().setDepth(17);
-    this.eliteAuraGraphics.disableInteractive();
+
+    if (!this.textures.exists('fx_elite_aura')) {
+      const size = 128;
+      const tex = this.textures.createCanvas('fx_elite_aura', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        const c = size * 0.5;
+        const grad = ctx.createRadialGradient(c, c, 8, c, c, 54);
+        grad.addColorStop(0, 'rgba(255,255,255,0.22)');
+        grad.addColorStop(0.72, 'rgba(255,255,255,0.12)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(c, c, 54, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(c, c, 52, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.strokeStyle = 'rgba(255,255,255,0.65)';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.arc(c, c, 37, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        for (let n = 0; n < 4; n++) {
+          const a = (n * Math.PI) / 2;
+          ctx.beginPath();
+          ctx.arc(c + Math.cos(a) * 56, c + Math.sin(a) * 56, 3.6, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        tex.refresh();
+      }
+    }
+
+    this.eliteAuraPool = [];
+    for (let i = 0; i < 24; i++) {
+      const aura = this.add
+        .image(0, 0, 'fx_elite_aura')
+        .setDepth(17)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setVisible(false);
+      aura.disableInteractive();
+      this.eliteAuraPool.push(aura);
+    }
+
+    if (!this.textures.exists('fx_edge_vignette')) {
+      const vw = 128;
+      const vh = 192;
+      const tex = this.textures.createCanvas('fx_edge_vignette', vw, vh);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, vw, vh);
+        const topG = ctx.createLinearGradient(0, 0, 0, 26);
+        topG.addColorStop(0, 'rgba(255,255,255,0.95)');
+        topG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = topG;
+        ctx.fillRect(0, 0, vw, 26);
+
+        const botG = ctx.createLinearGradient(0, vh, 0, vh - 26);
+        botG.addColorStop(0, 'rgba(255,255,255,0.95)');
+        botG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = botG;
+        ctx.fillRect(0, vh - 26, vw, 26);
+
+        const leftG = ctx.createLinearGradient(0, 0, 22, 0);
+        leftG.addColorStop(0, 'rgba(255,255,255,0.95)');
+        leftG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = leftG;
+        ctx.fillRect(0, 0, 22, vh);
+
+        const rightG = ctx.createLinearGradient(vw, 0, vw - 22, 0);
+        rightG.addColorStop(0, 'rgba(255,255,255,0.95)');
+        rightG.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = rightG;
+        ctx.fillRect(vw - 22, 0, 22, vh);
+        tex.refresh();
+      }
+    }
+
+    this.expandingRingPool = [];
+    for (let i = 0; i < 16; i++) {
+      const ringSpr = this.add
+        .sprite(0, 0, 'fx_ring')
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setVisible(false)
+        .setActive(false);
+      ringSpr.disableInteractive();
+      this.expandingRingPool.push({
+        sprite: ringSpr,
+        active: false,
+        elapsedMs: 0,
+        durationMs: 120,
+        startScale: 0.1,
+        endScale: 0.34,
+        startAlpha: 0.5,
+      });
+    }
 
     // Create Player Sprite using spritesheet (100px tall on screen)
     this.player = this.physics.add.sprite(width / 2, height / 2, 'player_walk', 0);
@@ -1473,11 +1681,15 @@ export class MainScene extends Phaser.Scene {
       .setBlendMode(Phaser.BlendModes.ADD);
     this.lanternGlowSprite.disableInteractive();
 
-    this.lightVignette = this.add
-      .graphics({ x: zeroOffset.x, y: zeroOffset.y })
+    this.lightVignetteSprite = this.add
+      .image(zeroOffset.x, zeroOffset.y, 'fx_edge_vignette')
+      .setOrigin(0, 0)
+      .setDisplaySize(width, height)
       .setDepth(15)
-      .setScrollFactor(0);
-    this.lightVignette.disableInteractive();
+      .setScrollFactor(0)
+      .setAlpha(0)
+      .setVisible(false);
+    this.lightVignetteSprite.disableInteractive();
     this.atmosphereOverlay = new AtmosphereOverlay(this);
 
     this.bossVignetteSprite = this.add
@@ -1572,7 +1784,7 @@ export class MainScene extends Phaser.Scene {
       ready: true,
     });
 
-    // Subscribe to GameManager critical hit impact bus (hitstop + color shockwave)
+    // Subscribe to GameManager critical hit impact bus (hitstop + subtle crit shockwave rings)
     this.unsubCritImpact?.();
     this.unsubCritImpact = gameManager.onCritImpact((impact) => {
       if (this.isDead || this.isGamePaused || !this.scene?.isActive()) return;
@@ -1583,29 +1795,26 @@ export class MainScene extends Phaser.Scene {
         this.physics.pause();
       }
 
-      if (gameManager.getGoreLevel() === 'off') {
-        this.spawnParticleBurst(
-          impact.x,
-          impact.y,
-          impact.isEliteOrBoss ? 14 : 9,
-          'fx_ring',
-          110,
-          280,
-          0.14,
-          0.28,
-          impact.flashTintNumber
-        );
-      } else {
-        this.spawnEnemyHitBloodSplash(
-          impact.x,
-          impact.y,
-          impact.enemyType ?? (impact.isEliteOrBoss ? 'boss' : 'imp'),
-          0,
-          0,
-          true,
-          impact.enemyDisplaySize
-        );
-      }
+      const nowMs = this.time.now;
+      if (nowMs - this.lastCritShockwaveAtMs < HIT_VFX.critShockwaveCooldownMs) return;
+      this.lastCritShockwaveAtMs = nowMs;
+
+      const styleColors = this.getMagicAttackPalette(impact.attackStyle ?? 'bolt');
+      this.spawnParticleBurst(
+        impact.x,
+        impact.y,
+        impact.isEliteOrBoss
+          ? HIT_VFX.critShockwaveCountElite
+          : HIT_VFX.critShockwaveCountNormal,
+        'fx_ring',
+        95,
+        220,
+        0.11,
+        0.19,
+        styleColors.primary,
+        200,
+        HIT_VFX.critShockwaveAlpha
+      );
     });
 
     // Keep cameras, floor TileSprite, and GPU upscaler synced across Dynamic Resolution / 4K setting changes
@@ -1617,9 +1826,9 @@ export class MainScene extends Phaser.Scene {
       if (this.floor && this.floor.scene) {
         this.floor.setPosition(this.cameras.main.width * 0.5, this.cameras.main.height * 0.5);
       }
-      if (this.lightVignette && this.lightVignette.scene) {
+      if (this.lightVignetteSprite && this.lightVignetteSprite.scene) {
         const z = getScrollZeroOffset(this.cameras.main);
-        this.lightVignette.setPosition(z.x, z.y);
+        this.lightVignetteSprite.setPosition(z.x, z.y);
       }
       if (this.bossVignetteSprite && this.bossVignetteSprite.scene) {
         const z = getScrollZeroOffset(this.cameras.main);
@@ -1680,6 +1889,18 @@ export class MainScene extends Phaser.Scene {
           fx.sprite.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
         }
       }
+      for (let i = 0; i < this.bloodBurstPool.length; i++) {
+        const b = this.bloodBurstPool[i];
+        b.active = false;
+        if (b.sprite) {
+          b.sprite.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
+        }
+      }
+      this.bloodBurstPool = [];
+      this.goreDecalPool = [];
+      this.eliteAuraPool = [];
+      this.expandingRingPool = [];
+      this.enemyTrailPool = [];
       this.unsubCritImpact?.();
       this.unsubCritImpact = null;
       this.unsubGraphics?.();
@@ -1771,7 +1992,7 @@ export class MainScene extends Phaser.Scene {
         cooldown: 2200,
         lastFired: 0,
         unlocked: BALANCE.startingKit.shotgunUnlockedAtStart,
-        description: 'Blasts a spread of cyan arcane bolts at incoming monsters.',
+        description: 'Blasts a spread of golden arcane bolts at incoming monsters.',
         icon: 'spark',
       },
     };
@@ -1796,6 +2017,7 @@ export class MainScene extends Phaser.Scene {
         life: 0,
         maxLife: 1,
         decay: 1,
+        baseAlpha: 1,
         active: false,
       });
     }
@@ -1811,20 +2033,27 @@ export class MainScene extends Phaser.Scene {
     scaleMin: number = 0.15,
     scaleMax: number = 0.35,
     tint?: number,
-    maxLifeOverrideMs?: number
+    maxLifeOverrideMs?: number,
+    alphaOverride: number = 0.82
   ) {
-    const effectiveCount = count;
     const poolCap = this.particlePool.length;
+    if (poolCap === 0) return;
     let spawned = 0;
-    for (let i = 0; i < poolCap; i++) {
-      const p = this.particlePool[i];
+    let cursor = this.particlePoolCursor;
+    for (let step = 0; step < poolCap; step++) {
+      const idx = cursor >= poolCap ? cursor - poolCap : cursor;
+      cursor = idx + 1;
+      const p = this.particlePool[idx];
       if (!p.active) {
         p.active = true;
-        p.sprite.setTexture(texture);
+        if (p.sprite.texture.key !== texture) {
+          p.sprite.setTexture(texture);
+        }
         p.sprite.setPosition(x, y);
         p.sprite.setVisible(true);
         p.sprite.setActive(true);
-        p.sprite.setAlpha(1);
+        p.baseAlpha = alphaOverride;
+        p.sprite.setAlpha(alphaOverride);
 
         if (tint !== undefined) {
           p.sprite.setTint(tint);
@@ -1845,28 +2074,30 @@ export class MainScene extends Phaser.Scene {
         p.sprite.setRotation(angle);
 
         spawned++;
-        if (spawned >= effectiveCount) break;
+        if (spawned >= count) break;
       }
     }
+    this.particlePoolCursor = cursor >= poolCap ? 0 : cursor;
   }
 
   private updateParticles(delta: number) {
-    for (const p of this.particlePool) {
-      if (p.active) {
-        p.life += delta;
-        if (p.life >= p.maxLife) {
-          p.active = false;
-          p.sprite.setVisible(false);
-          p.sprite.setActive(false);
-        } else {
-          p.sprite.x += (p.vx * delta) / 1000;
-          p.sprite.y += (p.vy * delta) / 1000;
-          const pDamp = Math.pow(0.95, delta / 16.6667);
-          p.vx *= pDamp;
-          p.vy *= pDamp;
-          const progress = p.life / p.maxLife;
-          p.sprite.setAlpha(1 - progress);
-        }
+    const pDamp = Math.pow(0.95, delta / 16.6667);
+    const dtSec = delta * 0.001;
+    const pool = this.particlePool;
+    for (let i = 0; i < pool.length; i++) {
+      const p = pool[i];
+      if (!p.active) continue;
+      p.life += delta;
+      if (p.life >= p.maxLife) {
+        p.active = false;
+        p.sprite.setVisible(false);
+        p.sprite.setActive(false);
+      } else {
+        p.sprite.x += p.vx * dtSec;
+        p.sprite.y += p.vy * dtSec;
+        p.vx *= pDamp;
+        p.vy *= pDamp;
+        p.sprite.setAlpha(p.baseAlpha * (1 - p.life * p.decay));
       }
     }
   }
@@ -1943,113 +2174,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // 4. Four distinct splat decal textures (irregular dark crimson blob + 6-10 satellite droplets + specular edge)
-    const size = GORE.decal.textureSize;
-    const half = size * 0.5;
-    for (let v = 0; v < GORE.decal.variants; v++) {
-      const key = GORE_DECAL_KEYS[v];
-      if (this.textures.exists(key)) continue;
-      const tex = this.textures.createCanvas(key, size, size);
-      if (!tex) continue;
-      const ctx = tex.getContext();
-      ctx.clearRect(0, 0, size, size);
-
-      // Deterministic pseudo-random helper per variant so stains look organic & consistent across boots
-      let seed = (v + 1) * 9301 + 49297;
-      const rand = () => {
-        seed = (seed * 16807) % 2147483647;
-        return (seed - 1) / 2147483646;
-      };
-
-      // Irregular multi-lobe dark crimson central pool
-      ctx.fillStyle = '#47090e';
-      ctx.beginPath();
-      const lobes = 14;
-      for (let i = 0; i <= lobes; i++) {
-        const a = (i / lobes) * Math.PI * 2;
-        const nextA = ((i + 0.5) / lobes) * Math.PI * 2;
-        const r = 13 + Math.sin(a * 3 + v * 1.4) * 4.5 + Math.cos(a * 5 - v) * 2.5 + rand() * 3.5;
-        const cr = r + 3.2;
-        const px = half + Math.cos(a) * r;
-        const py = half + Math.sin(a) * r;
-        if (i === 0) {
-          ctx.moveTo(px, py);
-        } else {
-          const cpx = half + Math.cos(nextA) * cr;
-          const cpy = half + Math.sin(nextA) * cr;
-          ctx.quadraticCurveTo(cpx, cpy, px, py);
-        }
-      }
-      ctx.closePath();
-      ctx.fill();
-
-      // Deeper dried center core
-      ctx.fillStyle = '#36060a';
-      ctx.beginPath();
-      ctx.ellipse(half + (rand() - 0.5) * 4, half + (rand() - 0.5) * 4, 9.5, 7.5, v * 0.7, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Fresh wet crimson edge layer
-      ctx.fillStyle = 'rgba(107, 15, 21, 0.78)';
-      for (let l = 0; l < 4; l++) {
-        const la = (l / 4) * Math.PI * 2 + v * 0.6;
-        const dist = 7 + rand() * 5;
-        ctx.beginPath();
-        ctx.ellipse(
-          half + Math.cos(la) * dist,
-          half + Math.sin(la) * dist,
-          5 + rand() * 3.5,
-          3.5 + rand() * 2.5,
-          la,
-          0,
-          Math.PI * 2
-        );
-        ctx.fill();
-      }
-
-      // 6-10 satellite droplets radiating from main splat
-      const satCount =
-        GORE.decal.satelliteMin +
-        (v % (GORE.decal.satelliteMax - GORE.decal.satelliteMin + 1));
-      for (let s = 0; s < satCount; s++) {
-        const sa = (s / satCount) * Math.PI * 2 + rand() * 0.55;
-        const sdist = 18 + rand() * 19;
-        const sx = half + Math.cos(sa) * sdist;
-        const sy = half + Math.sin(sa) * sdist;
-        const srX = 2.0 + rand() * 2.8;
-        const srY = 1.4 + rand() * 1.8;
-
-        ctx.save();
-        ctx.translate(sx, sy);
-        ctx.rotate(sa);
-        ctx.fillStyle = s % 2 === 0 ? '#5c0c12' : '#42080d';
-        ctx.beginPath();
-        ctx.ellipse(0, 0, srX, srY, 0, 0, Math.PI * 2);
-        ctx.fill();
-        // Tiny lighter specular glints on larger satellite droplets
-        if (s < 3) {
-          ctx.fillStyle = 'rgba(164, 40, 48, 0.65)';
-          ctx.beginPath();
-          ctx.arc(-srX * 0.25, -srY * 0.25, 0.85, 0, Math.PI * 2);
-          ctx.fill();
-        }
-        ctx.restore();
-      }
-
-      // Tiny lighter specular edge on upper-left rim of main blob
-      ctx.strokeStyle = 'rgba(176, 44, 54, 0.55)';
-      ctx.lineWidth = 1.4;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.arc(half - 1.5, half - 1.5, 11.5, Math.PI * 0.95, Math.PI * 1.48);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.arc(half + 2.5, half - 2.5, 6.2, Math.PI * 1.15, Math.PI * 1.55);
-      ctx.stroke();
-
-      tex.refresh();
-    }
+    // 4. Floor decals now use the attached blood_pack (blood_burst_stain + blood_decals_atlas)
 
     // 5. Boss death brief 10% darkening vignette texture
     if (!this.textures.exists('gore_boss_vignette')) {
@@ -2156,6 +2281,46 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
+  private ensureWeaponVfxTextures() {
+    if (this.textures.exists('fx_bolt_gold') || !this.textures.exists('fx_bolt')) return;
+    const srcImg = this.textures.get('fx_bolt').getSourceImage() as
+      | HTMLImageElement
+      | HTMLCanvasElement
+      | undefined;
+    if (!srcImg) return;
+    const w = srcImg instanceof HTMLImageElement ? srcImg.naturalWidth || srcImg.width : srcImg.width;
+    const h = srcImg instanceof HTMLImageElement ? srcImg.naturalHeight || srcImg.height : srcImg.height;
+    if (!w || !h) return;
+
+    const tex = this.textures.createCanvas('fx_bolt_gold', w, h);
+    if (!tex) return;
+    const ctx = tex.getContext();
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(srcImg, 0, 0, w, h);
+    const imgData = ctx.getImageData(0, 0, w, h);
+    const d = imgData.data;
+
+    for (let i = 0; i < d.length; i += 4) {
+      const a = d[i + 3];
+      if (a === 0) continue;
+      const maxC = Math.max(d[i], d[i + 1], d[i + 2]) / 255;
+      if (maxC <= 0.001) continue;
+      const minC = Math.min(d[i], d[i + 1], d[i + 2]) / 255;
+      const core = Math.pow(minC, 1.35);
+
+      const goldR = 255 * Math.pow(maxC, 0.78);
+      const goldG = 204 * Math.pow(maxC, 0.88);
+      const goldB = 24 * maxC;
+
+      d[i] = Math.min(255, Math.round(goldR + (255 - goldR) * core));
+      d[i + 1] = Math.min(255, Math.round(goldG + (248 - goldG) * core));
+      d[i + 2] = Math.min(255, Math.round(goldB + (205 - goldB) * core));
+    }
+
+    ctx.putImageData(imgData, 0, 0);
+    tex.refresh();
+  }
+
   private initGorePools() {
     this.goreParticlePool = [];
     for (let i = 0; i < GORE.maxDroplets; i++) {
@@ -2211,7 +2376,8 @@ export class MainScene extends Phaser.Scene {
 
     this.goreDecalPool = [];
     for (let i = 0; i < GORE.maxDecals; i++) {
-      const sprite = this.add.image(0, 0, GORE_DECAL_KEYS[0]);
+      const sprite = this.add.image(0, 0, 'blood_decals_atlas', 0);
+      sprite.setOrigin(0.5, 0.5);
       sprite.setBlendMode(Phaser.BlendModes.NORMAL);
       sprite.setDepth(GORE.decalDepth);
       sprite.setVisible(false);
@@ -2225,6 +2391,48 @@ export class MainScene extends Phaser.Scene {
         active: false,
         seq: 0,
       });
+    }
+
+    // Pooled animated blood_burst_sheet sprites (swaps to blood_burst_stain decal on complete)
+    this.bloodBurstPool = [];
+    for (let i = 0; i < GORE.bloodPack.maxLiveBursts; i++) {
+      const sprite = this.add.sprite(0, 0, 'blood_burst_sheet', 0);
+      sprite.setOrigin(0.5, 0.5);
+      sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+      sprite.setDepth(GORE.bloodPack.burstDepth);
+      sprite.setVisible(false);
+      sprite.setActive(false);
+      sprite.disableInteractive();
+      const item: BloodBurstItem = {
+        sprite,
+        x: 0,
+        y: 0,
+        scale: 1,
+        rotation: 0,
+        maxLiveDecals: GORE.maxDecals,
+        active: false,
+        seq: 0,
+      };
+      sprite.on(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
+        if (!item.active) return;
+        item.active = false;
+        sprite.setVisible(false);
+        sprite.setActive(false);
+        if (gameManager.getGoreLevel() !== 'off') {
+          this.spawnFloorDecal(
+            item.x,
+            item.y,
+            item.scale,
+            item.rotation,
+            'blood_burst_stain',
+            undefined,
+            GORE.bloodPack.stainAlpha,
+            GORE.decal.tint,
+            item.maxLiveDecals
+          );
+        }
+      });
+      this.bloodBurstPool.push(item);
     }
   }
 
@@ -2241,6 +2449,13 @@ export class MainScene extends Phaser.Scene {
         s.active = false;
         s.sprite.setVisible(false);
         s.sprite.setActive(false);
+      }
+      for (let i = 0; i < this.bloodBurstPool.length; i++) {
+        const b = this.bloodBurstPool[i];
+        b.active = false;
+        b.sprite.anims.stop();
+        b.sprite.setVisible(false);
+        b.sprite.setActive(false);
       }
       for (let i = 0; i < this.goreDecalPool.length; i++) {
         const d = this.goreDecalPool[i];
@@ -2379,6 +2594,26 @@ export class MainScene extends Phaser.Scene {
     return freeSlot;
   }
 
+  private acquireBloodBurst(): BloodBurstItem {
+    let freeSlot: BloodBurstItem | null = null;
+    let oldestSlot = this.bloodBurstPool[0];
+    let oldestSeq = Number.MAX_SAFE_INTEGER;
+
+    for (let i = 0; i < this.bloodBurstPool.length; i++) {
+      const b = this.bloodBurstPool[i];
+      if (b.active) {
+        if (b.seq < oldestSeq) {
+          oldestSeq = b.seq;
+          oldestSlot = b;
+        }
+      } else if (!freeSlot) {
+        freeSlot = b;
+      }
+    }
+
+    return freeSlot ?? oldestSlot;
+  }
+
   private spawnGoreDroplet(
     x: number,
     y: number,
@@ -2512,24 +2747,32 @@ export class MainScene extends Phaser.Scene {
     x: number,
     y: number,
     scale: number,
+    rotation: number,
+    textureKey: 'blood_burst_stain' | 'blood_decals_atlas',
+    frame: number | undefined,
+    alpha: number,
     tint: number,
     maxActiveDecals: number
   ) {
     const d = this.acquireGoreDecal(maxActiveDecals);
     this.goreDecalSeq += 1;
 
-    const variantKey = GORE_DECAL_KEYS[(Math.random() * GORE_DECAL_KEYS.length) | 0];
     d.active = true;
     d.seq = this.goreDecalSeq;
     d.life = 0;
     d.maxLife = GORE.decal.fadeDurationMs;
-    d.baseAlpha = GORE.decal.alpha;
+    d.baseAlpha = alpha;
 
-    d.sprite.setTexture(variantKey);
+    if (frame !== undefined) {
+      d.sprite.setTexture(textureKey, frame);
+    } else {
+      d.sprite.setTexture(textureKey);
+    }
+    d.sprite.setOrigin(0.5, 0.5);
     d.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
     d.sprite.setDepth(GORE.decalDepth);
     d.sprite.setPosition(x, y);
-    d.sprite.setRotation(Math.random() * Math.PI * 2);
+    d.sprite.setRotation(rotation);
     d.sprite.setScale(scale);
     if (tint === 0xffffff) {
       d.sprite.clearTint();
@@ -2541,16 +2784,65 @@ export class MainScene extends Phaser.Scene {
     d.sprite.setActive(true);
   }
 
+  private spawnBloodBurstAnim(
+    x: number,
+    y: number,
+    scale: number,
+    rotation: number,
+    maxActiveDecals: number
+  ) {
+    if (this.bloodBurstPool.length === 0) return;
+    const item = this.acquireBloodBurst();
+    if (item.active) {
+      item.sprite.anims.stop();
+      // Preserve finished floor stain when recycling a burst early under heavy multi-kills
+      this.spawnFloorDecal(
+        item.x,
+        item.y,
+        item.scale,
+        item.rotation,
+        'blood_burst_stain',
+        undefined,
+        GORE.bloodPack.stainAlpha,
+        GORE.decal.tint,
+        item.maxLiveDecals
+      );
+    }
+
+    this.bloodBurstSeq += 1;
+    item.active = true;
+    item.seq = this.bloodBurstSeq;
+    item.x = x;
+    item.y = y;
+    item.scale = scale;
+    item.rotation = rotation;
+    item.maxLiveDecals = maxActiveDecals;
+
+    item.sprite.setOrigin(0.5, 0.5);
+    item.sprite.setBlendMode(Phaser.BlendModes.NORMAL);
+    item.sprite.setDepth(GORE.bloodPack.burstDepth);
+    item.sprite.setPosition(x, y);
+    item.sprite.setRotation(rotation);
+    item.sprite.setScale(scale);
+    item.sprite.clearTint();
+    item.sprite.setAlpha(1);
+    item.sprite.setVisible(true);
+    item.sprite.setActive(true);
+    item.sprite.play('blood_burst_anim');
+  }
+
   private spawnEnemyDeathGore(
     x: number,
     y: number,
     enemyType: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss',
     enemyScale: number,
-    isElite: boolean
+    _isElite: boolean,
+    enemyDisplaySize: number = 0,
+    impactVx: number = 0,
+    impactVy: number = 0,
+    isCrit: boolean = false
   ) {
     const goreSetting = gameManager.getGoreLevel();
-    if (goreSetting === 'off') return;
-
     const isLowGore = goreSetting === 'low';
     const countMult = isLowGore ? GORE.lowSettingMultiplier : 1;
     const maxLiveDroplets = isLowGore
@@ -2653,82 +2945,59 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // 3. Blood variants: imp, spitter, elites, boss
+    // 3. Blood variants (imp, spitter, elites, boss): Off disables blood; Low halves decals
+    if (goreSetting === 'off') return;
+
     const isBoss = enemyType === 'boss';
-    const isSpitter = enemyType === 'spitter';
-    const colors = isSpitter ? GORE.bloodBurst.spitterColors : GORE.bloodBurst.colors;
+    const bp = GORE.bloodPack;
+    const effectiveDisplaySize = enemyDisplaySize > 0 ? enemyDisplaySize : enemyScale * 220;
+    const burstScale = isBoss
+      ? bp.bossBurstScale
+      : Phaser.Math.Clamp(
+          (effectiveDisplaySize * bp.enemySizeMult) / bp.frameSize,
+          0.42,
+          1.35
+        );
+    const burstRotation = Math.random() * Math.PI * 2;
 
-    const baseDrops = Phaser.Math.Between(GORE.bloodBurst.minCount, GORE.bloodBurst.maxCount);
-    let dropCount = isBoss
-      ? Math.min(GORE.variants.boss.maxDropletsPerKill, baseDrops * GORE.variants.boss.dropletMultiplier)
-      : baseDrops;
-    dropCount = Math.max(1, Math.round(dropCount * countMult));
+    // Animated blood_burst_sheet (256x256, 14 frames, 22 fps, ONCE, NORMAL blend) -> swaps to blood_burst_stain
+    this.spawnBloodBurstAnim(x, y, burstScale, burstRotation, maxLiveDecals);
 
-    const spawnSpread = isBoss ? 22 : isElite ? 10 : 5;
-    for (let i = 0; i < dropCount; i++) {
-      const color = colors[(Math.random() * colors.length) | 0];
-      const ox = x + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread);
-      const oy = y + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread);
-      this.spawnGoreDroplet(
-        ox,
-        oy,
-        color,
-        GORE.bloodBurst.speedMin,
-        isBoss ? GORE.bloodBurst.speedMax * 1.15 : GORE.bloodBurst.speedMax,
-        GORE.bloodBurst.gravity,
-        GORE.bloodBurst.lifeMinMs,
-        GORE.bloodBurst.lifeMaxMs,
-        maxLiveDroplets
+    // Secondary smaller floor decal from 9-frame blood_decals_atlas nearby (omitted on Low for 50% decals)
+    if (!isLowGore) {
+      const offsetAng = Math.random() * Math.PI * 2;
+      const offsetDist = isBoss
+        ? Phaser.Math.FloatBetween(bp.bossSecondaryOffsetMin, bp.bossSecondaryOffsetMax)
+        : Phaser.Math.FloatBetween(bp.secondaryOffsetMin, bp.secondaryOffsetMax);
+      const secX = x + Math.cos(offsetAng) * offsetDist;
+      const secY = y + Math.sin(offsetAng) * offsetDist;
+      const secFrame = Phaser.Math.Between(0, bp.atlasFrameCount - 1);
+      const secRotation = Math.random() * Math.PI * 2;
+      const secScale = Phaser.Math.FloatBetween(bp.secondaryScaleMin, bp.secondaryScaleMax);
+
+      this.spawnFloorDecal(
+        secX,
+        secY,
+        secScale,
+        secRotation,
+        'blood_decals_atlas',
+        secFrame,
+        bp.secondaryAlpha,
+        GORE.decal.tint,
+        maxLiveDecals
       );
     }
 
-    // Soft mist puffs
-    const mistColor = isSpitter ? GORE.mist.spitterColor : GORE.mist.bloodColor;
-    const rawMistCount = isBoss
-      ? Phaser.Math.Between(GORE.variants.boss.mistMin, GORE.variants.boss.mistMax)
-      : Phaser.Math.Between(GORE.mist.minCount, GORE.mist.maxCount);
-    const mistCount = Math.max(1, Math.round(rawMistCount * countMult));
-    const mistAlpha = isBoss ? GORE.variants.boss.mistAlpha : GORE.mist.alpha;
-    const mistDuration = isBoss ? GORE.variants.boss.mistDurationMs : GORE.mist.durationMs;
-    const mistEndScale = isBoss ? GORE.variants.boss.mistEndScale : GORE.mist.endScale;
-
-    for (let i = 0; i < mistCount; i++) {
-      const a = Math.random() * Math.PI * 2;
-      const spd = Phaser.Math.FloatBetween(GORE.mist.speedMin, GORE.mist.speedMax);
-      this.spawnGoreMist(
-        x + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread),
-        y + Phaser.Math.FloatBetween(-spawnSpread, spawnSpread),
-        'mist',
-        mistColor,
-        mistAlpha,
-        mistDuration,
-        isBoss ? 0.65 : GORE.mist.startScale,
-        mistEndScale,
-        Math.cos(a) * spd,
-        Math.sin(a) * spd,
-        0,
-        maxLiveDroplets
-      );
-    }
-
-    // Floor stain decal (Low halves decal frequency & cap; Boss always stamps)
-    let stampDecal = true;
-    if (isLowGore && !isBoss) {
-      this.goreLowDecalCounter = (this.goreLowDecalCounter + 1) & 1;
-      stampDecal = this.goreLowDecalCounter === 1;
-    }
-    if (stampDecal) {
-      const baseScaleRef = 0.48;
-      const scaleFactor = enemyScale > 0 ? Math.min(1.4, Math.max(0.75, enemyScale / baseScaleRef)) : 1;
-      const variantMult = isBoss
-        ? GORE.decal.bossScaleMult
-        : isElite
-          ? GORE.decal.eliteScaleMult
-          : 1;
-      const decalScale = GORE.decal.baseScale * scaleFactor * variantMult;
-      const decalTint = isSpitter ? GORE.decal.spitterTint : GORE.decal.bloodTint;
-      this.spawnFloorDecal(x, y + 6, decalScale, decalTint, maxLiveDecals);
-    }
+    // Thick pooled blood splash + size-scaled wet SFX appear ONLY when bleeding enemies die
+    this.spawnEnemyDeathBloodSplash(
+      x,
+      y,
+      enemyType,
+      impactVx,
+      impactVy,
+      isCrit,
+      effectiveDisplaySize
+    );
 
     // Boss death brief 10% darkening vignette
     if (isBoss && this.bossVignetteSprite) {
@@ -2738,7 +3007,130 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private spawnEnemyHitBloodSplash(
+  private getMagicAttackPalette(style: AttackSplashStyle): {
+    primary: number;
+    secondary: number;
+    ring: number;
+  } {
+    switch (style) {
+      case 'shotgun':
+        return { primary: 0xffd54f, secondary: 0xffe082, ring: 0xf59e0b };
+      case 'spark':
+        return { primary: 0xfde047, secondary: 0xfef08a, ring: 0xf59e0b };
+      case 'ring':
+        return { primary: 0x7df3ff, secondary: 0xe0f2fe, ring: 0x38bdf8 };
+      case 'blades':
+        return { primary: 0x38bdf8, secondary: 0xbae6fd, ring: 0x0ea5e9 };
+      case 'lightning':
+        return { primary: 0x60a5fa, secondary: 0xdbeafe, ring: 0x3b82f6 };
+      case 'light_burst':
+        return { primary: 0x5de4ff, secondary: 0xe0f2fe, ring: 0x22d3ee };
+      case 'bolt':
+      default:
+        return { primary: 0x5de4ff, secondary: 0xa5f3fc, ring: 0x38bdf8 };
+    }
+  }
+
+  private spawnMagicHitSplash(
+    x: number,
+    y: number,
+    attackStyle: AttackSplashStyle,
+    impactVx: number,
+    impactVy: number,
+    isCrit: boolean,
+    enemyDisplaySize?: number
+  ) {
+    const nowMs = this.time.now;
+    if (nowMs - this.recentHitSplashWindowStartMs > HIT_VFX.densityWindowMs) {
+      this.recentHitSplashWindowStartMs = nowMs;
+      this.recentHitSplashCount = 0;
+    }
+    this.recentHitSplashCount++;
+    const density = this.recentHitSplashCount;
+
+    const palette = this.getMagicAttackPalette(attackStyle);
+    const resolvedSize = enemyDisplaySize && enemyDisplaySize > 0 ? enemyDisplaySize : 110;
+    const sizeScale = Phaser.Math.Clamp(resolvedSize / 115, 0.72, 1.55);
+    const rawSparkScale =
+      (isCrit ? HIT_VFX.critSparkBaseScale : HIT_VFX.hitSparkBaseScale) *
+      (0.84 + sizeScale * 0.16);
+    const sparkScale = Math.min(HIT_VFX.maxSparkScale, rawSparkScale);
+    const sparkAlpha = isCrit ? HIT_VFX.critSparkAlpha : HIT_VFX.hitSparkAlpha;
+
+    // 1. Thinned & deduplicated animated arcane splash burst at the impact point (ADD blend)
+    this.spawnSparkHitEffect(x, y, palette.primary, sparkScale, sparkAlpha, true);
+
+    // 2. Adaptive droplet spray: thin out automatically when hitting crowds simultaneously
+    let dropletCount: number = isCrit ? HIT_VFX.dropletCountCrit : HIT_VFX.dropletCountNormal;
+    let dropletAlpha: number = isCrit ? HIT_VFX.dropletAlphaCrit : HIT_VFX.dropletAlphaNormal;
+    if (density >= 6) {
+      dropletCount = isCrit || density % 2 === 0 ? 1 : 0;
+      dropletAlpha *= 0.68;
+    } else if (density >= 3) {
+      dropletCount = isCrit ? 2 : 1;
+      dropletAlpha *= 0.82;
+    }
+
+    if (dropletCount > 0) {
+      const hasDir = impactVx * impactVx + impactVy * impactVy > 4;
+      const baseAngle = hasDir ? Math.atan2(impactVy, impactVx) : Math.random() * Math.PI * 2;
+      const speedMin = isCrit ? 85 : 65;
+      const speedMax = isCrit ? 190 : 145;
+      const poolCap = this.particlePool.length;
+      let spawned = 0;
+
+      for (let i = 0; i < poolCap; i++) {
+        const p = this.particlePool[i];
+        if (!p.active) {
+          p.active = true;
+          p.sprite.setTexture('fx_spark');
+          p.sprite.setPosition(x, y);
+          p.sprite.setVisible(true);
+          p.sprite.setActive(true);
+          p.baseAlpha = dropletAlpha;
+          p.sprite.setAlpha(dropletAlpha);
+          p.sprite.setTint(spawned % 2 === 0 ? palette.secondary : palette.ring);
+
+          const angle = hasDir
+            ? baseAngle + Phaser.Math.FloatBetween(-1.25, 1.25)
+            : Math.random() * Math.PI * 2;
+          const spd = Phaser.Math.Between(speedMin, speedMax) * (0.9 + sizeScale * 0.08);
+          p.vx = Math.cos(angle) * spd;
+          p.vy = Math.sin(angle) * spd;
+          p.life = 0;
+          p.maxLife = isCrit ? HIT_VFX.dropletLifeCritMs : HIT_VFX.dropletLifeNormalMs;
+          p.decay = 1 / p.maxLife;
+
+          const sc =
+            Phaser.Math.FloatBetween(HIT_VFX.dropletScaleMin, HIT_VFX.dropletScaleMax) *
+            (isCrit ? 1.15 : 1.0);
+          p.sprite.setScale(sc);
+          p.sprite.setRotation(angle);
+
+          spawned++;
+          if (spawned >= dropletCount) break;
+        }
+      }
+    }
+
+    if (isCrit && density <= 4) {
+      this.spawnParticleBurst(
+        x,
+        y,
+        HIT_VFX.critRingCount,
+        'fx_ring',
+        65,
+        130,
+        0.10,
+        0.17,
+        palette.primary,
+        180,
+        HIT_VFX.critRingAlpha
+      );
+    }
+  }
+
+  private spawnEnemyDeathBloodSplash(
     x: number,
     y: number,
     enemyType: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss',
@@ -2748,10 +3140,7 @@ export class MainScene extends Phaser.Scene {
     enemyDisplaySize?: number
   ) {
     const goreSetting = gameManager.getGoreLevel();
-    if (goreSetting === 'off') {
-      this.spawnSparkHitEffect(x, y);
-      return;
-    }
+    if (goreSetting === 'off') return;
 
     const hCfg = GORE.hitSplash;
     const fallbackSize =
@@ -3107,23 +3496,82 @@ export class MainScene extends Phaser.Scene {
     item.sprite.setAlpha(1);
     item.sprite.clearTint();
     item.inUse = false;
+    item.isHitSpark = false;
+    item.x = undefined;
+    item.y = undefined;
   }
 
-  // fx_spark_sheet: on every enemy hit (or tinted cast/impact), random rotation, scale 0.5-1
-  public spawnSparkHitEffect(x: number, y: number, tint?: number, scaleOverride?: number) {
+  // fx_spark_sheet: thinned & spatially deduplicated hit animation (ADD blend)
+  public spawnSparkHitEffect(
+    x: number,
+    y: number,
+    tint?: number,
+    scaleOverride?: number,
+    alphaOverride: number = 0.72,
+    isHitSpark: boolean = false
+  ) {
+    const nowMs = this.time.now;
+    let effectiveAlpha = alphaOverride;
+    let effectiveScale = scaleOverride ?? Phaser.Math.FloatBetween(0.38, 0.56);
+
+    if (isHitSpark) {
+      let liveHitSparks = 0;
+      let oldestHitSpark: EffectPoolItem | null = null;
+
+      for (let i = 0; i < this.effectPool.length; i++) {
+        const fx = this.effectPool[i];
+        if (!fx.inUse || !fx.isHitSpark) continue;
+        liveHitSparks++;
+        if (!oldestHitSpark || fx.spawnTime < oldestHitSpark.spawnTime) {
+          oldestHitSpark = fx;
+        }
+        if (fx.x !== undefined && fx.y !== undefined) {
+          const dx = fx.x - x;
+          const dy = fx.y - y;
+          if (
+            nowMs - fx.spawnTime < HIT_VFX.dedupeWindowMs &&
+            dx * dx + dy * dy < HIT_VFX.dedupeRadiusSq
+          ) {
+            return;
+          }
+        }
+      }
+
+      if (liveHitSparks >= HIT_VFX.maxSimultaneousHitSparks) {
+        if (oldestHitSpark && nowMs - oldestHitSpark.spawnTime >= HIT_VFX.recycleMinAgeMs) {
+          this.releasePooledEffect(oldestHitSpark);
+          liveHitSparks--;
+        } else {
+          return;
+        }
+      }
+
+      const crowdFactor = Math.max(
+        HIT_VFX.minStackedAlphaFactor,
+        1 - liveHitSparks * 0.09
+      );
+      effectiveAlpha *= crowdFactor;
+      if (liveHitSparks >= 3) {
+        effectiveScale *= 0.86;
+      }
+    }
+
     const item = this.getPooledEffect();
     if (!item) return;
 
     item.inUse = true;
-    item.spawnTime = this.time.now;
+    item.spawnTime = nowMs;
+    item.isHitSpark = isHitSpark;
+    item.x = x;
+    item.y = y;
 
     const rot = Phaser.Math.FloatBetween(0, Math.PI * 2);
-    const sc = scaleOverride ?? Phaser.Math.FloatBetween(0.5, 1.0);
 
     item.sprite.setPosition(x, y);
     item.sprite.setOrigin(0.5, 0.5);
     item.sprite.setRotation(rot);
-    item.sprite.setScale(sc);
+    item.sprite.setScale(effectiveScale);
+    item.sprite.setAlpha(effectiveAlpha);
     item.sprite.setBlendMode(Phaser.BlendModes.ADD);
     item.sprite.setDepth(26);
     if (tint !== undefined) {
@@ -3337,12 +3785,13 @@ export class MainScene extends Phaser.Scene {
 
     // Stretched in X to distance (frame width is 384)
     const scaleX = dist / 384;
-    const scaleY = 0.65;
+    const scaleY = 0.45;
 
     item.sprite.setPosition(midX, midY);
     item.sprite.setOrigin(0.5, 0.5);
     item.sprite.setRotation(angle);
     item.sprite.setScale(scaleX, scaleY);
+    item.sprite.setAlpha(0.72);
     item.sprite.setBlendMode(Phaser.BlendModes.ADD);
     item.sprite.setDepth(28);
     item.sprite.clearTint();
@@ -3390,7 +3839,7 @@ export class MainScene extends Phaser.Scene {
     if (target && target.active && target.scene) {
       this.spawnChainLightningEffect(source.x, source.y, target.x, target.y);
       soundManager.playLightning();
-      this.damageEnemy(target, chainDamage, false, 0, 0, false);
+      this.damageEnemy(target, chainDamage, false, 0, 0, false, 'lightning');
     }
   }
 
@@ -3445,34 +3894,109 @@ export class MainScene extends Phaser.Scene {
     soundManager.playPlayerAttack();
   }
 
+  private spawnExpandingRing(
+    x: number,
+    y: number,
+    startScale: number,
+    endScale: number,
+    startAlpha: number,
+    durationMs: number,
+    depth: number,
+    tint?: number
+  ) {
+    const len = this.expandingRingPool.length;
+    if (len === 0) return;
+    let slot: (typeof this.expandingRingPool)[number] | null = null;
+    for (let step = 0; step < len; step++) {
+      const idx = (this.expandingRingCursor + step) % len;
+      const cand = this.expandingRingPool[idx];
+      if (!cand.active && cand.sprite?.scene) {
+        this.expandingRingCursor = (idx + 1) % len;
+        slot = cand;
+        break;
+      }
+    }
+    if (!slot) {
+      slot = this.expandingRingPool[this.expandingRingCursor];
+      this.expandingRingCursor = (this.expandingRingCursor + 1) % len;
+    }
+    if (!slot || !slot.sprite?.scene) return;
+    slot.active = true;
+    slot.elapsedMs = 0;
+    slot.durationMs = Math.max(16, durationMs);
+    slot.startScale = startScale;
+    slot.endScale = endScale;
+    slot.startAlpha = startAlpha;
+    slot.sprite.setPosition(x, y).setDepth(depth).setScale(startScale).setAlpha(startAlpha).setActive(true).setVisible(true);
+    if (tint !== undefined) {
+      slot.sprite.setTint(tint);
+    } else {
+      slot.sprite.clearTint();
+    }
+  }
+
+  private updatePooledRingsAndTrails(delta: number) {
+    for (let i = 0; i < this.expandingRingPool.length; i++) {
+      const r = this.expandingRingPool[i];
+      if (!r.active) continue;
+      r.elapsedMs += delta;
+      if (r.elapsedMs >= r.durationMs) {
+        r.active = false;
+        r.sprite.setVisible(false).setActive(false);
+      } else {
+        const p = r.elapsedMs / r.durationMs;
+        const inv = 1 - p;
+        const easeOut = 1 - inv * inv * inv;
+        r.sprite.setScale(r.startScale + (r.endScale - r.startScale) * easeOut);
+        r.sprite.setAlpha(r.startAlpha * (1 - p));
+      }
+    }
+
+    for (let i = 0; i < this.enemyTrailPool.length; i++) {
+      const t = this.enemyTrailPool[i];
+      if (!t.active) continue;
+      t.elapsedMs += delta;
+      if (t.elapsedMs >= t.durationMs) {
+        t.active = false;
+        t.sprite.setVisible(false).setActive(false);
+      } else {
+        const p = t.elapsedMs / t.durationMs;
+        const inv = 1 - p;
+        const quadOut = inv * inv;
+        t.sprite.setScale(t.startScale * quadOut);
+        t.sprite.setAlpha(0.5 * quadOut);
+      }
+    }
+  }
+
+  private fillScratchFromGroup(
+    group: Phaser.Physics.Arcade.Group,
+    scratch: Phaser.Physics.Arcade.Sprite[]
+  ): Phaser.Physics.Arcade.Sprite[] {
+    scratch.length = 0;
+    const children = group.getChildren() as Phaser.Physics.Arcade.Sprite[];
+    for (let i = 0; i < children.length; i++) {
+      const item = children[i];
+      if (item && item.active && item.scene) {
+        scratch.push(item);
+      }
+    }
+    return scratch;
+  }
+
   private triggerAttackMuzzleEffect() {
     if (this.muzzleFiredThisAttack || this.isDead || !this.sys?.isActive() || !this.player?.active) return;
     this.muzzleFiredThisAttack = true;
 
-    // Muzzle flash particle effect at the lantern / hand position
     const offsetX = this.player.flipX ? -28 : 28;
     const mx = this.player.x + offsetX;
     const my = this.player.y - 6;
 
-    // Expanding radiant cyan ring with ADD blend mode
-    const flash = this.add.sprite(mx, my, 'fx_ring');
-    flash.setBlendMode(Phaser.BlendModes.ADD);
-    flash.setDepth(23);
-    flash.setScale(0.12);
-    flash.setTint(0x7df9ff);
-    this.tweens.add({
-      targets: flash,
-      scaleX: 0.5,
-      scaleY: 0.5,
-      alpha: 0,
-      duration: 160,
-      onComplete: () => {
-        if (flash.scene) flash.destroy();
-      },
-    });
+    // Pooled radiant cyan ring (zero tween/sprite allocation)
+    this.spawnExpandingRing(mx, my, 0.1, 0.34, 0.52, 120, 23, 0x7df9ff);
 
     // Particle burst of sparks
-    this.spawnParticleBurst(mx, my, 8, 'fx_spark', 90, 220, 0.2, 0.4, 0x66ffff);
+    this.spawnParticleBurst(mx, my, 3, 'fx_spark', 85, 190, 0.12, 0.22, 0x66ffff, 150, 0.48);
   }
 
   // -------------------------------------------------------------
@@ -3487,6 +4011,15 @@ export class MainScene extends Phaser.Scene {
       !this.player?.active
     )
       return;
+
+    if (this.isVictoryEnded) {
+      const victoryDelta = performanceRuntime.smoothFrameDelta(rawDelta);
+      this.updateParticles(victoryDelta);
+      this.updateGore(victoryDelta);
+      this.updateFloatingTexts(victoryDelta);
+      this.cameraController.update(victoryDelta, this.player.x, this.player.y, null);
+      return;
+    }
 
     try {
       // 90Hz/120Hz Dynamic Resolution Scaling & Quality Tier adaptation
@@ -3664,11 +4197,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     // Crossfade to intense music at 5:00 if boss is not active
-    if (
-      this.runTime >= SPAWN_TIMELINE.feel.intenseMusicTimeSec &&
-      !this.hasCrossfadedToIntense &&
-      !this.activeBoss
-    ) {
+    if (this.runTime >= SPAWN_TIMELINE.feel.intenseMusicTimeSec && !this.hasCrossfadedToIntense && !this.activeBoss) {
       this.hasCrossfadedToIntense = true;
       soundManager.playIntense();
     }
@@ -3734,8 +4263,9 @@ export class MainScene extends Phaser.Scene {
     // 9. Update Pickups Magnet & 12s Gem Expiry
     this.updatePickups(delta);
 
-    // 10. Update Particles & Enemy Death Gore/Decals
+    // 10. Update Particles, Pooled Rings/Trails & Enemy Death Gore/Decals
     this.updateParticles(delta);
+    this.updatePooledRingsAndTrails(delta);
     this.updateGore(delta);
 
     // 11. Update Floating Combat Text Pool
@@ -3755,8 +4285,8 @@ export class MainScene extends Phaser.Scene {
     // 13. Enemy Spawning & Timeline Events (millisecond simulation clock)
     this.handleEnemySpawning(this.simTimeMs);
 
-      // 14. Periodic Stats Sync with UI (~115ms)
-      if (time - this.lastStatsEmitMs >= 115) {
+      // 14. Periodic Stats Sync with UI (~155ms)
+      if (time - this.lastStatsEmitMs >= 155) {
         this.lastStatsEmitMs = time;
         this.emitStatsUpdate();
       }
@@ -3782,7 +4312,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   public triggerDash() {
-    if (this.isDead || this.isGamePaused) return;
+    if (this.isDead || this.isVictoryEnded || this.isGamePaused) return;
     if (this.dashChargesRemaining <= 0 || this.dashActiveTimerMs > 0) return;
 
     let dx = 0;
@@ -4003,42 +4533,48 @@ export class MainScene extends Phaser.Scene {
       this.screenEdgeFlashAlpha > 0.01;
 
     if (!hasEdge) {
-      if (this.hadEdgeVignette) {
-        this.hadEdgeVignette = false;
-        this.lightVignette.clear();
+      if (this.lightVignetteSprite.visible) {
+        this.lightVignetteSprite.setVisible(false);
       }
       return;
     }
 
-    this.hadEdgeVignette = true;
-    this.lightVignette.setPosition(zeroOffset.x, zeroOffset.y);
-    this.lightVignette.clear();
+    let finalAlpha = 0;
+    let finalTint = 0xe5484d;
 
     if (this.pressureAuraAlpha > 0.02) {
       const wave = 0.65 + 0.35 * Math.sin(this.time.now * 0.008);
-      const pAlpha = this.pressureAuraAlpha * 0.32 * wave;
-      this.lightVignette.lineStyle(22, 0xc44cff, pAlpha * 0.6);
-      this.lightVignette.strokeRect(0, 0, w, h);
-      this.lightVignette.lineStyle(8, 0xe5484d, pAlpha);
-      this.lightVignette.strokeRect(0, 0, w, h);
+      finalAlpha = Math.max(finalAlpha, this.pressureAuraAlpha * 0.42 * wave);
+      finalTint = 0xc44cff;
     }
 
     if (this.lowHpVignetteAlpha > 0.01) {
-      const beatPhase = (this.time.now % SPAWN_TIMELINE.feel.heartbeatPeriodMs) / SPAWN_TIMELINE.feel.heartbeatPeriodMs;
+      const beatPhase =
+        (this.time.now % SPAWN_TIMELINE.feel.heartbeatPeriodMs) /
+        SPAWN_TIMELINE.feel.heartbeatPeriodMs;
       const lub = Math.exp(-Math.pow((beatPhase - 0.14) / 0.06, 2));
       const dub = 0.75 * Math.exp(-Math.pow((beatPhase - 0.32) / 0.06, 2));
       const heartbeat = 0.45 + 0.55 * Math.min(1, lub + dub);
-      const edgeAlpha = this.lowHpVignetteAlpha * 0.45 * heartbeat;
-      this.lightVignette.lineStyle(48, 0x991b1b, edgeAlpha * 0.45);
-      this.lightVignette.strokeRect(0, 0, w, h);
-      this.lightVignette.lineStyle(18, 0xe5484d, edgeAlpha * 0.8);
-      this.lightVignette.strokeRect(0, 0, w, h);
+      const hpEdge = this.lowHpVignetteAlpha * 0.62 * heartbeat;
+      if (hpEdge >= finalAlpha) {
+        finalAlpha = hpEdge;
+        finalTint = 0xe5484d;
+      }
     }
 
     if (this.screenEdgeFlashAlpha > 0.01) {
-      this.lightVignette.lineStyle(28, 0xe5484d, this.screenEdgeFlashAlpha * 0.7);
-      this.lightVignette.strokeRect(0, 0, w, h);
+      const flashEdge = this.screenEdgeFlashAlpha * 0.75;
+      if (flashEdge >= finalAlpha) {
+        finalAlpha = flashEdge;
+        finalTint = 0xe5484d;
+      }
     }
+
+    this.lightVignetteSprite
+      .setPosition(zeroOffset.x, zeroOffset.y)
+      .setTint(finalTint)
+      .setAlpha(Math.min(0.95, finalAlpha))
+      .setVisible(true);
   }
 
   // -------------------------------------------------------------
@@ -4082,7 +4618,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // 4. Radiant Scatter: Shotgun fires cyan bolts strictly up to lantern light radius
+    // 4. Radiant Scatter: Shotgun fires golden-yellow bolts strictly up to lantern light radius
     const shotgun = this.weapons['shotgun'];
     if (shotgun && shotgun.unlocked) {
       const effectiveCooldown = shotgun.cooldown * this.playerStats.cooldownMultiplier;
@@ -4161,7 +4697,9 @@ export class MainScene extends Phaser.Scene {
         originX: this.player.x,
         originY: this.player.y,
         maxRangeSq: maxRange * maxRange,
+        attackStyle: 'bolt',
       };
+      (proj as unknown as { __projData?: ProjectileData }).__projData = data;
       proj.setData('data', data);
       proj.setVelocity(vx, vy);
     }
@@ -4169,7 +4707,7 @@ export class MainScene extends Phaser.Scene {
     return true;
   }
 
-  // Weapon: Radiant Scatter (Fires 3 cyan fx_bolt.png projectiles strictly within lantern light radius)
+  // Weapon: Radiant Scatter (Fires 3 golden-yellow fx_bolt_gold projectiles strictly within lantern light radius)
   private fireShotgunCone(): boolean {
     const shotgun = this.weapons['shotgun'];
     if (!shotgun || !shotgun.unlocked) return false;
@@ -4185,16 +4723,25 @@ export class MainScene extends Phaser.Scene {
     const speed = 480;
     const maxLife = Math.round((maxRange / speed) * 1000);
     const spreadOffsets = [-0.14, 0, 0.14];
+    const hasGoldBolt = this.textures.exists('fx_bolt_gold');
 
     for (const offset of spreadOffsets) {
       const angle = baseAngle + offset;
       const vx = Math.cos(angle) * speed;
       const vy = Math.sin(angle) * speed;
 
-      const proj = this.acquirePlayerProjectile(this.player.x, this.player.y, 'fx_bolt');
+      const proj = this.acquirePlayerProjectile(
+        this.player.x,
+        this.player.y,
+        hasGoldBolt ? 'fx_bolt_gold' : 'fx_bolt'
+      );
       proj.setDepth(22);
       proj.setBlendMode(Phaser.BlendModes.ADD);
-      proj.setTint(0x22ffff);
+      if (hasGoldBolt) {
+        proj.clearTint();
+      } else {
+        proj.setTint(0xffd54f);
+      }
       proj.setScale(0.4);
       proj.setRotation(angle);
 
@@ -4219,7 +4766,9 @@ export class MainScene extends Phaser.Scene {
         originX: this.player.x,
         originY: this.player.y,
         maxRangeSq: maxRange * maxRange,
+        attackStyle: 'shotgun',
       };
+      (proj as unknown as { __projData?: ProjectileData }).__projData = data;
       proj.setData('data', data);
       proj.setVelocity(vx, vy);
     }
@@ -4260,7 +4809,7 @@ export class MainScene extends Phaser.Scene {
     );
     const hitRadiusSq = 45 * 45;
     const nearby = canDealDamage
-      ? [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])]
+      ? this.fillScratchFromGroup(this.enemiesGroup, this.enemiesScratch)
       : null;
     const now = this.time.now;
     const dmg = canDealDamage ? Math.round(blades.damage * this.playerStats.damageMultiplier) : 0;
@@ -4272,24 +4821,23 @@ export class MainScene extends Phaser.Scene {
 
       const blade = this.orbitingBlades[i];
       if (!blade || !blade.scene) continue;
-      // Orbit the sprite's POSITION around the player; keep sprite's baked spin animation fast & sharp
       blade.setPosition(bx, by);
       blade.setAlpha(canDealDamage ? 1.0 : 0.28);
       blade.anims.timeScale = canDealDamage ? 1.25 : 0.85;
 
       if (!nearby) continue;
 
-      // Slicing check on nearby enemies using squared distance (only while standing still if ORBIT_BLADES_NEED_STANDING)
       for (let j = 0; j < nearby.length; j++) {
         const enemy = nearby[j];
         if (!enemy || !enemy.active || !enemy.scene) continue;
         const dx = enemy.x - bx;
         const dy = enemy.y - by;
         if (dx * dx + dy * dy < hitRadiusSq) {
-          const lastHit = (enemy.getData('lastBladeHit') as number) || 0;
+          const enemyAny = enemy as unknown as { __lastBladeHit?: number };
+          const lastHit = enemyAny.__lastBladeHit || 0;
           if (now - lastHit > 280) {
-            enemy.setData('lastBladeHit', now);
-            this.damageEnemy(enemy, dmg, false, Math.cos(angle) * 120, Math.sin(angle) * 120);
+            enemyAny.__lastBladeHit = now;
+            this.damageEnemy(enemy, dmg, false, Math.cos(angle) * 120, Math.sin(angle) * 120, true, 'blades');
             soundManager.playBladeSlash();
           }
         }
@@ -4308,29 +4856,11 @@ export class MainScene extends Phaser.Scene {
     this.triggerPlayerAttack();
     soundManager.playRingPulse();
 
-    const ringSprite = this.add.sprite(this.player.x, this.player.y, 'fx_ring');
-    ringSprite.setBlendMode(Phaser.BlendModes.ADD);
-    ringSprite.setDepth(21);
-    ringSprite.setScale(0.1);
-    ringSprite.setAlpha(0.9);
-
     const maxScale = maxRadius / 140;
     const maxRadiusSq = maxRadius * maxRadius;
+    this.spawnExpandingRing(this.player.x, this.player.y, 0.1, maxScale, 0.9, 550, 21);
 
-    this.tweens.add({
-      targets: ringSprite,
-      scaleX: maxScale,
-      scaleY: maxScale,
-      alpha: 0,
-      duration: 550,
-      ease: 'Cubic.easeOut',
-      onComplete: () => {
-        if (ringSprite.scene) ringSprite.destroy();
-      },
-    });
-
-    // Damage all enemies in blast radius (snapshot children so mid-loop boss destroy cannot shrink array)
-    const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
+    const enemies = this.fillScratchFromGroup(this.enemiesGroup, this.enemiesScratch);
     const dmg = Math.round(ring.damage * this.playerStats.damageMultiplier);
 
     for (let i = 0; i < enemies.length; i++) {
@@ -4342,11 +4872,11 @@ export class MainScene extends Phaser.Scene {
         const angle = Math.atan2(dy, dx);
         const kx = Math.cos(angle) * 220;
         const ky = Math.sin(angle) * 220;
-        this.damageEnemy(enemy, dmg, false, kx, ky);
+        this.damageEnemy(enemy, dmg, false, kx, ky, true, 'ring');
       }
     }
 
-    this.spawnParticleBurst(this.player.x, this.player.y, 14, 'fx_ring', 90, 200, 0.2, 0.4);
+    this.spawnParticleBurst(this.player.x, this.player.y, 6, 'fx_ring', 90, 190, 0.15, 0.28, undefined, 260, 0.48);
     return true;
   }
 
@@ -4395,7 +4925,9 @@ export class MainScene extends Phaser.Scene {
         originX: this.player.x,
         originY: this.player.y,
         maxRangeSq: maxRange * maxRange,
+        attackStyle: 'spark',
       };
+      (proj as unknown as { __projData?: ProjectileData }).__projData = data;
       proj.setData('data', data);
       proj.setVelocity(vx, vy);
     }
@@ -4470,12 +5002,20 @@ export class MainScene extends Phaser.Scene {
   // -------------------------------------------------------------
   private updateProjectiles(delta: number) {
     if (!this.projectilesGroup) return;
-    const projs = [...(this.projectilesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
+    const projs = this.fillScratchFromGroup(this.projectilesGroup, this.projsScratch);
     let magentaParticlesThisFrame = 0;
+    const dtSec = delta * 0.001;
+    const maxMagentaParticles = gameManager.getQualityTier() === 'low' ? 1 : 3;
 
-    for (const proj of projs) {
+    for (let i = 0; i < projs.length; i++) {
+      const proj = projs[i];
       if (!proj || !proj.active || !proj.scene) continue;
-      const data = proj.getData('data') as ProjectileData;
+      const projAny = proj as unknown as {
+        __projData?: ProjectileData;
+        __trailTimerMs?: number;
+        __nearMissAwarded?: boolean;
+      };
+      const data = projAny.__projData || (proj.getData('data') as ProjectileData);
       if (!data) continue;
 
       data.life += delta;
@@ -4501,20 +5041,19 @@ export class MainScene extends Phaser.Scene {
         continue;
       }
 
-      // Animated enemy orb behavior: continuous rotation, 40ms ghost trail, magenta particles, hit/dodge
       if (data.isEnemy) {
-        proj.rotation += (delta / 1000) * 4.5;
+        proj.rotation += dtSec * 4.5;
+        // Analytical ~6Hz orb pulse (zero Tween overhead)
+        const pulseScale = 0.42 * (1.025 + 0.125 * Math.sin(data.life * 0.0378));
+        proj.setScale(pulseScale);
 
-        // Spawn a fading ghost copy every 40ms (alpha 0.5 -> 0, scale -> 0 in 250ms, ADD blend)
-        let trailTimer = ((proj.getData('trailTimerMs') as number) || 0) + delta;
+        let trailTimer = (projAny.__trailTimerMs || 0) + delta;
         while (trailTimer >= 40) {
           trailTimer -= 40;
           this.spawnEnemyOrbTrailGhost(proj);
         }
-        proj.setData('trailTimerMs', trailTimer);
+        projAny.__trailTimerMs = trailTimer;
 
-        // Emit small magenta particles (max 3 per frame total in high quality, 1 in low quality; 300ms life)
-        const maxMagentaParticles = gameManager.getQualityTier() === 'low' ? 1 : 3;
         if (magentaParticlesThisFrame < maxMagentaParticles) {
           const ox = proj.x + Phaser.Math.Between(-10, 10);
           const oy = proj.y + Phaser.Math.Between(-10, 10);
@@ -4522,20 +5061,24 @@ export class MainScene extends Phaser.Scene {
           magentaParticlesThisFrame++;
         }
 
-        const dist = Phaser.Math.Distance.Between(proj.x, proj.y, this.player.x, this.player.y);
-        if (dist < SPAWN_TIMELINE.pressure.nearMissInnerRadius) {
+        const dxP = proj.x - this.player.x;
+        const dyP = proj.y - this.player.y;
+        const distSq = dxP * dxP + dyP * dyP;
+        const innerR = SPAWN_TIMELINE.pressure.nearMissInnerRadius;
+        const outerR = SPAWN_TIMELINE.pressure.nearMissOuterRadius;
+        if (distSq < innerR * innerR) {
           this.damagePlayer(data.damage);
-          this.spawnSparkHitEffect(proj.x, proj.y, 0xff44ee, 0.85);
+          this.spawnSparkHitEffect(proj.x, proj.y, 0xff44ee, 0.56, 0.62, true);
           this.spawnOrbImpactDeathEffect(proj.x, proj.y);
           this.cameraController.shakeOnDamage(data.damage, this.playerStats.maxHp);
-          this.spawnParticleBurst(proj.x, proj.y, 8, 'fx_spark', 60, 150, 0.16, 0.3, 0xff44ee, 300);
+          this.spawnParticleBurst(proj.x, proj.y, 4, 'fx_spark', 60, 145, 0.12, 0.22, 0xff44ee, 240, 0.56);
           this.releaseEnemyProjectile(proj);
         } else if (
-          dist <= SPAWN_TIMELINE.pressure.nearMissOuterRadius &&
+          distSq <= outerR * outerR &&
           this.isMoving &&
-          !proj.getData('nearMissAwarded')
+          !projAny.__nearMissAwarded
         ) {
-          proj.setData('nearMissAwarded', true);
+          projAny.__nearMissAwarded = true;
           const bonusXp = SPAWN_TIMELINE.pressure.nearMissBonusXp * this.comboMultiplier;
           this.addXp(bonusXp);
           this.showFloatingCallout(this.player.x, this.player.y - 44, `DODGE +${bonusXp}`, '#5de4ff');
@@ -4548,21 +5091,21 @@ export class MainScene extends Phaser.Scene {
   // Enemies AI & Update
   // -------------------------------------------------------------
   private updateEnemies(time: number, delta: number) {
-    const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
+    const enemies = this.fillScratchFromGroup(this.enemiesGroup, this.enemiesScratch);
     const pressureSpeedFactor = this.isUnderPressure ? 1 + SPAWN_TIMELINE.pressure.enemySpeedBonus : 1;
     const bloodFogSpeedFactor =
       this.bloodFogTimerMs > 0 ? this.getBloodFogModifiers(this.bloodFogTier).speedMult : 1;
     const globalEnemySpeedFactor = pressureSpeedFactor * bloodFogSpeedFactor;
-
-    if (this.eliteAuraGraphics) {
-      this.eliteAuraGraphics.clear();
-    }
+    const kbDamp = Math.pow(0.88, delta / 16.6667);
+    const dtSec = delta * 0.001;
+    let usedEliteAuras = 0;
 
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
       if (!enemy || !enemy.active || !enemy.scene) continue;
 
-      const edata = enemy.getData('data') as EnemyData;
+      const edata = ((enemy as unknown as { __enemyData?: EnemyData }).__enemyData ||
+        enemy.getData('data')) as EnemyData;
       if (!edata) continue;
 
       // Zero-allocation hit-flash tint restoration
@@ -4577,37 +5120,25 @@ export class MainScene extends Phaser.Scene {
         }
       }
 
-      // Elite distinct multi-layered pulsing aura & orbiting sigil nodes
-      if (edata.isElite && this.eliteAuraGraphics) {
+      // Elite pulsing aura + spinning sigil nodes via pooled GPU sprite (zero CPU triangulation)
+      if (edata.isElite && usedEliteAuras < this.eliteAuraPool.length) {
         const auraStyle = ELITE_AURA_STYLE[edata.type] ?? ELITE_AURA_STYLE.brute;
-        const auraPulse = 0.65 + 0.35 * Math.sin(time * 0.008);
+        const auraPulse = 0.68 + 0.32 * Math.sin(time * 0.008);
         const auraRadius = 54 * enemy.scaleX;
-
-        this.eliteAuraGraphics.fillStyle(auraStyle.outerColor, 0.16 * auraPulse);
-        this.eliteAuraGraphics.fillCircle(enemy.x, enemy.y, auraRadius);
-        this.eliteAuraGraphics.lineStyle(2.5, auraStyle.outerColor, 0.7 * auraPulse);
-        this.eliteAuraGraphics.strokeCircle(enemy.x, enemy.y, auraRadius + 5);
-        this.eliteAuraGraphics.lineStyle(1.5, auraStyle.innerColor, 0.6 * auraPulse);
-        this.eliteAuraGraphics.strokeCircle(enemy.x, enemy.y, auraRadius * 0.72);
-
-        const spin = time * 0.0032;
-        const orbitR = auraRadius + 8;
-        this.eliteAuraGraphics.fillStyle(auraStyle.innerColor, 0.9 * auraPulse);
-        for (let n = 0; n < 4; n++) {
-          const na = spin + (n * Math.PI) / 2;
-          this.eliteAuraGraphics.fillCircle(
-            enemy.x + Math.cos(na) * orbitR,
-            enemy.y + Math.sin(na) * orbitR,
-            3.2
-          );
-        }
+        const auraSpr = this.eliteAuraPool[usedEliteAuras++];
+        auraSpr
+          .setPosition(enemy.x, enemy.y)
+          .setScale((auraRadius * 2.15) / 128)
+          .setRotation(time * 0.0032)
+          .setTint(auraStyle.outerColor)
+          .setAlpha(0.75 * auraPulse)
+          .setVisible(true);
       }
 
       // Handle knockback decay (frame-rate-independent across 60/90/120fps)
       if (Math.abs(edata.knockbackX) > 2 || Math.abs(edata.knockbackY) > 2) {
-        enemy.x += (edata.knockbackX * delta) / 1000;
-        enemy.y += (edata.knockbackY * delta) / 1000;
-        const kbDamp = Math.pow(0.88, delta / 16.6667);
+        enemy.x += edata.knockbackX * dtSec;
+        enemy.y += edata.knockbackY * dtSec;
         edata.knockbackX *= kbDamp;
         edata.knockbackY *= kbDamp;
       }
@@ -4831,6 +5362,13 @@ export class MainScene extends Phaser.Scene {
         this.shadowSystem.resolvePillarPushout(enemy, edata.type === 'brute' ? 28 : 16);
       }
     }
+
+    for (let i = usedEliteAuras; i < this.eliteAuraPool.length; i++) {
+      const aura = this.eliteAuraPool[i];
+      if (aura && aura.visible) {
+        aura.setVisible(false);
+      }
+    }
   }
 
   // Enemy Projectile & Ghost Trail Object Pools
@@ -4848,6 +5386,7 @@ export class MainScene extends Phaser.Scene {
 
   private initEnemyTrailPool() {
     this.enemyTrailPool = [];
+    this.enemyTrailCursor = 0;
     for (let i = 0; i < this.MAX_ENEMY_TRAILS; i++) {
       const ghost = this.add.sprite(0, 0, 'fx_spitter_orb_sheet', 0);
       ghost.setBlendMode(Phaser.BlendModes.ADD);
@@ -4855,20 +5394,37 @@ export class MainScene extends Phaser.Scene {
       ghost.setActive(false);
       ghost.setVisible(false);
       ghost.disableInteractive();
-      this.enemyTrailPool.push(ghost);
+      this.enemyTrailPool.push({
+        sprite: ghost,
+        active: false,
+        elapsedMs: 0,
+        durationMs: 250,
+        startScale: 0.42,
+      });
     }
   }
 
   private acquireEnemyProjectile(x: number, y: number): Phaser.Physics.Arcade.Sprite {
-    let proj = this.enemyProjectilePool.find((p) => !p.active && Boolean(p.scene));
+    let proj: Phaser.Physics.Arcade.Sprite | undefined;
+    const len = this.enemyProjectilePool.length;
+    for (let step = 0; step < len; step++) {
+      const idx = (this.enemyProjCursor + step) % len;
+      const cand = this.enemyProjectilePool[idx];
+      if (!cand.active && cand.scene) {
+        this.enemyProjCursor = (idx + 1) % len;
+        proj = cand;
+        break;
+      }
+    }
     if (!proj) {
-      if (this.enemyProjectilePool.length >= this.MAX_ENEMY_PROJECTILE_POOL) {
+      if (len >= this.MAX_ENEMY_PROJECTILE_POOL) {
         let oldest: Phaser.Physics.Arcade.Sprite | undefined;
         let maxLife = -1;
-        for (let i = 0; i < this.enemyProjectilePool.length; i++) {
+        for (let i = 0; i < len; i++) {
           const candidate = this.enemyProjectilePool[i];
           if (!candidate.scene) continue;
-          const pdata = candidate.getData('data') as ProjectileData | undefined;
+          const pdata = ((candidate as unknown as { __projData?: ProjectileData }).__projData ||
+            candidate.getData('data')) as ProjectileData | undefined;
           const life = pdata?.life ?? 0;
           if (!oldest || life > maxLife) {
             maxLife = life;
@@ -4886,7 +5442,6 @@ export class MainScene extends Phaser.Scene {
         this.enemyProjectilePool.push(proj);
       }
     }
-    this.tweens.killTweensOf(proj);
     proj.anims.stop();
     proj.setTexture('fx_spitter_orb_sheet', 0);
     proj.enableBody(true, x, y, true, true);
@@ -4900,15 +5455,26 @@ export class MainScene extends Phaser.Scene {
     y: number,
     texture: string
   ): Phaser.Physics.Arcade.Sprite {
-    let proj = this.playerProjectilePool.find((p) => !p.active && Boolean(p.scene));
+    let proj: Phaser.Physics.Arcade.Sprite | undefined;
+    const len = this.playerProjectilePool.length;
+    for (let step = 0; step < len; step++) {
+      const idx = (this.playerProjCursor + step) % len;
+      const cand = this.playerProjectilePool[idx];
+      if (!cand.active && cand.scene) {
+        this.playerProjCursor = (idx + 1) % len;
+        proj = cand;
+        break;
+      }
+    }
     if (!proj) {
-      if (this.playerProjectilePool.length >= this.MAX_PLAYER_PROJECTILES) {
+      if (len >= this.MAX_PLAYER_PROJECTILES) {
         let oldest: Phaser.Physics.Arcade.Sprite | undefined;
         let maxLife = -1;
-        for (let i = 0; i < this.playerProjectilePool.length; i++) {
+        for (let i = 0; i < len; i++) {
           const candidate = this.playerProjectilePool[i];
           if (!candidate.scene) continue;
-          const pdata = candidate.getData('data') as ProjectileData | undefined;
+          const pdata = ((candidate as unknown as { __projData?: ProjectileData }).__projData ||
+            candidate.getData('data')) as ProjectileData | undefined;
           const life = pdata?.life ?? 0;
           if (!oldest || life > maxLife) {
             maxLife = life;
@@ -4939,6 +5505,7 @@ export class MainScene extends Phaser.Scene {
 
   private releasePlayerProjectile(proj: Phaser.Physics.Arcade.Sprite) {
     if (!proj || !proj.scene) return;
+    (proj as unknown as { __projData?: ProjectileData }).__projData = undefined;
     proj.clearTint();
     proj.disableBody(true, true);
     proj.setActive(false);
@@ -4950,7 +5517,17 @@ export class MainScene extends Phaser.Scene {
     y: number,
     texture: string
   ): Phaser.Physics.Arcade.Sprite {
-    let enemy = this.enemyPool.find((e) => !e.active && Boolean(e.scene));
+    let enemy: Phaser.Physics.Arcade.Sprite | undefined;
+    const len = this.enemyPool.length;
+    for (let step = 0; step < len; step++) {
+      const idx = (this.enemyCursor + step) % len;
+      const cand = this.enemyPool[idx];
+      if (!cand.active && cand.scene) {
+        this.enemyCursor = (idx + 1) % len;
+        enemy = cand;
+        break;
+      }
+    }
     if (!enemy) {
       enemy = this.enemiesGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
       enemy.disableInteractive();
@@ -4969,6 +5546,9 @@ export class MainScene extends Phaser.Scene {
   private releaseEnemy(enemy: Phaser.Physics.Arcade.Sprite) {
     if (!enemy || !enemy.scene) return;
     this.tweens.killTweensOf(enemy);
+    const enemyAny = enemy as unknown as { __enemyData?: EnemyData; __lastBladeHit?: number };
+    enemyAny.__enemyData = undefined;
+    enemyAny.__lastBladeHit = 0;
     enemy.anims.stop();
     enemy.clearTint();
     enemy.setAlpha(1);
@@ -4984,7 +5564,17 @@ export class MainScene extends Phaser.Scene {
     y: number,
     texture: string
   ): Phaser.Physics.Arcade.Sprite {
-    let p = this.pickupPool.find((item) => !item.active && Boolean(item.scene));
+    let p: Phaser.Physics.Arcade.Sprite | undefined;
+    const len = this.pickupPool.length;
+    for (let step = 0; step < len; step++) {
+      const idx = (this.pickupCursor + step) % len;
+      const cand = this.pickupPool[idx];
+      if (!cand.active && cand.scene) {
+        this.pickupCursor = (idx + 1) % len;
+        p = cand;
+        break;
+      }
+    }
     if (!p) {
       p = this.pickupsGroup.create(x, y, texture) as Phaser.Physics.Arcade.Sprite;
       p.disableInteractive();
@@ -5000,6 +5590,13 @@ export class MainScene extends Phaser.Scene {
 
   private releasePickup(p: Phaser.Physics.Arcade.Sprite) {
     if (!p || !p.scene) return;
+    const pAny = p as unknown as {
+      __pickupType?: string;
+      __pickupLife?: number;
+      __pickupBaseScale?: number;
+    };
+    pAny.__pickupType = undefined;
+    pAny.__pickupLife = 0;
     p.setAlpha(1);
     p.disableBody(true, true);
     p.setActive(false);
@@ -5007,9 +5604,15 @@ export class MainScene extends Phaser.Scene {
   }
 
   private releaseEnemyProjectile(proj: Phaser.Physics.Arcade.Sprite) {
-    this.tweens.killTweensOf(proj);
+    const projAny = proj as unknown as {
+      __projData?: ProjectileData;
+      __trailTimerMs?: number;
+      __nearMissAwarded?: boolean;
+    };
+    projAny.__projData = undefined;
+    projAny.__trailTimerMs = 0;
+    projAny.__nearMissAwarded = false;
     proj.anims.stop();
-    proj.setData('pulseTween', null);
     proj.setData('trailTimerMs', 0);
     proj.setData('nearMissAwarded', false);
     proj.setScale(0.42);
@@ -5021,11 +5624,22 @@ export class MainScene extends Phaser.Scene {
   }
 
   private spawnEnemyOrbTrailGhost(sourceProj: Phaser.Physics.Arcade.Sprite) {
-    const ghost = this.enemyTrailPool.find((g) => !g.active);
-    if (!ghost) return;
+    const len = this.enemyTrailPool.length;
+    if (len === 0) return;
+    let slot: (typeof this.enemyTrailPool)[number] | undefined;
+    for (let step = 0; step < len; step++) {
+      const idx = (this.enemyTrailCursor + step) % len;
+      const cand = this.enemyTrailPool[idx];
+      if (!cand.active && cand.sprite?.scene) {
+        this.enemyTrailCursor = (idx + 1) % len;
+        slot = cand;
+        break;
+      }
+    }
+    if (!slot || !slot.sprite?.scene) return;
 
-    this.tweens.killTweensOf(ghost);
     const frameIndex = sourceProj.anims.currentFrame?.textureFrame ?? 0;
+    const ghost = slot.sprite;
     ghost.setTexture('fx_spitter_orb_sheet', frameIndex);
     ghost.setPosition(sourceProj.x, sourceProj.y);
     ghost.setRotation(sourceProj.rotation);
@@ -5036,18 +5650,10 @@ export class MainScene extends Phaser.Scene {
     ghost.setActive(true);
     ghost.setVisible(true);
 
-    this.tweens.add({
-      targets: ghost,
-      alpha: 0,
-      scaleX: 0,
-      scaleY: 0,
-      duration: 250,
-      ease: 'Quad.easeOut',
-      onComplete: () => {
-        ghost.setActive(false);
-        ghost.setVisible(false);
-      },
-    });
+    slot.active = true;
+    slot.elapsedMs = 0;
+    slot.durationMs = 250;
+    slot.startScale = sourceProj.scaleX;
   }
 
   // Enemy Projectile (Spitter / Boss)
@@ -5072,31 +5678,17 @@ export class MainScene extends Phaser.Scene {
     const proj = this.acquireEnemyProjectile(castX, castY);
     const baseScale = 0.42;
 
-    // Reset all visual & trail state cleanly for pooled reuse
+    // Reset all visual & trail state cleanly for pooled reuse (analytical pulse in updateProjectiles)
     proj.setDepth(23);
     proj.setBlendMode(Phaser.BlendModes.ADD);
     proj.clearTint();
     proj.setAlpha(1);
     proj.setRotation(0);
-    proj.setScale(baseScale * 0.9);
-    proj.setData('trailTimerMs', 0);
-    proj.setData('nearMissAwarded', false);
+    proj.setScale(baseScale);
 
     // Restart animated orb spritesheet from frame 0
     proj.play({ key: 'fx_spitter_orb_anim', startFrame: 0 });
     proj.anims.restart();
-
-    // Scale pulse 0.9-1.15 at ~6 Hz (~166ms full cycle -> 83ms yoyo half-cycle)
-    const pulseTween = this.tweens.add({
-      targets: proj,
-      scaleX: baseScale * 1.15,
-      scaleY: baseScale * 1.15,
-      duration: 83,
-      yoyo: true,
-      repeat: -1,
-      ease: 'Sine.easeInOut',
-    });
-    proj.setData('pulseTween', pulseTween);
 
     const epBody = proj.body as Phaser.Physics.Arcade.Body;
     if (epBody) {
@@ -5117,6 +5709,14 @@ export class MainScene extends Phaser.Scene {
       life: 0,
       maxLife: 2800,
     };
+    const projAny = proj as unknown as {
+      __projData?: ProjectileData;
+      __trailTimerMs?: number;
+      __nearMissAwarded?: boolean;
+    };
+    projAny.__projData = data;
+    projAny.__trailTimerMs = 0;
+    projAny.__nearMissAwarded = false;
     proj.setData('data', data);
     proj.setVelocity(vx, vy);
   }
@@ -5244,6 +5844,18 @@ export class MainScene extends Phaser.Scene {
 
   private handleTimelineEvents() {
     if (this.activeBoss && this.activeBoss.active) return;
+
+    // 5:00 First Boss
+    if (this.runTime >= SPAWN_TIMELINE.events.bossFirstTimeSec && !this.triggeredEvents.has('boss_1')) {
+      this.triggeredEvents.add('boss_1');
+      this.lastEventTriggerTimeSec = this.runTime;
+      this.pendingEvent = null;
+      this.bloodFogBannerTimerMs = 0;
+      gameManager.emitEventWarning(null);
+      this.spawnBoss(1);
+      return;
+    }
+
     if (this.pendingEvent) return;
     if (this.runTime - this.lastEventTriggerTimeSec < SPAWN_TIMELINE.events.minEventSpacingSec) {
       return;
@@ -5376,19 +5988,6 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
-    // 5:00 First Boss
-    if (this.runTime >= SPAWN_TIMELINE.events.bossFirstTimeSec && !this.triggeredEvents.has('boss_1')) {
-      this.scheduleTimelineEvent(
-        'boss_1',
-        'THE VOID TITAN',
-        `Apex dreadnought awakens · Rec. Lv. ${BOSS_RECOMMENDED_LEVEL}`,
-        () => {
-          this.spawnBoss(1);
-        }
-      );
-      return;
-    }
-
     // Minute 6 and Minute 9: "Darkness Falls" event (-25% light radius for 40s, +50% enemy XP drops)
     for (const dfSec of LIGHT.progression.darknessFalls.eventTimesSec) {
       const dfId = `darkness_falls_${dfSec}`;
@@ -5408,7 +6007,7 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // Recurring every 3 minutes after 5:00 (8:00, 11:00, ...): harder boss or double elite
+    // Recurring every 3 minutes after 5:00 (8:00, 11:00, ...): alternating double elite and tougher boss
     if (this.runTime >= this.nextRecurringEventTimeSec) {
       this.recurringCycleCount++;
       const cycleIdx = this.recurringCycleCount;
@@ -5441,21 +6040,19 @@ export class MainScene extends Phaser.Scene {
           }
         );
       } else {
+        this.triggeredEvents.add(`recurring_${cycleIdx}`);
+        this.lastEventTriggerTimeSec = this.runTime;
+        this.pendingEvent = null;
+        this.bloodFogBannerTimerMs = 0;
+        gameManager.emitEventWarning(null);
         const tier = 1 + Math.floor(cycleIdx / 2);
-        this.scheduleTimelineEvent(
-          `recurring_${cycleIdx}`,
-          `VOID TITAN TIER ${tier}`,
-          `Abyssal juggernaut rises · Rec. Lv. ${BOSS_RECOMMENDED_LEVEL + (tier - 1) * 10}`,
-          () => {
-            this.spawnBoss(tier);
-          }
-        );
+        this.spawnBoss(tier);
       }
     }
   }
 
   private handleEnemySpawning(time: number) {
-    // Pause all regular waves and timeline spawns while a Boss is active so player can focus on the Boss
+    // Pause all regular waves and timeline spawns while Boss is active so players can focus on the duel
     if (this.activeBoss && this.activeBoss.active) {
       this.nextSpawnTime = time + 1200;
       return;
@@ -5713,6 +6310,9 @@ export class MainScene extends Phaser.Scene {
       baseScale: scale,
       lastStompFrame: -1,
     };
+    const enemyAny = enemy as unknown as { __enemyData?: EnemyData; __lastBladeHit?: number };
+    enemyAny.__enemyData = edata;
+    enemyAny.__lastBladeHit = 0;
     enemy.setData('data', edata);
     enemy.setData('lastBladeHit', 0);
 
@@ -5729,22 +6329,22 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  // Boss Spawn (5:00, recurring every 3 minutes, or Summon button)
+  // Boss Spawn (5:00 and subsequent boss cycles)
   public spawnBoss(tier: number = 1) {
     if (this.activeBoss || this.isDead || !this.sys?.isActive() || !this.player?.active) return;
     this.bossSpawned = true;
     // Cancel any queued non-boss wave event and defer next regular wave until boss is defeated
     this.pendingEvent = null;
+    this.bloodFogBannerTimerMs = 0;
     this.nextSpawnTime = this.simTimeMs + 1500;
 
-    soundManager.playBossSiren();
     soundManager.playBoss();
+    soundManager.playBossSiren();
+    this.cameraController.triggerShake(800, 0.025, true);
 
     const angle = Math.random() * Math.PI * 2;
-    const x = this.player.x + Math.cos(angle) * 450;
-    const y = this.player.y + Math.sin(angle) * 450;
-
-    this.triggerBossIntroShake(800, 0.025);
+    const x = this.player.x + Math.cos(angle) * 460;
+    const y = this.player.y + Math.sin(angle) * 460;
 
     const boss = this.enemiesGroup.create(x, y, 'boss_idle_sheet') as Phaser.Physics.Arcade.Sprite;
     boss.setDepth(24);
@@ -5778,6 +6378,9 @@ export class MainScene extends Phaser.Scene {
       dropsChest: true,
       coinDrops: 30 * tier,
     };
+    const bossAny = boss as unknown as { __enemyData?: EnemyData; __lastBladeHit?: number };
+    bossAny.__enemyData = edata;
+    bossAny.__lastBladeHit = 0;
     boss.setData('data', edata);
     boss.setData('bossTier', tier);
     boss.setData('isAttacking', false);
@@ -5831,17 +6434,16 @@ export class MainScene extends Phaser.Scene {
       enraged: false,
     });
 
-    // Clear any lingering wave banner so BossIntroModal owns the warning moment cleanly
-    gameManager.emitEventWarning(null);
     this.beginBossIntroPause();
     gameManager.emitBossIntro({
       name: bossDisplayName,
-      tier,
       currentHp: bossHp,
       maxHp: bossHp,
+      tier,
       recommendedLevel,
       damage: bossDmg,
     });
+    gameManager.emitEventWarning(null);
   }
 
   // Triggered on boss_attack frame index 10 (Boss ground slam)
@@ -5852,24 +6454,8 @@ export class MainScene extends Phaser.Scene {
     // fx_slam_sheet: 448x252, 14 frames, 14 fps, scaled to 295px damage radius; area damage on frame 8
     this.spawnBossGroundSlam(boss.x, boss.y, 295, edata?.damage ?? 48);
 
-    // Keep fx_ring shockwave as static fallback with ADD blend mode
-    const ring = this.add
-      .sprite(boss.x, boss.y, 'fx_ring')
-      .setDepth(23)
-      .setScale(0.2)
-      .setAlpha(0.95)
-      .setBlendMode(Phaser.BlendModes.ADD);
-
-    this.tweens.add({
-      targets: ring,
-      scale: 2.6,
-      alpha: 0,
-      duration: 650,
-      ease: 'Cubic.easeOut',
-      onComplete: () => {
-        if (ring.scene) ring.destroy();
-      },
-    });
+    // Pooled expanding fx_ring shockwave with ADD blend mode
+    this.spawnExpandingRing(boss.x, boss.y, 0.2, 2.6, 0.95, 650, 23);
 
     // Particle burst with ADD blend mode
     this.spawnParticleBurst(boss.x, boss.y, 16, 'fx_spark', 100, 260, 0.2, 0.45, 0xff4466);
@@ -5879,22 +6465,30 @@ export class MainScene extends Phaser.Scene {
   // Damage & Combat Interactions
   // -------------------------------------------------------------
   private handleProjectileEnemyOverlap(proj: Phaser.Physics.Arcade.Sprite, enemy: Phaser.Physics.Arcade.Sprite) {
-    if (this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
+    if (this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) return;
     if (!proj || !proj.active || !proj.scene || !enemy || !enemy.active || !enemy.scene) return;
-    const pdata = proj.getData('data') as ProjectileData;
+    const pdata = ((proj as unknown as { __projData?: ProjectileData }).__projData ||
+      proj.getData('data')) as ProjectileData;
     if (!pdata || pdata.isEnemy) return;
 
-    // Knockback vector
+    // Knockback vector & contact point
     const angle = Math.atan2(pdata.vy, pdata.vx);
     const kx = Math.cos(angle) * 140;
     const ky = Math.sin(angle) * 140;
+    const hitX = (proj.x + enemy.x) * 0.5;
+    const hitY = (proj.y + enemy.y) * 0.5;
 
-    this.damageEnemy(enemy, pdata.damage, pdata.isCrit, kx, ky);
-
-    // Light hit sparks only when Gore is Off (otherwise blood splash renders inside damageEnemy)
-    if (gameManager.getGoreLevel() === 'off') {
-      this.spawnParticleBurst(proj.x, proj.y, 6, 'fx_spark', 80, 200, 0.15, 0.35);
-    }
+    this.damageEnemy(
+      enemy,
+      pdata.damage,
+      pdata.isCrit,
+      kx,
+      ky,
+      true,
+      pdata.attackStyle ?? 'bolt',
+      hitX,
+      hitY
+    );
 
     pdata.pierce--;
     if (pdata.pierce <= 0) {
@@ -5908,9 +6502,12 @@ export class MainScene extends Phaser.Scene {
     isCrit: boolean = false,
     knockbackX: number = 0,
     knockbackY: number = 0,
-    canChain: boolean = true
+    canChain: boolean = true,
+    attackStyle: AttackSplashStyle = 'bolt',
+    hitX?: number,
+    hitY?: number
   ) {
-    if (!enemy || !enemy.active || !enemy.scene || this.isDead || !this.sys?.isActive()) return;
+    if (!enemy || !enemy.active || !enemy.scene || this.isDead || this.isVictoryEnded || !this.sys?.isActive()) return;
     const edata = enemy.getData('data') as EnemyData;
     if (!edata || edata.hp <= 0) return;
 
@@ -5919,30 +6516,31 @@ export class MainScene extends Phaser.Scene {
     this.recentDamageLog.push({ timeMs: this.time.now, amount: damage });
     soundManager.playEnemyHit(isCrit);
 
-    // Blood splash on enemy hit scaled to monster size (falls back to light sparks if Gore is Off)
     const enemyDisplaySize = (enemy.displayWidth + enemy.displayHeight) * 0.5;
-    this.spawnEnemyHitBloodSplash(
-      enemy.x,
-      enemy.y,
-      edata.type,
-      knockbackX,
-      knockbackY,
-      isCrit,
-      enemyDisplaySize
-    );
 
     // fx_lightning_sheet: chain lightning between enemies (stretched in X, 0.25s per hit)
     if (canChain && Math.random() < 0.65) {
       this.triggerChainLightning(enemy, Math.round(damage * 0.7));
     }
 
-    // Check that enemy wasn't already killed/destroyed inside chain reaction
+    // Blood splash ONLY appears when an enemy dies (inside killEnemy -> spawnEnemyDeathGore)
     if (!enemy.active || !enemy.scene || edata.hp <= 0) {
       if (edata.hp <= 0 && enemy.active && enemy.scene) {
-        this.killEnemy(enemy, edata);
+        this.killEnemy(enemy, edata, knockbackX, knockbackY, isCrit);
       }
       return;
     }
+
+    // Surviving enemy hit: magic attack splash effect instead of blood splash
+    this.spawnMagicHitSplash(
+      hitX ?? enemy.x,
+      hitY ?? enemy.y,
+      attackStyle,
+      knockbackX,
+      knockbackY,
+      isCrit,
+      enemyDisplaySize
+    );
 
     // Apply knockback
     const resist = edata.type === 'boss' ? 0.01 : edata.type === 'brute' || edata.isElite ? 0.25 : 1;
@@ -5955,11 +6553,12 @@ export class MainScene extends Phaser.Scene {
       enemy.setTint(isHeavyEnemy ? 0xff4d5a : 0xf2a93b);
       gameManager.emitCritImpact({
         damage,
-        x: enemy.x,
-        y: enemy.y,
+        x: hitX ?? enemy.x,
+        y: hitY ?? enemy.y,
         isEliteOrBoss: isHeavyEnemy,
         enemyType: edata.type,
         enemyDisplaySize,
+        attackStyle,
       });
     } else {
       enemy.setTint(0xffffff);
@@ -5971,7 +6570,13 @@ export class MainScene extends Phaser.Scene {
     this.showDamageNumber(enemy.x, enemy.y - 20, damage, isCrit);
   }
 
-  private killEnemy(enemy: Phaser.Physics.Arcade.Sprite, edata: EnemyData) {
+  private killEnemy(
+    enemy: Phaser.Physics.Arcade.Sprite,
+    edata: EnemyData,
+    knockbackX: number = 0,
+    knockbackY: number = 0,
+    isCrit: boolean = false
+  ) {
     this.enemiesKilled++;
     bestiary.recordKill(edata.type);
     dailyMissions.recordIncrement('kill_enemies', 1);
@@ -6013,8 +6618,18 @@ export class MainScene extends Phaser.Scene {
     // fx_death_sheet: faint glow on enemy death (30% alpha, 60% scale)
     this.spawnDeathEffect(enemy.x, enemy.y, edata.type, enemy.scale);
 
-    // Enemy death gore, variant chips/embers/mist & floor stain decals
-    this.spawnEnemyDeathGore(enemy.x, enemy.y, edata.type, enemy.scale, Boolean(edata.isElite));
+    // Enemy death gore: blood_pack + blood splash for bleeding enemies, stone chips / cyan mist for brute & wisp
+    this.spawnEnemyDeathGore(
+      enemy.x,
+      enemy.y,
+      edata.type,
+      enemy.scale,
+      Boolean(edata.isElite),
+      Math.max(enemy.displayWidth || 0, enemy.displayHeight || 0),
+      knockbackX,
+      knockbackY,
+      isCrit
+    );
 
     // Drop XP Gem (+50% during Darkness Falls event; Elites scatter extra bonus XP orbs)
     const xpMult =
@@ -6086,27 +6701,15 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // Boss defeat clears boss HUD & switches back to intense/gameplay music so survival run continues
+    // Boss defeat completes Stage 1 and ends the run with difficulty gold rewards
     if (edata.type === 'boss') {
       this.activeBoss = null;
-      this.nextSpawnTime = this.simTimeMs + 1500;
       gameManager.emitBossUpdate(null);
-      soundManager.playLevelUp();
-      if (this.runTime >= SPAWN_TIMELINE.feel.intenseMusicTimeSec) {
-        this.hasCrossfadedToIntense = true;
-        soundManager.playIntense();
-      } else {
-        soundManager.playGameplay();
-      }
       this.tweens.killTweensOf(enemy);
       enemy.off(Phaser.Animations.Events.ANIMATION_UPDATE);
       enemy.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
       enemy.destroy();
-      if (this.pendingBloodFogTier > 0) {
-        const waveTier = this.pendingBloodFogTier;
-        this.pendingBloodFogTier = 0;
-        this.triggerBloodFogWave(waveTier);
-      }
+      this.triggerStageVictory();
       return;
     }
 
@@ -6114,7 +6717,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private triggerBloodFogWave(tier: number): void {
-    // Defer Blood Fog surge wave while Boss is active so waves stay paused during Boss fights
+    // Defer Blood Fog surge wave while Boss is active so regular waves remain paused
     if (this.activeBoss && this.activeBoss.active) {
       this.pendingBloodFogTier = Math.max(this.pendingBloodFogTier, tier);
       return;
@@ -6226,6 +6829,14 @@ export class MainScene extends Phaser.Scene {
     );
     pickup.setScale(baseScale);
     pickup.setAlpha(1);
+    const pAny = pickup as unknown as {
+      __pickupType?: 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard';
+      __pickupLife?: number;
+      __pickupBaseScale?: number;
+    };
+    pAny.__pickupType = type;
+    pAny.__pickupLife = 0;
+    pAny.__pickupBaseScale = baseScale;
     pickup.setData('type', type);
     pickup.setData('value', value);
     pickup.setData('life', 0);
@@ -6234,7 +6845,7 @@ export class MainScene extends Phaser.Scene {
 
   private updatePickups(delta: number) {
     if (!this.pickupsGroup) return;
-    const pickups = [...(this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
+    const pickups = this.fillScratchFromGroup(this.pickupsGroup, this.pickupsScratch);
     const magnetDist = this.playerStats.magnetRadius;
     const magnetDistSq = magnetDist * magnetDist;
     const dtSec = delta * 0.001;
@@ -6243,7 +6854,14 @@ export class MainScene extends Phaser.Scene {
     for (let i = 0; i < pickups.length; i++) {
       const p = pickups[i];
       if (!p || !p.active || !p.scene) continue;
-      const type = p.getData('type') as 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard';
+      const pAny = p as unknown as {
+        __pickupType?: 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard';
+        __pickupLife?: number;
+        __pickupBaseScale?: number;
+      };
+      const type =
+        pAny.__pickupType ||
+        (p.getData('type') as 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard');
 
       // XP gems expire after 12s, Red Shards after 16s, Coins after 45s
       if (type === 'gem' || type === 'red_shard' || type === 'coin') {
@@ -6253,19 +6871,19 @@ export class MainScene extends Phaser.Scene {
             : type === 'coin'
               ? 45000
               : SPAWN_TIMELINE.pressure.gemExpireMs;
-        const life = ((p.getData('life') as number) || 0) + delta;
+        const life = (pAny.__pickupLife ?? 0) + delta;
         if (life >= expireMs) {
           this.releasePickup(p);
           continue;
         }
-        p.setData('life', life);
+        pAny.__pickupLife = life;
         if (life >= expireMs - 3000) {
           p.setAlpha(Math.sin(life * 0.025) > 0 ? 0.9 : 0.25);
         }
       }
 
       if (type === 'chest' || type === 'light_shard' || type === 'red_shard') {
-        const baseScale = (p.getData('baseScale') as number) || 0.95;
+        const baseScale = pAny.__pickupBaseScale || 0.95;
         p.setScale(baseScale * (1 + pulseWave));
       }
 
@@ -6285,7 +6903,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private handlePlayerPickupOverlap(_player: Phaser.Physics.Arcade.Sprite, pickup: Phaser.Physics.Arcade.Sprite) {
-    if (this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
+    if (this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) return;
     if (!pickup || !pickup.active || !pickup.scene) return;
     const type = pickup.getData('type');
     const value = pickup.getData('value') || 1;
@@ -6406,7 +7024,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private triggerLevelUp() {
-    if (this.isDead || this.isGamePaused || !this.sys?.isActive() || !this.player?.active) return;
+    if (this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive() || !this.player?.active) return;
     this.levelUpPulseSeq++;
     soundManager.playLevelUp();
     haptics.onLevelUp();
@@ -6422,8 +7040,9 @@ export class MainScene extends Phaser.Scene {
           this.playerStats.damageMultiplier
       );
       const knockbackForce = LIGHT.progression.lightBurst.knockback;
-      const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
-      for (const e of enemies) {
+      const enemies = this.fillScratchFromGroup(this.enemiesGroup, this.enemiesScratch);
+      for (let i = 0; i < enemies.length; i++) {
+        const e = enemies[i];
         if (!e || !e.active || !e.scene) continue;
         const dist = Phaser.Math.Distance.Between(this.player.x, this.player.y, e.x, e.y);
         if (dist <= burstRadius) {
@@ -6434,11 +7053,12 @@ export class MainScene extends Phaser.Scene {
             false,
             Math.cos(ang) * knockbackForce,
             Math.sin(ang) * knockbackForce,
-            false
+            false,
+            'light_burst'
           );
         }
       }
-      this.spawnParticleBurst(this.player.x, this.player.y, 28, 'fx_ring', 180, 380, 0.25, 0.55, 0x5de4ff);
+      this.spawnParticleBurst(this.player.x, this.player.y, 10, 'fx_ring', 170, 340, 0.20, 0.40, 0x5de4ff, 340, 0.50);
       soundManager.playRingPulse();
     }
 
@@ -6454,7 +7074,7 @@ export class MainScene extends Phaser.Scene {
       }
     }, 300);
 
-    this.spawnParticleBurst(this.player.x, this.player.y, 35, 'fx_spark', 120, 320, 0.25, 0.5);
+    this.spawnParticleBurst(this.player.x, this.player.y, 14, 'fx_spark', 110, 280, 0.18, 0.36, undefined, 320, 0.56);
 
     // Pause physics and present 3 upgrade cards
     this.isGamePaused = true;
@@ -6707,7 +7327,7 @@ export class MainScene extends Phaser.Scene {
   // Player Damage & Death
   // -------------------------------------------------------------
   private handlePlayerEnemyOverlap(_player: Phaser.Physics.Arcade.Sprite, enemy: Phaser.Physics.Arcade.Sprite) {
-    if (this.isInvulnerable || this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
+    if (this.isInvulnerable || this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) return;
     if (!enemy || !enemy.active || !enemy.scene) return;
     const edata = enemy.getData('data') as EnemyData;
     if (!edata) return;
@@ -6716,7 +7336,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private damagePlayer(amount: number) {
-    if (this.isInvulnerable || this.isDead || this.isGamePaused || !this.sys?.isActive()) return;
+    if (this.isInvulnerable || this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) return;
 
     // Blend by playing attack only while the player is not hit, then return to walk
     if (this.isAttacking) {
@@ -6770,7 +7390,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private handlePlayerDeath() {
-    if (this.isDead || !this.sys?.isActive()) return;
+    if (this.isDead || this.isVictoryEnded || !this.sys?.isActive()) return;
 
     // Check Undying Ember (Revival meta upgrade)
     if (this.playerStats.hasRevive && !this.playerStats.usedRevive) {
@@ -6796,11 +7416,13 @@ export class MainScene extends Phaser.Scene {
       this.showFloatingCallout(this.player.x, this.player.y - 54, 'UNDYING EMBER!', '#f2a93b');
 
       // Push all nearby enemies away
-      const enemies = [...(this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[])];
-      for (const e of enemies) {
+      const enemies = this.fillScratchFromGroup(this.enemiesGroup, this.enemiesScratch);
+      for (let i = 0; i < enemies.length; i++) {
+        const e = enemies[i];
         if (!e || !e.active || !e.scene) continue;
         const angle = Phaser.Math.Angle.Between(this.player.x, this.player.y, e.x, e.y);
-        const edata = e.getData('data') as EnemyData;
+        const edata = ((e as unknown as { __enemyData?: EnemyData }).__enemyData ||
+          e.getData('data')) as EnemyData;
         if (edata) {
           edata.knockbackX = Math.cos(angle) * 380;
           edata.knockbackY = Math.sin(angle) * 380;
@@ -6818,6 +7440,7 @@ export class MainScene extends Phaser.Scene {
     }
     this.physics.pause();
 
+    soundManager.unduckMusic(100);
     soundManager.playGameOverStinger();
 
     // Bank earned coins & flush Daily Missions + Bestiary on run completion
@@ -6849,6 +7472,81 @@ export class MainScene extends Phaser.Scene {
         };
         gameManager.emitGameOver(stats);
       },
+    });
+  }
+
+  private triggerStageVictory() {
+    if (this.isVictoryEnded || this.isDead || !this.sys?.isActive()) return;
+    this.isVictoryEnded = true;
+    this.isInvulnerable = true;
+    this.isAttacking = false;
+    this.muzzleFiredThisAttack = false;
+    this.pendingEvent = null;
+    this.pendingBloodFogTier = 0;
+
+    if (this.levelUpSlowMoTimer !== null) {
+      window.clearTimeout(this.levelUpSlowMoTimer);
+      this.levelUpSlowMoTimer = null;
+    }
+    if (this.time) {
+      this.time.timeScale = 1.0;
+    }
+
+    if (this.player?.anims) {
+      this.player.anims.stop();
+      this.player.setTexture('player_walk', 0);
+    }
+    this.physics.pause();
+
+    soundManager.unduckMusic(100);
+    soundManager.playLevelUp();
+    haptics.onLevelUp();
+
+    // Grant difficulty-scaled Stage 1 clear gold reward immediately so it is safely persisted
+    const stageRewardGold = this.difficultyPreset.stageClearRewardGold;
+    const runCoinsCollected = this.coinsEarned;
+    this.coinsEarned = runCoinsCollected + stageRewardGold;
+
+    saveCoins(getSavedCoins() + this.coinsEarned);
+    dailyMissions.recordIncrement('collect_coins', stageRewardGold);
+    achievements.recordIncrement('totalCoinsEarned', stageRewardGold);
+    dailyMissions.recordIncrement('play_runs', 1);
+    achievements.recordIncrement('runsCompleted', 1);
+    dailyMissions.flush();
+    achievements.flush();
+    bestiary.flush();
+    this.emitStatsUpdate();
+
+    // Celebratory golden pulse & immediate Stage 1 Complete notification
+    if (this.player && this.player.active) {
+      this.spawnLevelUpRingEffect(this.player.x, this.player.y);
+      this.spawnParticleBurst(this.player.x, this.player.y, 14, 'fx_ring', 130, 290, 0.18, 0.36, 0xf2c464, 420, 0.68);
+      this.spawnParticleBurst(this.player.x, this.player.y, 16, 'fx_spark', 110, 260, 0.16, 0.32, 0xffd700, 440, 0.72);
+      this.showFloatingCallout(this.player.x, this.player.y - 54, 'STAGE 1 COMPLETE!', '#f2c464');
+    }
+
+    gameManager.emitEventWarning({
+      title: 'STAGE 1 COMPLETE!',
+      subtitle: `${this.difficultyPreset.name} Mode · +${stageRewardGold.toLocaleString()} Gold Reward`,
+    });
+
+    this.time.delayedCall(1250, () => {
+      if (!this.sys?.isActive()) return;
+      gameManager.emitEventWarning(null);
+      const stats: RunStats = {
+        timeSurvived: Math.floor(this.runTime),
+        enemiesKilled: this.enemiesKilled,
+        coinsEarned: this.coinsEarned,
+        runCoinsCollected,
+        stageRewardGold,
+        stageCleared: 1,
+        levelReached: this.playerLevel,
+        damageDealt: this.damageDealt,
+        victory: true,
+        challengesCompleted: this.challengesCompletedCount,
+        difficulty: this.difficultyPreset.id,
+      };
+      gameManager.emitGameOver(stats);
     });
   }
 
@@ -7132,10 +7830,31 @@ export class MainScene extends Phaser.Scene {
     const playerDps = Math.round(recentDamageSum / (windowMs / 1000));
     const currentMinute = Math.floor(this.runTime / 60);
 
-    const dashCooldownProgress =
+    const rawDashProgress =
       this.dashChargesRemaining < this.playerStats.dashCharges && this.playerStats.dashCooldownMs > 0
         ? Math.min(1, this.dashRechargeTimerMs / this.playerStats.dashCooldownMs)
         : 1;
+    const dashCooldownProgress = Math.round(rawDashProgress * 50) / 50;
+
+    let weaponSig = 0;
+    let snapCount = 0;
+    for (const key in this.weapons) {
+      if (Object.prototype.hasOwnProperty.call(this.weapons, key)) {
+        const w = this.weapons[key];
+        weaponSig = (weaponSig * 31 + (w.unlocked ? 100 : 0) + w.level) | 0;
+        snapCount++;
+      }
+    }
+    if (weaponSig !== this.lastWeaponsSig || this.weaponsSnapshot.length !== snapCount) {
+      this.lastWeaponsSig = weaponSig;
+      const nextSnap: WeaponState[] = [];
+      for (const key in this.weapons) {
+        if (Object.prototype.hasOwnProperty.call(this.weapons, key)) {
+          nextSnap.push({ ...this.weapons[key] });
+        }
+      }
+      this.weaponsSnapshot = nextSnap;
+    }
 
     gameManager.emitStats({
       hp: this.playerStats.currentHp,
@@ -7146,7 +7865,7 @@ export class MainScene extends Phaser.Scene {
       time: Math.floor(this.runTime),
       kills: this.enemiesKilled,
       coins: this.coinsEarned,
-      weapons: Object.values(this.weapons),
+      weapons: this.weaponsSnapshot,
       combo: this.comboMultiplier,
       isUnderPressure: this.isUnderPressure,
       lightShardRemainingSec:
@@ -7257,8 +7976,12 @@ export class MainScene extends Phaser.Scene {
     gameManager.emitPauseState(true);
   }
 
+  public isRunFinished(): boolean {
+    return this.isDead || this.isVictoryEnded;
+  }
+
   public resumeGame() {
-    if (!this.sys?.isActive() || this.isDead) return;
+    if (!this.sys?.isActive() || this.isDead || this.isVictoryEnded) return;
     if (this.levelUpSlowMoTimer !== null) {
       window.clearTimeout(this.levelUpSlowMoTimer);
       this.levelUpSlowMoTimer = null;

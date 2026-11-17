@@ -7,6 +7,7 @@ import {
 } from './types';
 
 const FLUSH_DEBOUNCE_MS = 1000;
+export const ELITE_SLAYER_MILESTONE_STEP = 10_000;
 
 export const ACHIEVEMENTS: AchievementDefinition[] = [
   // Total Kills milestones
@@ -145,6 +146,8 @@ class AchievementsManager {
   private subscribers: AchievementsSubscriber[] = [];
   private unlockSubscribers: AchievementUnlockedSubscriber[] = [];
   private flushTimer: number | null = null;
+  private notifyTimer: number | null = null;
+  private lastNotifyAt = 0;
   private dirty = false;
 
   constructor() {
@@ -156,17 +159,17 @@ class AchievementsManager {
   }
 
   public getUnlockedCount(): number {
-    return this.getState().unlockedIds.length;
+    return saveDataStore.readFastRef().achievements.unlockedIds.length;
   }
 
   public getUnclaimedCount(): number {
-    const state = this.getState();
+    const state = saveDataStore.readFastRef().achievements;
     const claimedSet = new Set(state.claimedIds);
     return state.unlockedIds.filter((id) => !claimedSet.has(id)).length;
   }
 
   public getUnclaimedRewardTotal(): number {
-    const state = this.getState();
+    const state = saveDataStore.readFastRef().achievements;
     const unlockedSet = new Set(state.unlockedIds);
     const claimedSet = new Set(state.claimedIds);
     return ACHIEVEMENTS.filter((a) => unlockedSet.has(a.id) && !claimedSet.has(a.id)).reduce(
@@ -190,7 +193,27 @@ class AchievementsManager {
   }
 
   private notifySubscribers(state: AchievementsProgressState): void {
+    if (this.subscribers.length === 0) return;
+    if (this.notifyTimer !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.notifyTimer);
+      this.notifyTimer = null;
+    }
+    this.lastNotifyAt = typeof performance !== 'undefined' ? performance.now() : Date.now();
     this.subscribers.forEach((cb) => cb(state));
+  }
+
+  private scheduleNotify(): void {
+    if (this.subscribers.length === 0) return;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now - this.lastNotifyAt >= 120) {
+      this.notifySubscribers(saveDataStore.readFastRef().achievements);
+      return;
+    }
+    if (this.notifyTimer !== null || typeof window === 'undefined') return;
+    this.notifyTimer = window.setTimeout(() => {
+      this.notifyTimer = null;
+      this.notifySubscribers(saveDataStore.readFastRef().achievements);
+    }, 125);
   }
 
   private scheduleFlush(): void {
@@ -210,6 +233,11 @@ class AchievementsManager {
       window.clearTimeout(this.flushTimer);
       this.flushTimer = null;
     }
+    if (this.notifyTimer !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.notifyTimer);
+      this.notifyTimer = null;
+      this.notifySubscribers(saveDataStore.readFastRef().achievements);
+    }
     if (this.dirty) {
       this.dirty = false;
       saveDataStore.flush();
@@ -218,7 +246,7 @@ class AchievementsManager {
 
   private reconcileUnlocks(emitEvents: boolean): void {
     const newlyUnlocked: AchievementDefinition[] = [];
-    const current = this.getState();
+    const current = saveDataStore.readFastRef().achievements;
     const unlockedSet = new Set(current.unlockedIds);
 
     for (const ach of ACHIEVEMENTS) {
@@ -246,63 +274,97 @@ class AchievementsManager {
   public recordIncrement(statKey: AchievementStatKey, delta: number): void {
     if (delta <= 0) return;
 
-    const current = this.getState();
-    const nextValue = current.stats[statKey] + Math.floor(delta);
-    const unlockedSet = new Set(current.unlockedIds);
-    const newlyUnlocked = ACHIEVEMENTS.filter(
-      (ach) => ach.statKey === statKey && !unlockedSet.has(ach.id) && nextValue >= ach.target
-    );
+    const current = saveDataStore.readFastRef().achievements;
+    const prevValue = current.stats[statKey];
+    const nextValue = prevValue + Math.floor(delta);
+    let hasNewlyUnlocked = false;
+    const newlyUnlocked: AchievementDefinition[] = [];
 
-    const writeNow = newlyUnlocked.length > 0;
-    const updated = saveDataStore.update((draft) => {
-      draft.achievements.stats[statKey] = nextValue;
-      if (newlyUnlocked.length > 0) {
-        const set = new Set(draft.achievements.unlockedIds);
-        newlyUnlocked.forEach((ach) => set.add(ach.id));
-        draft.achievements.unlockedIds = Array.from(set);
+    for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+      const ach = ACHIEVEMENTS[i];
+      if (
+        ach.statKey === statKey &&
+        nextValue >= ach.target &&
+        prevValue < ach.target &&
+        !current.unlockedIds.includes(ach.id)
+      ) {
+        newlyUnlocked.push(ach);
+        hasNewlyUnlocked = true;
+      }
+    }
+
+    const crossedEliteSlayerMilestone =
+      statKey === 'totalKills' &&
+      Math.floor(nextValue / ELITE_SLAYER_MILESTONE_STEP) >
+        Math.floor(prevValue / ELITE_SLAYER_MILESTONE_STEP);
+    const writeNow = hasNewlyUnlocked || crossedEliteSlayerMilestone;
+
+    const updated = saveDataStore.mutateFast((cache) => {
+      cache.achievements.stats[statKey] = nextValue;
+      if (hasNewlyUnlocked) {
+        for (let i = 0; i < newlyUnlocked.length; i++) {
+          const id = newlyUnlocked[i].id;
+          if (!cache.achievements.unlockedIds.includes(id)) {
+            cache.achievements.unlockedIds.push(id);
+          }
+        }
       }
     }, writeNow);
 
     if (writeNow) {
       this.dirty = false;
       newlyUnlocked.forEach((ach) => this.unlockSubscribers.forEach((cb) => cb(ach)));
+      this.notifySubscribers(updated.achievements);
     } else {
       this.scheduleFlush();
+      this.scheduleNotify();
     }
-
-    this.notifySubscribers(updated.achievements);
   }
 
   public recordMax(statKey: AchievementStatKey, value: number): void {
     if (value <= 0) return;
 
     const cleanValue = Math.floor(value);
-    const current = this.getState();
-    if (cleanValue <= current.stats[statKey]) return;
+    const current = saveDataStore.readFastRef().achievements;
+    const prevValue = current.stats[statKey];
+    if (cleanValue <= prevValue) return;
 
-    const unlockedSet = new Set(current.unlockedIds);
-    const newlyUnlocked = ACHIEVEMENTS.filter(
-      (ach) => ach.statKey === statKey && !unlockedSet.has(ach.id) && cleanValue >= ach.target
-    );
+    const newlyUnlocked: AchievementDefinition[] = [];
+    for (let i = 0; i < ACHIEVEMENTS.length; i++) {
+      const ach = ACHIEVEMENTS[i];
+      if (
+        ach.statKey === statKey &&
+        cleanValue >= ach.target &&
+        prevValue < ach.target &&
+        !current.unlockedIds.includes(ach.id)
+      ) {
+        newlyUnlocked.push(ach);
+      }
+    }
 
     const writeNow = newlyUnlocked.length > 0;
-    const updated = saveDataStore.update((draft) => {
-      draft.achievements.stats[statKey] = Math.max(draft.achievements.stats[statKey], cleanValue);
-      if (newlyUnlocked.length > 0) {
-        const set = new Set(draft.achievements.unlockedIds);
-        newlyUnlocked.forEach((ach) => set.add(ach.id));
-        draft.achievements.unlockedIds = Array.from(set);
+    const updated = saveDataStore.mutateFast((cache) => {
+      if (cleanValue > cache.achievements.stats[statKey]) {
+        cache.achievements.stats[statKey] = cleanValue;
+      }
+      if (writeNow) {
+        for (let i = 0; i < newlyUnlocked.length; i++) {
+          const id = newlyUnlocked[i].id;
+          if (!cache.achievements.unlockedIds.includes(id)) {
+            cache.achievements.unlockedIds.push(id);
+          }
+        }
       }
     }, writeNow);
 
     if (writeNow) {
       this.dirty = false;
       newlyUnlocked.forEach((ach) => this.unlockSubscribers.forEach((cb) => cb(ach)));
+      this.notifySubscribers(updated.achievements);
     } else {
       this.scheduleFlush();
+      this.scheduleNotify();
     }
-
-    this.notifySubscribers(updated.achievements);
   }
 
   public claimAchievement(achievementId: string): {

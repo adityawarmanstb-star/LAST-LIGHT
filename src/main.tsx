@@ -1,3 +1,5 @@
+import '@fontsource/cinzel/latin-600.css';
+import '@fontsource/cinzel/latin-700.css';
 import '@fontsource/cinzel-decorative/latin-700.css';
 import '@fontsource/cinzel-decorative/latin-900.css';
 import '@fontsource/almendra/latin-400.css';

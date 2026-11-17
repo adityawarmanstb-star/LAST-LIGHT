@@ -100,6 +100,9 @@ export interface RunStats {
   victory: boolean;
   challengesCompleted?: number;
   difficulty?: GameDifficultyId;
+  stageCleared?: number;
+  stageRewardGold?: number;
+  runCoinsCollected?: number;
 }
 
 export type DynamicChallengeId =

@@ -12,8 +12,8 @@ export const BASE_RELIC_SLOTS = 2;
 export const MAX_RELIC_SLOTS = 4;
 
 export const RELIC_SLOT_UNLOCK_COSTS: Record<number, number> = {
-  3: 2,
-  4: 4,
+  3: 3,
+  4: 6,
 };
 
 export interface RelicRarityMeta {
@@ -94,7 +94,7 @@ export const RELICS: RelicDefinition[] = [
       'Stacks multiplicatively with Soul Attractor shop upgrades & Magnet Pull',
       'Tempest Set (2/2): -15% Dash Cooldown & +10% Move Speed',
     ],
-    cost: 75,
+    cost: 1500,
     icon: 'magnet',
     accentColor: '#8892a0',
   },
@@ -112,7 +112,7 @@ export const RELICS: RelicDefinition[] = [
       'Reduces Dash recharge cooldown from 3.0s down to 2.6s per charge',
       'Tempest Set (2/2): -15% Dash Cooldown & +10% Move Speed',
     ],
-    cost: 95,
+    cost: 2500,
     icon: 'wind',
     accentColor: '#5de4ff',
   },
@@ -130,7 +130,7 @@ export const RELICS: RelicDefinition[] = [
       'Restores +15 HP instantly upon slaying any Elite or Boss enemy',
       'Shadow Set (2/2): +35% Crit Damage & +8% Crit Chance',
     ],
-    cost: 115,
+    cost: 3500,
     icon: 'heart',
     accentColor: '#5de4ff',
   },
@@ -148,7 +148,7 @@ export const RELICS: RelicDefinition[] = [
       '+12% Critical Hit Chance (total 17% base crit for 1.5x damage)',
       'Fire Set (2/2): +15% Weapon Damage & +15% Light & Range',
     ],
-    cost: 140,
+    cost: 5000,
     icon: 'sun',
     accentColor: '#c084fc',
   },
@@ -166,7 +166,7 @@ export const RELICS: RelicDefinition[] = [
       '-12% global weapon cooldowns for faster bolts, rings, sparks & shells',
       'Fire Set (2/2): +15% Weapon Damage & +15% Light Radius',
     ],
-    cost: 160,
+    cost: 6500,
     icon: 'zap',
     accentColor: '#c084fc',
   },
@@ -184,7 +184,7 @@ export const RELICS: RelicDefinition[] = [
       '+1 Projectile Pierce so shots punch through extra enemies per volley',
       'Shadow Set (2/2): +35% Crit Damage & +8% Crit Chance (-10% Max HP base)',
     ],
-    cost: 200,
+    cost: 9500,
     icon: 'sword',
     accentColor: '#f2a93b',
   },

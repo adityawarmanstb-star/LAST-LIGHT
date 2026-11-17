@@ -1,6 +1,10 @@
 import Phaser from 'phaser';
-import { gameManager } from './GameManager';
-import { LOGICAL_HEIGHT, LOGICAL_WIDTH, getScrollZeroOffset } from './PerformanceEngine';
+import {
+  LOGICAL_HEIGHT,
+  LOGICAL_WIDTH,
+  getAdaptiveFxBudget,
+  getScrollZeroOffset,
+} from './PerformanceEngine';
 
 export type WeatherKind = 'embers' | 'rain' | 'storm' | 'ash';
 
@@ -62,7 +66,6 @@ const TIME_CYCLE_DURATION_SEC = 360;
 const WEATHER_DURATION_MS = 55000;
 const WEATHER_FADE_MS = 3200;
 const MAX_WEATHER_PARTICLES = 44;
-const LOW_QUALITY_WEATHER_PARTICLES = 20;
 
 function lerpHexColor(c1: number, c2: number, t: number): number {
   const clamped = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -81,8 +84,7 @@ function lerpHexColor(c1: number, c2: number, t: number): number {
 export class AtmosphereOverlay {
   private scene: Phaser.Scene;
   private floorTintImage: Phaser.GameObjects.Image;
-  private horizonTopUpper: Phaser.GameObjects.Image;
-  private horizonTopLower: Phaser.GameObjects.Image;
+  private horizonTop: Phaser.GameObjects.Image;
   private horizonBottom: Phaser.GameObjects.Image;
   private lightningOverlay: Phaser.GameObjects.Image;
   private particles: WeatherParticle[] = [];
@@ -97,6 +99,13 @@ export class AtmosphereOverlay {
   private bossBloodMoonBlend: number = 0;
   private lightningAlpha: number = 0;
   private nextLightningMs: number = 9000;
+  private colorUpdateAccumMs: number = 200;
+  private lastOffsetX: number = -99999;
+  private lastOffsetY: number = -99999;
+  private lastTintColor: number = -1;
+  private lastTintAlpha: number = -1;
+  private lastHorizonColor: number = -1;
+  private lastHorizonAlpha: number = -1;
 
   constructor(scene: Phaser.Scene) {
     this.scene = scene;
@@ -113,26 +122,19 @@ export class AtmosphereOverlay {
     this.floorTintImage.disableInteractive();
 
     const bandH = Math.round(LOGICAL_HEIGHT * 0.18);
-    this.horizonTopUpper = scene.add
-      .image(0, 0, 'atmo_white_pixel')
+    this.horizonTop = scene.add
+      .image(0, 0, 'atmo_horizon_grad')
       .setOrigin(0, 0)
-      .setDisplaySize(LOGICAL_WIDTH, bandH * 0.55)
+      .setDisplaySize(LOGICAL_WIDTH, bandH)
       .setDepth(33)
       .setScrollFactor(0);
-    this.horizonTopUpper.disableInteractive();
-
-    this.horizonTopLower = scene.add
-      .image(0, bandH * 0.55, 'atmo_white_pixel')
-      .setOrigin(0, 0)
-      .setDisplaySize(LOGICAL_WIDTH, bandH * 0.45)
-      .setDepth(33)
-      .setScrollFactor(0);
-    this.horizonTopLower.disableInteractive();
+    this.horizonTop.disableInteractive();
 
     this.horizonBottom = scene.add
-      .image(0, LOGICAL_HEIGHT - bandH * 0.5, 'atmo_white_pixel')
+      .image(0, LOGICAL_HEIGHT, 'atmo_horizon_grad')
       .setOrigin(0, 0)
-      .setDisplaySize(LOGICAL_WIDTH, bandH * 0.5)
+      .setDisplaySize(LOGICAL_WIDTH, bandH * 0.55)
+      .setFlipY(true)
       .setDepth(33)
       .setScrollFactor(0);
     this.horizonBottom.disableInteractive();
@@ -160,6 +162,20 @@ export class AtmosphereOverlay {
         const ctx = tex.getContext();
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, 4, 4);
+        tex.refresh();
+      }
+    }
+
+    if (!texMgr.exists('atmo_horizon_grad')) {
+      const tex = texMgr.createCanvas('atmo_horizon_grad', 4, 64);
+      if (tex) {
+        const ctx = tex.getContext();
+        const grad = ctx.createLinearGradient(0, 0, 0, 64);
+        grad.addColorStop(0, 'rgba(255,255,255,0.58)');
+        grad.addColorStop(0.55, 'rgba(255,255,255,0.24)');
+        grad.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, 4, 64);
         tex.refresh();
       }
     }
@@ -312,56 +328,75 @@ export class AtmosphereOverlay {
     const offset = getScrollZeroOffset(this.scene.cameras.main);
     const bandH = Math.round(h * 0.18);
 
-    // 1. Time-of-Day Cycle
-    const cycleRatio = (runTimeSec % TIME_CYCLE_DURATION_SEC) / TIME_CYCLE_DURATION_SEC;
-    const phaseScaled = cycleRatio * TIME_OF_DAY_PHASES.length;
-    const phaseIdxA = Math.floor(phaseScaled) % TIME_OF_DAY_PHASES.length;
-    const phaseIdxB = (phaseIdxA + 1) % TIME_OF_DAY_PHASES.length;
-    const phaseT = phaseScaled - Math.floor(phaseScaled);
-
-    const phaseA = TIME_OF_DAY_PHASES[phaseIdxA];
-    const phaseB = TIME_OF_DAY_PHASES[phaseIdxB];
-
-    let tintColor = lerpHexColor(phaseA.tintColor, phaseB.tintColor, phaseT);
-    let tintAlpha = Phaser.Math.Linear(phaseA.tintAlpha, phaseB.tintAlpha, phaseT);
-    let horizonColor = lerpHexColor(phaseA.horizonColor, phaseB.horizonColor, phaseT);
-    let horizonAlpha = Phaser.Math.Linear(phaseA.horizonAlpha, phaseB.horizonAlpha, phaseT);
-
-    const targetBloodMoon = isBossActive || isDarknessFalls ? 1 : 0;
-    this.bossBloodMoonBlend = Phaser.Math.Linear(
-      this.bossBloodMoonBlend,
-      targetBloodMoon,
-      Math.min(1, deltaMs / 1800)
-    );
-    if (this.bossBloodMoonBlend > 0.01) {
-      const bloodMoon = TIME_OF_DAY_PHASES[2];
-      tintColor = lerpHexColor(tintColor, bloodMoon.tintColor, this.bossBloodMoonBlend * 0.72);
-      tintAlpha = Phaser.Math.Linear(tintAlpha, bloodMoon.tintAlpha, this.bossBloodMoonBlend * 0.72);
-      horizonColor = lerpHexColor(
-        horizonColor,
-        bloodMoon.horizonColor,
-        this.bossBloodMoonBlend * 0.78
-      );
-      horizonAlpha = Phaser.Math.Linear(
-        horizonAlpha,
-        bloodMoon.horizonAlpha,
-        this.bossBloodMoonBlend * 0.78
-      );
+    // 1. Time-of-Day Cycle (throttled every ~120ms and dirty-checked to avoid redundant GPU state updates)
+    const offsetChanged =
+      Math.abs(offset.x - this.lastOffsetX) > 0.01 ||
+      Math.abs(offset.y - this.lastOffsetY) > 0.01;
+    if (offsetChanged) {
+      this.lastOffsetX = offset.x;
+      this.lastOffsetY = offset.y;
+      this.floorTintImage.setPosition(offset.x, offset.y);
+      this.horizonTop.setPosition(offset.x, offset.y);
+      this.horizonBottom.setPosition(offset.x, offset.y + h - bandH * 0.55);
     }
 
-    this.floorTintImage.setPosition(offset.x, offset.y).setTint(tintColor).setAlpha(tintAlpha);
-    this.horizonTopUpper
-      .setPosition(offset.x, offset.y)
-      .setTint(horizonColor)
-      .setAlpha(horizonAlpha * 0.55);
-    this.horizonTopLower
-      .setPosition(offset.x, offset.y + bandH * 0.55)
-      .setTint(horizonColor)
-      .setAlpha(horizonAlpha * 0.25);
-    this.horizonBottom
-      .setPosition(offset.x, offset.y + h - bandH * 0.5)
-      .setTint(horizonColor)
-      .setAlpha(horizonAlpha * 0.45);
+    this.colorUpdateAccumMs += deltaMs;
+    const targetBloodMoon = isBossActive || isDarknessFalls ? 1 : 0;
+    const bloodMoonSettled = Math.abs(this.bossBloodMoonBlend - targetBloodMoon) < 0.005;
+    if (this.colorUpdateAccumMs >= 120 || !bloodMoonSettled) {
+      const stepMs = this.colorUpdateAccumMs;
+      this.colorUpdateAccumMs = 0;
+
+      const cycleRatio = (runTimeSec % TIME_CYCLE_DURATION_SEC) / TIME_CYCLE_DURATION_SEC;
+      const phaseScaled = cycleRatio * TIME_OF_DAY_PHASES.length;
+      const phaseIdxA = Math.floor(phaseScaled) % TIME_OF_DAY_PHASES.length;
+      const phaseIdxB = (phaseIdxA + 1) % TIME_OF_DAY_PHASES.length;
+      const phaseT = phaseScaled - Math.floor(phaseScaled);
+
+      const phaseA = TIME_OF_DAY_PHASES[phaseIdxA];
+      const phaseB = TIME_OF_DAY_PHASES[phaseIdxB];
+
+      let tintColor = lerpHexColor(phaseA.tintColor, phaseB.tintColor, phaseT);
+      let tintAlpha = Phaser.Math.Linear(phaseA.tintAlpha, phaseB.tintAlpha, phaseT);
+      let horizonColor = lerpHexColor(phaseA.horizonColor, phaseB.horizonColor, phaseT);
+      let horizonAlpha = Phaser.Math.Linear(phaseA.horizonAlpha, phaseB.horizonAlpha, phaseT);
+
+      this.bossBloodMoonBlend = Phaser.Math.Linear(
+        this.bossBloodMoonBlend,
+        targetBloodMoon,
+        Math.min(1, stepMs / 1800)
+      );
+      if (this.bossBloodMoonBlend > 0.01) {
+        const bloodMoon = TIME_OF_DAY_PHASES[2];
+        tintColor = lerpHexColor(tintColor, bloodMoon.tintColor, this.bossBloodMoonBlend * 0.72);
+        tintAlpha = Phaser.Math.Linear(tintAlpha, bloodMoon.tintAlpha, this.bossBloodMoonBlend * 0.72);
+        horizonColor = lerpHexColor(
+          horizonColor,
+          bloodMoon.horizonColor,
+          this.bossBloodMoonBlend * 0.78
+        );
+        horizonAlpha = Phaser.Math.Linear(
+          horizonAlpha,
+          bloodMoon.horizonAlpha,
+          this.bossBloodMoonBlend * 0.78
+        );
+      }
+
+      if (tintColor !== this.lastTintColor || Math.abs(tintAlpha - this.lastTintAlpha) > 0.003) {
+        this.lastTintColor = tintColor;
+        this.lastTintAlpha = tintAlpha;
+        this.floorTintImage.setTint(tintColor).setAlpha(tintAlpha);
+      }
+      if (
+        horizonColor !== this.lastHorizonColor ||
+        Math.abs(horizonAlpha - this.lastHorizonAlpha) > 0.003
+      ) {
+        this.lastHorizonColor = horizonColor;
+        this.lastHorizonAlpha = horizonAlpha;
+        this.horizonTop.setTint(horizonColor).setAlpha(horizonAlpha);
+        this.horizonBottom.setTint(horizonColor).setAlpha(horizonAlpha * 0.85);
+      }
+    }
 
     // 2. Dynamic Weather Cycle
     this.weatherElapsedMs += deltaMs;
@@ -406,10 +441,7 @@ export class AtmosphereOverlay {
       this.lightningOverlay.setVisible(false);
     }
 
-    const activeCount =
-      gameManager.getQualityTier() === 'low'
-        ? Math.min(LOW_QUALITY_WEATHER_PARTICLES, this.particles.length)
-        : this.particles.length;
+    const activeCount = Math.min(getAdaptiveFxBudget().weatherParticles, this.particles.length);
 
     const timeSec = this.elapsedMs * 0.001;
     const isEmberOrAsh = activeWeather === 'embers' || activeWeather === 'ash';
@@ -450,8 +482,7 @@ export class AtmosphereOverlay {
 
   public destroy(): void {
     this.floorTintImage.destroy();
-    this.horizonTopUpper.destroy();
-    this.horizonTopLower.destroy();
+    this.horizonTop.destroy();
     this.horizonBottom.destroy();
     this.lightningOverlay.destroy();
     for (let i = 0; i < this.particles.length; i++) {

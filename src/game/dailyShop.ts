@@ -35,9 +35,9 @@ export function getDailyShopDeals(): DailyShopDeal[] {
   const seed = hashSeed(`last-light-deals:${today}`);
   const variant = seed % 3;
 
-  const deal1CoinsCost = variant === 0 ? 45 : variant === 1 ? 40 : 50;
-  const deal2CoinsReward = variant === 0 ? 90 : variant === 1 ? 105 : 85;
-  const deal3CoinsReward = variant === 0 ? 150 : variant === 1 ? 165 : 140;
+  const deal1CoinsCost = variant === 0 ? 450 : variant === 1 ? 400 : 500;
+  const deal2CoinsReward = variant === 0 ? 900 : variant === 1 ? 1050 : 850;
+  const deal3CoinsReward = variant === 0 ? 1500 : variant === 1 ? 1650 : 1400;
   const deal3GemsCost = 2;
 
   return [
@@ -48,7 +48,7 @@ export function getDailyShopDeals(): DailyShopDeal[] {
       rewardLabel: '+1 Gem',
       currency: 'coins',
       cost: deal1CoinsCost,
-      originalCost: 65,
+      originalCost: 650,
       discountBadge: '-30%',
       purchased: boughtSet.has(`${today}_blood_seal`),
       icon: 'gem',
@@ -119,10 +119,10 @@ export function purchaseDailyShopDeal(dealId: string): {
     addRelicSeals(1);
   } else if (deal.id.endsWith('_ash_hoard')) {
     const match = deal.rewardLabel.match(/\+(\d+)/);
-    addCoins(match ? Number(match[1]) : 90);
+    addCoins(match ? Number(match[1]) : 900);
   } else if (deal.id.endsWith('_warden_tribute')) {
     const match = deal.rewardLabel.match(/\+(\d+)/);
-    addCoins(match ? Number(match[1]) : 150);
+    addCoins(match ? Number(match[1]) : 1500);
     addRelicSeals(1);
   }
 

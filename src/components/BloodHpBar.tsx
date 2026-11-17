@@ -14,7 +14,7 @@ interface FallingDrop {
   driftX: number;
 }
 
-export const BloodHpBar: React.FC<BloodHpBarProps> = ({
+export const BloodHpBar: React.FC<BloodHpBarProps> = React.memo(({
   hp,
   maxHp,
   compact = false,
@@ -193,4 +193,4 @@ export const BloodHpBar: React.FC<BloodHpBarProps> = ({
       )}
     </div>
   );
-};
+});

@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { gameManager } from './GameManager';
 
 export const CAMERA_SHAKE_CONFIG = {
   damage: {
@@ -60,6 +61,7 @@ export class CameraController {
    * Triggers a camera shake unless a significantly stronger shake is already active.
    */
   public triggerShake(durationMs: number, intensity: number, force: boolean = false): void {
+    if (!gameManager.isScreenShakeEnabled()) return;
     if (intensity <= 0 || durationMs <= 0) return;
 
     const clampedIntensity = Phaser.Math.Clamp(intensity, 0.0004, 0.03);

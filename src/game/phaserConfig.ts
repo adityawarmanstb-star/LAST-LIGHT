@@ -11,6 +11,7 @@ import {
   getWebGlMaxTextureSize,
   isAndroidOrMobileDevice,
   performanceRuntime,
+  probeWebGlRendererTier,
   resolveRenderScale,
 } from './PerformanceEngine';
 
@@ -69,7 +70,7 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       batchSize: isMobile ? 2048 : 4096,
       maxTextures: -1,
       autoMobileTextures: false,
-      mipmapFilter: isMobile ? 'LINEAR' : 'LINEAR_MIPMAP_LINEAR',
+      mipmapFilter: 'LINEAR',
       mipmapRegeneration: false,
       desynchronized: false,
     },
@@ -82,7 +83,7 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
       default: 'arcade',
       arcade: {
         gravity: { x: 0, y: 0 },
-        fps: isMobile ? 60 : 120,
+        fps: isMobile ? 60 : 90,
         fixedStep: false,
         debug: false,
       },
@@ -123,6 +124,10 @@ export function createPhaserGame(parentContainerId: string): Phaser.Game {
     if (game.canvas) {
       game.canvas.addEventListener('webglcontextlost', onContextLost, false);
       game.canvas.addEventListener('webglcontextrestored', onContextRestored, false);
+    }
+    const renderer = game.renderer;
+    if (renderer && renderer instanceof Phaser.Renderer.WebGL.WebGLRenderer && renderer.gl) {
+      probeWebGlRendererTier(renderer.gl);
     }
     const maxTex = getWebGlMaxTextureSize(game);
     const verifiedScale = resolveRenderScale(gfx.resolutionMode, maxTex);

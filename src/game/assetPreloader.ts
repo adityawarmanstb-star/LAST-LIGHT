@@ -38,6 +38,10 @@ const ARENA_SPRITE_ASSETS: readonly string[] = [
   './assets/aistudio/fx_blade_spin_sheet_46489d73.webp',
   './assets/aistudio/fx_lightning_sheet_03b57c80.webp',
   './assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.webp',
+  // Enemy death blood pack (animated burst, primary stain & 9-frame decal atlas)
+  './assets/aistudio/blood_burst_sheet_71be5646.png',
+  './assets/aistudio/blood_burst_stain_dba05e4d.png',
+  './assets/aistudio/blood_decals_atlas_9700fcd9.png',
 ];
 
 const STATIC_UI_IMAGES: readonly string[] = [

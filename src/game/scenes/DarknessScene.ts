@@ -5,6 +5,7 @@ import { computePointShadowOcclusion, WorldPillarData } from '../ShadowCasterSys
 import {
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
+  getAdaptiveFxBudget,
   getLogicalScrollX,
   getLogicalScrollY,
   isAndroidOrMobileDevice,
@@ -43,9 +44,9 @@ export class DarknessScene extends Phaser.Scene {
   private torchGlowPool: Phaser.GameObjects.Image[] = [];
   private fogLayer1!: Phaser.GameObjects.TileSprite;
   private fogLayer2!: Phaser.GameObjects.TileSprite;
-  private auraSurgeGraphics!: Phaser.GameObjects.Graphics;
-  private eyeGraphics!: Phaser.GameObjects.Graphics;
-  private edgeArrowGraphics!: Phaser.GameObjects.Graphics;
+  private auraSurgeSprite!: Phaser.GameObjects.Image;
+  private alertMarkPool: Phaser.GameObjects.Image[] = [];
+  private edgeArrowPool: Phaser.GameObjects.Image[] = [];
 
   private brightness: number = gameManager.getBrightness();
   private currentRtScale: number = LIGHT.renderTextureScale;
@@ -108,12 +109,11 @@ export class DarknessScene extends Phaser.Scene {
   }
 
   private computeDesiredRtScale(tier: 'high' | 'low'): number {
-    const isMobile = isAndroidOrMobileDevice();
     if (tier === 'low') {
-      return isMobile ? 0.34 : LIGHT.renderTextureScale * 0.56;
+      return getAdaptiveFxBudget().darknessRtScale;
     }
-    if (isMobile) {
-      return 0.42;
+    if (isAndroidOrMobileDevice()) {
+      return getAdaptiveFxBudget().darknessRtScale;
     }
     const mode = performanceRuntime.currentConfig.resolutionMode;
     if (mode === 'ultra_4k') {
@@ -148,6 +148,7 @@ export class DarknessScene extends Phaser.Scene {
     this.ensureRadialLightTexture();
     this.ensureBossAmberTexture();
     this.ensureProceduralFogTexture();
+    this.ensureAlertAndIndicatorTextures();
     upgradeTextureFiltering(this);
 
     const w = LOGICAL_WIDTH;
@@ -212,17 +213,37 @@ export class DarknessScene extends Phaser.Scene {
       .setVisible(false);
     this.stripInteractivity(this.bossGlowSprite);
 
-    // Luminous safe-zone expansion wavefront rendered just above darkRT
-    this.auraSurgeGraphics = this.add.graphics().setDepth(6);
-    this.stripInteractivity(this.auraSurgeGraphics);
+    // Luminous safe-zone expansion wavefront rendered just above darkRT via GPU sprite
+    this.auraSurgeSprite = this.add
+      .image(0, 0, 'dark_aura_ring')
+      .setOrigin(0.5, 0.5)
+      .setBlendMode(Phaser.BlendModes.ADD)
+      .setDepth(6)
+      .setVisible(false);
+    this.stripInteractivity(this.auraSurgeSprite);
 
-    // Glowing monster eye/accent dots visible at distance in the dark
-    this.eyeGraphics = this.add.graphics().setDepth(7);
-    this.stripInteractivity(this.eyeGraphics);
+    // Pre-allocated GPU sprite pools replacing heavy per-frame CPU Graphics triangulation
+    this.alertMarkPool = [];
+    for (let i = 0; i < 48; i++) {
+      const mark = this.add
+        .image(0, 0, 'dark_alert_mark')
+        .setOrigin(0.5, 1)
+        .setDepth(7)
+        .setVisible(false);
+      this.stripInteractivity(mark);
+      this.alertMarkPool.push(mark);
+    }
 
-    // Screen-edge directional arrows pointing toward off-screen or dark Boss & Elites
-    this.edgeArrowGraphics = this.add.graphics().setDepth(8);
-    this.stripInteractivity(this.edgeArrowGraphics);
+    this.edgeArrowPool = [];
+    for (let i = 0; i < 12; i++) {
+      const arrow = this.add
+        .image(0, 0, 'dark_edge_arrow')
+        .setOrigin(0.5, 0.5)
+        .setDepth(8)
+        .setVisible(false);
+      this.stripInteractivity(arrow);
+      this.edgeArrowPool.push(arrow);
+    }
 
     this.unsubBrightness = gameManager.onBrightnessChange((val) => {
       if (!this.sys?.isActive()) return;
@@ -276,12 +297,20 @@ export class DarknessScene extends Phaser.Scene {
         this.unsubGraphics = null;
       }
       this.scale.off('resize', this.handleResize, this);
-      this.auraSurgeGraphics?.destroy();
+      this.auraSurgeSprite?.destroy();
       this.shadowMaskGraphics?.destroy();
       for (let i = 0; i < this.torchGlowPool.length; i++) {
         this.torchGlowPool[i].destroy();
       }
+      for (let i = 0; i < this.alertMarkPool.length; i++) {
+        this.alertMarkPool[i].destroy();
+      }
+      for (let i = 0; i < this.edgeArrowPool.length; i++) {
+        this.edgeArrowPool[i].destroy();
+      }
       this.torchGlowPool = [];
+      this.alertMarkPool = [];
+      this.edgeArrowPool = [];
     });
 
     // Guarantee UIScene stays strictly above DarknessScene
@@ -381,6 +410,96 @@ export class DarknessScene extends Phaser.Scene {
       }
     }
     tex.refresh();
+  }
+
+  private ensureAlertAndIndicatorTextures() {
+    if (!this.textures.exists('dark_alert_mark')) {
+      const tex = this.textures.createCanvas('dark_alert_mark', 32, 36);
+      if (tex) {
+        const ctx = tex.getContext();
+        const cx = 16;
+        // Soft outer halo tinted by sprite color
+        const halo = ctx.createRadialGradient(cx, 18, 1, cx, 18, 15);
+        halo.addColorStop(0, 'rgba(255,255,255,0.34)');
+        halo.addColorStop(0.55, 'rgba(255,255,255,0.12)');
+        halo.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = halo;
+        ctx.fillRect(0, 0, 32, 36);
+
+        // Dark drop shadow
+        ctx.fillStyle = 'rgba(7,8,13,0.78)';
+        ctx.beginPath();
+        ctx.roundRect(cx - 2.6 + 1, 7 + 1.2, 5.2, 13.5, 2.2);
+        ctx.arc(cx + 1, 26 + 1.2, 2.8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Main stem + dot (white so sprite tint colors crisply)
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.roundRect(cx - 2.6, 7, 5.2, 13.5, 2.2);
+        ctx.arc(cx, 26, 2.8, 0, Math.PI * 2);
+        ctx.fill();
+        tex.refresh();
+      }
+    }
+
+    if (!this.textures.exists('dark_edge_arrow')) {
+      const tex = this.textures.createCanvas('dark_edge_arrow', 36, 36);
+      if (tex) {
+        const ctx = tex.getContext();
+        const c = 18;
+        const halo = ctx.createRadialGradient(c, c, 2, c, c, 17);
+        halo.addColorStop(0, 'rgba(255,255,255,0.28)');
+        halo.addColorStop(1, 'rgba(255,255,255,0)');
+        ctx.fillStyle = halo;
+        ctx.fillRect(0, 0, 36, 36);
+
+        ctx.beginPath();
+        ctx.moveTo(c + 12, c);
+        ctx.lineTo(c - 8, c + 9.5);
+        ctx.lineTo(c - 8, c - 9.5);
+        ctx.closePath();
+        ctx.fillStyle = '#ffffff';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(11,13,18,0.92)';
+        ctx.stroke();
+        tex.refresh();
+      }
+    }
+
+    if (!this.textures.exists('dark_aura_ring')) {
+      const size = 256;
+      const tex = this.textures.createCanvas('dark_aura_ring', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        const h = size * 0.5;
+        const r = h - 18;
+        ctx.beginPath();
+        ctx.arc(h, h, r * 0.96, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(93, 228, 255, 0.06)';
+        ctx.fill();
+
+        ctx.beginPath();
+        ctx.arc(h, h, r, 0, Math.PI * 2);
+        ctx.lineWidth = 18;
+        ctx.strokeStyle = 'rgba(34, 211, 238, 0.16)';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(h, h, r, 0, Math.PI * 2);
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = 'rgba(125, 243, 255, 0.38)';
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.arc(h, h, r, 0, Math.PI * 2);
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(232, 253, 255, 0.65)';
+        ctx.stroke();
+        tex.refresh();
+      }
+    }
   }
 
   update(_time: number, rawDelta: number) {
@@ -707,7 +826,8 @@ export class DarknessScene extends Phaser.Scene {
         for (let i = 0; i < enemies.length && lightCount < LIGHT.maxLightSources && eliteLightsAdded < 3; i++) {
           const enemy = enemies[i];
           if (!enemy.active) continue;
-          const edata = enemy.getData('data') as { isElite?: boolean } | undefined;
+          const edata = ((enemy as unknown as { __enemyData?: { isElite?: boolean } }).__enemyData ||
+            enemy.getData('data')) as { isElite?: boolean } | undefined;
           if (!edata?.isElite) continue;
           const sx = enemy.x - scrollX;
           const sy = enemy.y - scrollY;
@@ -729,7 +849,8 @@ export class DarknessScene extends Phaser.Scene {
           const sx = proj.x - scrollX;
           const sy = proj.y - scrollY;
           if (sx < -80 || sx > w + 80 || sy < -80 || sy > h + 80) continue;
-          const pdata = proj.getData('data') as { isEnemy?: boolean } | undefined;
+          const pdata = ((proj as unknown as { __projData?: { isEnemy?: boolean } }).__projData ||
+            proj.getData('data')) as { isEnemy?: boolean } | undefined;
           if (pdata?.isEnemy) {
             pushLight(proj.x, proj.y, LIGHT.sources.enemyProjRadius, 0.95);
           } else if (this.playerProjScratch.length < remainingSlots) {
@@ -773,7 +894,7 @@ export class DarknessScene extends Phaser.Scene {
         const sx = p.x - scrollX;
         const sy = p.y - scrollY;
         if (sx < -60 || sx > w + 60 || sy < -60 || sy > h + 60) continue;
-        const pType = p.getData('type');
+        const pType = (p as unknown as { __pickupType?: string }).__pickupType || p.getData('type');
         if (
           pType === 'gem' ||
           pType === 'chest' ||
@@ -872,8 +993,7 @@ export class DarknessScene extends Phaser.Scene {
       }
     }
 
-    // 4.5 Render smooth expanding Safe-Zone Aura Wavefront above darkRT when light grows
-    this.auraSurgeGraphics.clear();
+    // 4.5 Render smooth expanding Safe-Zone Aura Wavefront above darkRT via GPU sprite
     if (this.auraSurgeDurationMs > 0 && this.auraSurgeElapsedMs < this.auraSurgeDurationMs) {
       const p = this.auraSurgeElapsedMs / this.auraSurgeDurationMs;
       const eased = 1 - Math.pow(1 - p, 3);
@@ -881,27 +1001,19 @@ export class DarknessScene extends Phaser.Scene {
       const fadeAlpha = p < 0.18 ? p / 0.18 : Math.pow(1 - (p - 0.18) / 0.82, 1.35);
       const psx = snap.player.x - scrollX;
       const psy = snap.player.y - scrollY;
-
-      if (this.auraSurgeIsMajor) {
-        this.auraSurgeGraphics.fillStyle(0x5de4ff, 0.055 * fadeAlpha);
-        this.auraSurgeGraphics.fillCircle(psx, psy, ringR * 0.97);
-        this.auraSurgeGraphics.lineStyle(18, 0x22d3ee, 0.14 * fadeAlpha);
-        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
-        this.auraSurgeGraphics.lineStyle(6, 0x7df3ff, 0.34 * fadeAlpha);
-        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
-        this.auraSurgeGraphics.lineStyle(2, 0xe8fdff, 0.56 * fadeAlpha);
-        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
-      } else {
-        this.auraSurgeGraphics.lineStyle(10, 0x22d3ee, 0.08 * fadeAlpha);
-        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
-        this.auraSurgeGraphics.lineStyle(2.5, 0x8ef5ff, 0.22 * fadeAlpha);
-        this.auraSurgeGraphics.strokeCircle(psx, psy, ringR);
-      }
+      const diameter = ringR * 2.18;
+      this.auraSurgeSprite
+        .setPosition(psx, psy)
+        .setDisplaySize(diameter, diameter)
+        .setAlpha((this.auraSurgeIsMajor ? 0.92 : 0.45) * fadeAlpha)
+        .setVisible(true);
+    } else if (this.auraSurgeSprite.visible) {
+      this.auraSurgeSprite.setVisible(false);
     }
 
     // 5. Update Enemies Alpha (0.12 outside light -> 1.0 in 0.2s), Glowing Eye Dots & Edge Arrows
-    this.eyeGraphics.clear();
-    this.edgeArrowGraphics.clear();
+    let usedAlertMarks = 0;
+    let usedEdgeArrows = 0;
 
     const pillarItems = snap.pillars?.items ?? [];
     const pillarCount = snap.pillars?.count ?? 0;
@@ -916,7 +1028,9 @@ export class DarknessScene extends Phaser.Scene {
       for (let i = 0; i < enemies.length; i++) {
         const enemy = enemies[i];
         if (!enemy.active) continue;
-        const edata = enemy.getData('data') as
+        const edata = ((enemy as unknown as {
+          __enemyData?: { type: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss'; isElite?: boolean; lightVis?: number };
+        }).__enemyData || enemy.getData('data')) as
           | { type: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss'; isElite?: boolean; lightVis?: number }
           | undefined;
         if (!edata) continue;
@@ -972,8 +1086,7 @@ export class DarknessScene extends Phaser.Scene {
 
         const onScreen = nearView && sx >= 16 && sx <= w - 16 && sy >= 16 && sy <= h - 16;
 
-        if (onScreen && nextVis < 0.9) {
-          // Glowing "!" alert indicator visible on enemies lurking in the dark (extended by Night Eyes)
+        if (onScreen && nextVis < 0.9 && usedAlertMarks < this.alertMarkPool.length) {
           const alertRange =
             LIGHT.enemies.baseEyeGlowRange *
             (snap.hasNightEyes ? LIGHT.enemies.nightEyesRangeMultiplier : 1.0);
@@ -1023,72 +1136,50 @@ export class DarknessScene extends Phaser.Scene {
               const ix = sx;
               const iy = Math.max(24, sy - offsetY + bobY);
 
-              const barW = 3.4 * markScale;
-              const barH = 8.8 * markScale;
-              const barTop = iy - 13.0 * markScale;
-              const dotY = iy - 1.4 * markScale;
-              const dotR = 1.9 * markScale;
-
-              // Outer soft colored glow aura
-              this.eyeGraphics.fillStyle(alertColor, alertAlpha * 0.24);
-              this.eyeGraphics.fillCircle(ix, iy - 6.8 * markScale, 9.5 * markScale);
-
-              // Dark iron drop-shadow for crisp contrast against fog & background
-              this.eyeGraphics.fillStyle(0x07080d, alertAlpha * 0.75);
-              this.eyeGraphics.fillRoundedRect(
-                ix - barW * 0.5 + 0.8,
-                barTop + 1.0,
-                barW,
-                barH,
-                1.5 * markScale
-              );
-              this.eyeGraphics.fillCircle(ix + 0.8, dotY + 1.0, dotR);
-
-              // Main glowing "!" exclamation glyph (stem + dot)
-              this.eyeGraphics.fillStyle(alertColor, alertAlpha);
-              this.eyeGraphics.fillRoundedRect(
-                ix - barW * 0.5,
-                barTop,
-                barW,
-                barH,
-                1.5 * markScale
-              );
-              this.eyeGraphics.fillCircle(ix, dotY, dotR);
-
-              // Subtle bright core highlight for sharpness in the dark
-              this.eyeGraphics.fillStyle(0xfff7e6, alertAlpha * 0.45);
-              this.eyeGraphics.fillRoundedRect(
-                ix - barW * 0.22,
-                barTop + 1.1 * markScale,
-                barW * 0.44,
-                barH * 0.68,
-                0.8 * markScale
-              );
-              this.eyeGraphics.fillCircle(ix, dotY, dotR * 0.45);
+              const markSpr = this.alertMarkPool[usedAlertMarks++];
+              markSpr
+                .setPosition(ix, iy)
+                .setScale(markScale * 0.75)
+                .setTint(alertColor)
+                .setAlpha(alertAlpha)
+                .setVisible(true);
             }
           }
         }
 
-        // Screen-edge directional arrows for Boss & Elites when off-screen or in the dark
-        if ((edata.type === 'boss' || edata.isElite) && (!onScreen || nextVis < 0.45)) {
-          this.drawEdgeIndicator(
+        // Screen-edge directional arrows when Boss or Elite is off-screen or hidden in darkness
+        if (
+          usedEdgeArrows < this.edgeArrowPool.length &&
+          ((edata.type === 'boss' && (!onScreen || nextVis < 0.55)) ||
+            (edata.isElite && (!onScreen || nextVis < 0.45)))
+        ) {
+          this.placeEdgeIndicatorSprite(
+            this.edgeArrowPool[usedEdgeArrows++],
             sx,
             sy,
             w,
             h,
             edata.type === 'boss' ? LIGHT.edgeIndicators.bossColor : LIGHT.edgeIndicators.eliteColor,
-            edata.type === 'boss' ? 12 : 9.5,
+            edata.type === 'boss' ? 11.5 : 9.5,
             this.effectTimeMs
           );
         }
       }
+    }
+
+    for (let i = usedAlertMarks; i < this.alertMarkPool.length; i++) {
+      if (this.alertMarkPool[i].visible) this.alertMarkPool[i].setVisible(false);
+    }
+    for (let i = usedEdgeArrows; i < this.edgeArrowPool.length; i++) {
+      if (this.edgeArrowPool[i].visible) this.edgeArrowPool[i].setVisible(false);
     }
     } catch (err) {
       console.error('[DarknessScene] update error:', err);
     }
   }
 
-  private drawEdgeIndicator(
+  private placeEdgeIndicatorSprite(
+    arrow: Phaser.GameObjects.Image,
     targetScreenX: number,
     targetScreenY: number,
     w: number,
@@ -1097,7 +1188,10 @@ export class DarknessScene extends Phaser.Scene {
     size: number,
     time: number
   ) {
-    if (!Number.isFinite(targetScreenX) || !Number.isFinite(targetScreenY)) return;
+    if (!Number.isFinite(targetScreenX) || !Number.isFinite(targetScreenY)) {
+      arrow.setVisible(false);
+      return;
+    }
     const cx = w * 0.5;
     const cy = h * 0.5;
     const dx = targetScreenX - cx;
@@ -1121,37 +1215,15 @@ export class DarknessScene extends Phaser.Scene {
 
     const ix = Phaser.Math.Clamp(cx + cos * tMin, minX, maxX);
     const iy = Phaser.Math.Clamp(cy + sin * tMin, minY, maxY);
+    const pulse = 0.74 + 0.26 * Math.sin(time * 0.008);
 
-    const pulse = 0.72 + 0.28 * Math.sin(time * 0.008);
-    const tipX = ix + cos * size;
-    const tipY = iy + sin * size;
-    const perpX = -sin;
-    const perpY = cos;
-    const backX = ix - cos * (size * 0.65);
-    const backY = iy - sin * (size * 0.65);
-    const wing = size * 0.75;
-
-    this.edgeArrowGraphics.fillStyle(color, 0.25 * pulse);
-    this.edgeArrowGraphics.fillCircle(ix, iy, size * 1.15);
-
-    this.edgeArrowGraphics.fillStyle(color, 0.92 * pulse);
-    this.edgeArrowGraphics.fillTriangle(
-      tipX,
-      tipY,
-      backX + perpX * wing,
-      backY + perpY * wing,
-      backX - perpX * wing,
-      backY - perpY * wing
-    );
-    this.edgeArrowGraphics.lineStyle(1.5, 0x0b0d12, 0.9);
-    this.edgeArrowGraphics.strokeTriangle(
-      tipX,
-      tipY,
-      backX + perpX * wing,
-      backY + perpY * wing,
-      backX - perpX * wing,
-      backY - perpY * wing
-    );
+    arrow
+      .setPosition(ix, iy)
+      .setRotation(angle)
+      .setScale(size / 10.5)
+      .setTint(color)
+      .setAlpha(0.92 * pulse)
+      .setVisible(true);
   }
 
   private drawPlayerShadowMaskCones(

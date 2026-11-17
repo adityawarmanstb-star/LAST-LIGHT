@@ -16,6 +16,7 @@ import { IronCard } from './IronCard';
 import { BloodHpBar } from './BloodHpBar';
 import { BloodSplatterHit, BloodSplatterOverlay } from './BloodSplatterOverlay';
 import { BossHealthOverlay } from './BossHealthOverlay';
+import { EliteSlayerCounter } from './EliteSlayerCounter';
 import { CritImpactPayload, gameManager } from '../game/GameManager';
 import { preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
@@ -96,6 +97,10 @@ const HUDComponent: React.FC<HUDProps> = ({
   equippedRelicIds = [],
   activeRelicSynergies = [],
   eventWarning,
+  isMuted: _isMuted,
+  isPaused: _isPaused,
+  onToggleMute: _onToggleMute,
+  onOpenSettings: _onOpenSettings,
   onTogglePause,
   onSpawnBossNow,
   onTriggerDash,
@@ -322,11 +327,9 @@ const HUDComponent: React.FC<HUDProps> = ({
           {/* Top-Center: Sleek Dark-Translucent 36px Combined Timer + Kills + Coins Pill */}
           <div className="justify-self-center pointer-events-none min-w-0">
             <div
-              className="h-[36px] px-2.5 sm:px-3.5 rounded-full flex items-center justify-center gap-1.5 sm:gap-2.5 border border-[#3a424d]/65 shadow-[0_4px_12px_rgba(0,0,0,0.65)]"
+              className="h-[36px] px-2.5 sm:px-3.5 rounded-full flex items-center justify-center gap-1.5 sm:gap-2.5 border border-[#3a424d]/75 shadow-[0_4px_12px_rgba(0,0,0,0.65)]"
               style={{
-                background: 'rgba(10, 14, 20, 0.72)',
-                backdropFilter: 'blur(4px)',
-                WebkitBackdropFilter: 'blur(4px)',
+                background: 'linear-gradient(180deg, rgba(16, 20, 28, 0.90) 0%, rgba(9, 12, 18, 0.92) 100%)',
               }}
             >
               <span className="font-display text-[11.5px] sm:text-[13px] font-black tracking-[0.06em] text-[#ede0c4] tabular-nums whitespace-nowrap">
@@ -494,11 +497,9 @@ const HUDComponent: React.FC<HUDProps> = ({
             {!boss && (
               <div className="justify-self-start sm:justify-self-center pointer-events-none">
                 <div
-                  className="h-[26px] px-2.5 rounded-full flex items-center gap-1.5 border border-[#3a424d]/55 text-[11px] whitespace-nowrap"
+                  className="h-[26px] px-2.5 rounded-full flex items-center gap-1.5 border border-[#3a424d]/65 text-[11px] whitespace-nowrap"
                   style={{
-                    background: 'rgba(10, 14, 20, 0.68)',
-                    backdropFilter: 'blur(4px)',
-                    WebkitBackdropFilter: 'blur(4px)',
+                    background: 'rgba(10, 14, 20, 0.88)',
                   }}
                 >
                   <span className="font-body font-semibold text-[#cbbba0]">
@@ -528,16 +529,20 @@ const HUDComponent: React.FC<HUDProps> = ({
         )}
       </div>
 
-      {/* 2s Event Warning Banner */}
+      {/* 2s Event Warning / Stage Clear Banner */}
       {eventWarning && (
         <div className="fixed left-1/2 -translate-x-1/2 top-24 z-30 w-full max-w-sm px-4 pointer-events-none">
           <IronCard
-            highlight="blood"
+            highlight={eventWarning.title.includes('STAGE 1') ? 'gold' : 'blood'}
             contentClassName="px-3.5 py-2 flex items-center gap-2.5 justify-center text-center"
           >
-            <Icon id="ui_warning" size={18} />
+            <Icon id={eventWarning.title.includes('STAGE 1') ? 'ui_crown' : 'ui_warning'} size={18} />
             <div className="flex flex-col">
-              <span className="font-display text-xs font-bold tracking-wider text-[#e5303a]">
+              <span
+                className={`font-display text-xs font-bold tracking-wider ${
+                  eventWarning.title.includes('STAGE 1') ? 'text-[#f2c464]' : 'text-[#e5303a]'
+                }`}
+              >
                 {eventWarning.title}
               </span>
               <span className="font-body text-[11px] font-medium text-[#ede0c4]">
@@ -550,6 +555,9 @@ const HUDComponent: React.FC<HUDProps> = ({
 
       {/* Persistent Boss Health Overlay (fixed top-center when boss is active) */}
       <BossHealthOverlay boss={boss} playerLevel={level} />
+
+      {/* Dynamic Cross-Session Elite Slayer Counter & 10,000-Kill Milestone Celebration */}
+      <EliteSlayerCounter />
 
       {/* Bottom-Left: Single Horizontal Row of 36x36 Compact Weapon & Relic Icon Slots (pointer-events-none) */}
       <div
@@ -651,15 +659,24 @@ const HUDComponent: React.FC<HUDProps> = ({
             cy="34"
             r={DASH_RING_RADIUS}
             fill="none"
+            stroke={dashReady ? 'rgba(34, 211, 238, 0.32)' : 'rgba(93, 228, 255, 0.18)'}
+            strokeWidth="5.5"
+            strokeLinecap="round"
+            strokeDasharray={DASH_RING_CIRCUMFERENCE}
+            strokeDashoffset={ringDashOffset}
+            style={{ transition: 'stroke-dashoffset 75ms linear' }}
+          />
+          <circle
+            cx="34"
+            cy="34"
+            r={DASH_RING_RADIUS}
+            fill="none"
             stroke={dashReady ? '#22d3ee' : '#5de4ff'}
-            strokeWidth="3.5"
+            strokeWidth="3.2"
             strokeLinecap="round"
             strokeDasharray={DASH_RING_CIRCUMFERENCE}
             strokeDashoffset={ringDashOffset}
             style={{
-              filter: dashReady
-                ? 'drop-shadow(0 0 5px rgba(34, 211, 238, 0.85))'
-                : 'drop-shadow(0 0 3px rgba(93, 228, 255, 0.5))',
               transition: 'stroke-dashoffset 75ms linear',
             }}
           />

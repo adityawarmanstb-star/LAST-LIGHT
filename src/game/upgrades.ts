@@ -213,7 +213,7 @@ export function getAvailableUpgrades(
         id: 'shotgun_unlock',
         weaponId: 'shotgun',
         title: 'Radiant Scatter',
-        description: 'Unleash a spread of cyan arcane bolts blasting enemies in front.',
+        description: 'Unleash a spread of purple & black-flame arcane bolts blasting enemies in front.',
         category: 'weapon_unlock',
         icon: 'spark',
         levelText: 'New Weapon',

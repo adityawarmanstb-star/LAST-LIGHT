@@ -34,7 +34,7 @@ interface TitleScreenProps {
   onOpenSettings: () => void;
 }
 
-const EMBER_PARTICLES = Array.from({ length: 18 }, (_, i) => {
+const EMBER_PARTICLES = Array.from({ length: 10 }, (_, i) => {
   const seed = (i * 37 + 13) % 100;
   const palettePick = i % 4;
   const color =
@@ -47,12 +47,12 @@ const EMBER_PARTICLES = Array.from({ length: 18 }, (_, i) => {
           : '#5de4ff';
   return {
     id: i,
-    left: `${(i * 5.2 + (seed % 5)) % 98}%`,
-    size: 2 + (i % 3),
-    duration: `${9 + (i % 5) * 1.4}s`,
-    delay: `${-(i * 0.9)}s`,
+    left: `${(i * 9.4 + (seed % 6)) % 96}%`,
+    size: 4 + (i % 3) * 2,
+    duration: `${9.5 + (i % 4) * 1.6}s`,
+    delay: `${-(i * 1.4)}s`,
     drift: `${(i % 2 === 0 ? 1 : -1) * (10 + (seed % 20))}px`,
-    opacity: palettePick === 3 ? 0.35 : 0.62,
+    opacity: palettePick === 3 ? 0.42 : 0.68,
     color,
   };
 });
@@ -223,10 +223,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
         {/* Soft Drifting Dungeon Mist & Embers */}
         <div
-          className="absolute -inset-x-10 bottom-16 h-56 blur-2xl dungeon-mist-drift"
+          className="absolute -inset-x-10 bottom-16 h-56 dungeon-mist-drift"
           style={{
             background:
-              'radial-gradient(ellipse at 50% 60%, rgba(64, 118, 136, 0.16) 0%, rgba(34, 14, 16, 0.22) 48%, transparent 76%)',
+              'radial-gradient(ellipse at 50% 60%, rgba(64, 118, 136, 0.14) 0%, rgba(34, 14, 16, 0.16) 44%, rgba(16, 12, 14, 0.05) 66%, transparent 82%)',
           }}
         />
         {EMBER_PARTICLES.map((p) => (
@@ -238,8 +238,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 left: p.left,
                 width: `${p.size}px`,
                 height: `${p.size}px`,
-                backgroundColor: p.color,
-                boxShadow: `0 0 ${p.size * 2}px ${p.color}`,
+                background: `radial-gradient(circle, ${p.color} 0%, ${p.color}88 45%, transparent 100%)`,
                 '--ember-duration': p.duration,
                 '--ember-delay': p.delay,
                 '--ember-drift': p.drift,

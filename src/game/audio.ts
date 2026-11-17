@@ -139,6 +139,7 @@ class AudioManager {
   }> = [];
   private stingerFollowupTimer: number | null = null;
   private readonly TRACK_CROSSFADE_SEC = 1.0;
+  private musicDuckFactor: number = 1.0;
 
   constructor() {
     this.loadSettings();
@@ -177,9 +178,34 @@ class AudioManager {
     saveDataStore.update((draft) => {
       draft.settings.musicVolume = this.musicVolume;
     });
-    if (this.musicGain && this.ctx) {
-      this.musicGain.gain.setValueAtTime(this.musicVolume, this.ctx.currentTime);
+    this.applyMusicGain(0);
+  }
+
+  private applyMusicGain(rampSec: number = 0) {
+    if (!this.musicGain || !this.ctx) return;
+    const target = Math.max(0, this.musicVolume * this.musicDuckFactor);
+    const now = this.ctx.currentTime;
+    try {
+      this.musicGain.gain.cancelScheduledValues(now);
+      if (rampSec > 0 && this.ctx.state === 'running') {
+        this.musicGain.gain.setValueAtTime(this.musicGain.gain.value, now);
+        this.musicGain.gain.linearRampToValueAtTime(target, now + rampSec);
+      } else {
+        this.musicGain.gain.setValueAtTime(target, now);
+      }
+    } catch {
+      this.musicGain.gain.setValueAtTime(target, now);
     }
+  }
+
+  public duckMusic(factor: number = 0.5, rampMs: number = 250) {
+    this.musicDuckFactor = Math.max(0, Math.min(1, factor));
+    this.applyMusicGain(Math.max(0, rampMs) / 1000);
+  }
+
+  public unduckMusic(rampMs: number = 250) {
+    this.musicDuckFactor = 1.0;
+    this.applyMusicGain(Math.max(0, rampMs) / 1000);
   }
 
   public getSfxVolume(): number {
@@ -293,7 +319,10 @@ class AudioManager {
     this.sfxGain.connect(this.masterGain);
 
     this.musicGain = this.ctx.createGain();
-    this.musicGain.gain.setValueAtTime(this.musicVolume, this.ctx.currentTime);
+    this.musicGain.gain.setValueAtTime(
+      Math.max(0, this.musicVolume * this.musicDuckFactor),
+      this.ctx.currentTime
+    );
     this.musicGain.connect(this.masterGain);
 
     if (!this.preloadStarted) {
@@ -1133,8 +1162,9 @@ class AudioManager {
   }
 
   /**
-   * Plays a thrilling, heart-pounding, and ominous dark-fantasy warning siren + war-horn + heartbeat
-   * sequence when a Boss spawns and wave-spawns pause.
+   * Plays an authentic, chilling mechanical War / Air-Raid Siren ("sirine perang")
+   * with dual-port rotor harmonies, turbine air rush, cavernous battlefield echo,
+   * and an initial seismic impact slam when a Boss spawns.
    */
   public playBossSiren() {
     if (this.isMuted || this.isPaused) return;
@@ -1169,36 +1199,38 @@ class AudioManager {
 
     const ctx = this.ctx;
     const now = ctx.currentTime;
-    const duration = 2.45;
+    const duration = 3.05;
+    const spinUpEnd = 1.12;
+    const plateauEnd = 1.56;
 
     try {
       const cleanupTargets: AudioNode[] = [];
       const stoppables: Array<OscillatorNode | AudioBufferSourceNode> = [];
 
-      // Protective compressor/limiter keeps multi-layered impact + siren punchy without clipping
+      // Protective compressor/limiter keeps multi-port air-raid siren loud and punchy without clipping
       const limiter = ctx.createDynamicsCompressor();
-      limiter.threshold.setValueAtTime(-12, now);
-      limiter.knee.setValueAtTime(14, now);
-      limiter.ratio.setValueAtTime(5, now);
+      limiter.threshold.setValueAtTime(-11, now);
+      limiter.knee.setValueAtTime(12, now);
+      limiter.ratio.setValueAtTime(5.5, now);
       limiter.attack.setValueAtTime(0.004, now);
       limiter.release.setValueAtTime(0.18, now);
 
       const masterOut = ctx.createGain();
-      masterOut.gain.setValueAtTime(0.92, now);
+      masterOut.gain.setValueAtTime(0.95, now);
       limiter.connect(masterOut);
       masterOut.connect(this.sfxGain);
       cleanupTargets.push(limiter, masterOut);
 
-      // Cavernous echo return for colossal arena dread
+      // Distant ruined-city / cavern slapback echo for massive battlefield scale
       const echoDelay = ctx.createDelay(1.0);
-      echoDelay.delayTime.setValueAtTime(0.23, now);
+      echoDelay.delayTime.setValueAtTime(0.26, now);
       const echoLp = ctx.createBiquadFilter();
       echoLp.type = 'lowpass';
-      echoLp.frequency.setValueAtTime(920, now);
+      echoLp.frequency.setValueAtTime(1150, now);
       const echoFeedback = ctx.createGain();
-      echoFeedback.gain.setValueAtTime(0.3, now);
+      echoFeedback.gain.setValueAtTime(0.36, now);
       const echoWet = ctx.createGain();
-      echoWet.gain.setValueAtTime(0.34, now);
+      echoWet.gain.setValueAtTime(0.38, now);
 
       echoDelay.connect(echoLp);
       echoLp.connect(echoWet);
@@ -1209,14 +1241,14 @@ class AudioManager {
 
       const noiseBuf = this.getBossTensionNoiseBuffer(ctx);
 
-      // 1. Seismic Abyssal Impact Slam (synchronizes with initial camera shake at t=0)
+      // 1. Seismic Spawn Impact Boom at t=0 (syncs with BossIntroModal slam)
       const impactSub = ctx.createOscillator();
       impactSub.type = 'sine';
-      impactSub.frequency.setValueAtTime(122, now);
-      impactSub.frequency.exponentialRampToValueAtTime(28, now + 0.45);
+      impactSub.frequency.setValueAtTime(112, now);
+      impactSub.frequency.exponentialRampToValueAtTime(27, now + 0.46);
       const impactSubGain = ctx.createGain();
       impactSubGain.gain.setValueAtTime(0.001, now);
-      impactSubGain.gain.linearRampToValueAtTime(0.68, now + 0.01);
+      impactSubGain.gain.linearRampToValueAtTime(0.62, now + 0.01);
       impactSubGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.52);
       impactSub.connect(impactSubGain);
       impactSubGain.connect(limiter);
@@ -1225,192 +1257,123 @@ class AudioManager {
       stoppables.push(impactSub);
       cleanupTargets.push(impactSub, impactSubGain);
 
-      const impactBlast = ctx.createBufferSource();
-      impactBlast.buffer = noiseBuf;
-      const impactLp = ctx.createBiquadFilter();
-      impactLp.type = 'lowpass';
-      impactLp.frequency.setValueAtTime(320, now);
-      impactLp.frequency.exponentialRampToValueAtTime(68, now + 0.36);
-      const impactBlastGain = ctx.createGain();
-      impactBlastGain.gain.setValueAtTime(0.001, now);
-      impactBlastGain.gain.linearRampToValueAtTime(0.45, now + 0.008);
-      impactBlastGain.gain.exponentialRampToValueAtTime(0.0008, now + 0.4);
-      impactBlast.connect(impactLp);
-      impactLp.connect(impactBlastGain);
-      impactBlastGain.connect(limiter);
-      impactBlastGain.connect(echoDelay);
-      impactBlast.start(now);
-      impactBlast.stop(now + 0.44);
-      stoppables.push(impactBlast);
-      cleanupTargets.push(impactBlast, impactLp, impactBlastGain);
+      // 2. Mechanical War Siren Horn Bus (dual-port rotor + megaphone horn formant)
+      const sirenBus = ctx.createGain();
+      sirenBus.gain.setValueAtTime(0.001, now);
+      sirenBus.gain.linearRampToValueAtTime(0.34, now + 0.22);
+      sirenBus.gain.linearRampToValueAtTime(0.68, now + spinUpEnd);
+      sirenBus.gain.linearRampToValueAtTime(0.7, now + plateauEnd);
+      sirenBus.gain.exponentialRampToValueAtTime(0.0008, now + duration);
 
-      // 2. Accelerating Heartbeat / War-Drum Thuds ("lub-DUB ... lub-DUB ... lub-DUB ... SLAM")
-      const heartbeatSchedule: Array<{ time: number; pitch: number; gain: number }> = [
-        { time: 0.04, pitch: 84, gain: 0.36 },
-        { time: 0.23, pitch: 72, gain: 0.42 },
-        { time: 0.62, pitch: 86, gain: 0.4 },
-        { time: 0.79, pitch: 74, gain: 0.46 },
-        { time: 1.16, pitch: 90, gain: 0.44 },
-        { time: 1.31, pitch: 76, gain: 0.5 },
-        { time: 1.66, pitch: 96, gain: 0.54 },
-      ];
-      for (const beat of heartbeatSchedule) {
-        const t = now + beat.time;
-        const drumOsc = ctx.createOscillator();
-        drumOsc.type = 'triangle';
-        drumOsc.frequency.setValueAtTime(beat.pitch, t);
-        drumOsc.frequency.exponentialRampToValueAtTime(32, t + 0.16);
-
-        const drumGain = ctx.createGain();
-        drumGain.gain.setValueAtTime(0.001, t);
-        drumGain.gain.linearRampToValueAtTime(beat.gain, t + 0.007);
-        drumGain.gain.exponentialRampToValueAtTime(0.0008, t + 0.18);
-
-        drumOsc.connect(drumGain);
-        drumGain.connect(limiter);
-        drumGain.connect(echoDelay);
-        drumOsc.start(t);
-        drumOsc.stop(t + 0.21);
-        stoppables.push(drumOsc);
-        cleanupTargets.push(drumOsc, drumGain);
-      }
-
-      // 3. Dissonant Abyssal Brass War-Horn Choir (tritone + minor-2nd horror tension)
-      const hornBus = ctx.createGain();
-      hornBus.gain.setValueAtTime(0.001, now);
-      hornBus.gain.linearRampToValueAtTime(0.36, now + 0.16);
-      hornBus.gain.setValueAtTime(0.38, now + 1.68);
-      hornBus.gain.exponentialRampToValueAtTime(0.0008, now + duration);
-
+      // Warm megaphone horn saturation
       const hornDrive = ctx.createWaveShaper();
       hornDrive.curve = this.getBrassDriveCurve();
       hornDrive.oversample = '2x';
 
+      // Megaphone horn bandpass + lowpass shaping tracks the mechanical rotor RPM
+      const hornBand = ctx.createBiquadFilter();
+      hornBand.type = 'bandpass';
+      hornBand.Q.setValueAtTime(1.45, now);
+      hornBand.frequency.setValueAtTime(340, now);
+      hornBand.frequency.exponentialRampToValueAtTime(1550, now + spinUpEnd);
+      hornBand.frequency.linearRampToValueAtTime(1600, now + plateauEnd);
+      hornBand.frequency.exponentialRampToValueAtTime(380, now + duration);
+
       const hornLp = ctx.createBiquadFilter();
       hornLp.type = 'lowpass';
-      hornLp.Q.setValueAtTime(3.2, now);
-      hornLp.frequency.setValueAtTime(220, now);
-      hornLp.frequency.exponentialRampToValueAtTime(1250, now + 0.62);
-      hornLp.frequency.exponentialRampToValueAtTime(440, now + 1.06);
-      hornLp.frequency.exponentialRampToValueAtTime(1780, now + 1.66);
-      hornLp.frequency.exponentialRampToValueAtTime(190, now + duration);
+      hornLp.Q.setValueAtTime(1.1, now);
+      hornLp.frequency.setValueAtTime(620, now);
+      hornLp.frequency.exponentialRampToValueAtTime(2800, now + spinUpEnd);
+      hornLp.frequency.linearRampToValueAtTime(2850, now + plateauEnd);
+      hornLp.frequency.exponentialRampToValueAtTime(520, now + duration);
 
-      hornDrive.connect(hornLp);
-      hornLp.connect(hornBus);
-      hornBus.connect(limiter);
-      hornBus.connect(echoDelay);
-      cleanupTargets.push(hornDrive, hornLp, hornBus);
+      hornDrive.connect(hornBand);
+      hornBand.connect(hornLp);
+      hornLp.connect(sirenBus);
+      sirenBus.connect(limiter);
+      sirenBus.connect(echoDelay);
+      cleanupTargets.push(hornDrive, hornBand, hornLp, sirenBus);
 
-      const hornVoices: Array<{ type: OscillatorType; baseFreq: number; gainVal: number }> = [
-        { type: 'sawtooth', baseFreq: 49.0, gainVal: 0.42 }, // G1 abyssal pedal
-        { type: 'sawtooth', baseFreq: 98.0, gainVal: 0.34 }, // G2 root
-        { type: 'sawtooth', baseFreq: 138.59, gainVal: 0.26 }, // C#3 ominous tritone
-        { type: 'triangle', baseFreq: 146.83, gainVal: 0.24 }, // D3 dissonant clash
+      // Subtle slow mechanical rotor flutter (5.6 Hz chop/inertia, not sci-fi vibrato)
+      const rotorLfo = ctx.createOscillator();
+      rotorLfo.type = 'sine';
+      rotorLfo.frequency.setValueAtTime(3.2, now);
+      rotorLfo.frequency.linearRampToValueAtTime(5.6, now + spinUpEnd);
+      rotorLfo.frequency.linearRampToValueAtTime(5.6, now + plateauEnd);
+      rotorLfo.frequency.linearRampToValueAtTime(2.6, now + duration);
+      const rotorLfoGain = ctx.createGain();
+      rotorLfoGain.gain.setValueAtTime(2.5, now);
+      rotorLfoGain.gain.linearRampToValueAtTime(5.5, now + spinUpEnd);
+      rotorLfoGain.gain.linearRampToValueAtTime(5.5, now + plateauEnd);
+      rotorLfoGain.gain.linearRampToValueAtTime(2.0, now + duration);
+      rotorLfo.connect(rotorLfoGain);
+      rotorLfo.start(now);
+      rotorLfo.stop(now + duration + 0.08);
+      stoppables.push(rotorLfo);
+      cleanupTargets.push(rotorLfo, rotorLfoGain);
+
+      // Classic Dual-Port Civil Defense / Air-Raid War Siren Tuning:
+      // Primary port (1.0), Minor-Third second port (1.189), mechanical drift (+0.4%), sub body (0.5), upper edge (2.0)
+      const startRootHz = 148;
+      const peakRootHz = 615;
+      const endRootHz = 162;
+
+      const rotorVoices: Array<{ type: OscillatorType; ratio: number; gainVal: number }> = [
+        { type: 'sawtooth', ratio: 1.0, gainVal: 0.44 },
+        { type: 'square', ratio: 1.003, gainVal: 0.22 },
+        { type: 'sawtooth', ratio: 1.189, gainVal: 0.4 }, // Dual-port minor-third war siren clash
+        { type: 'square', ratio: 1.193, gainVal: 0.18 },
+        { type: 'sawtooth', ratio: 0.5, gainVal: 0.22 },   // Low mechanical motor growl
+        { type: 'sawtooth', ratio: 2.0, gainVal: 0.14 },   // Horn harmonic bite
       ];
-      for (const hv of hornVoices) {
+
+      for (const rv of rotorVoices) {
         const osc = ctx.createOscillator();
-        osc.type = hv.type;
-        osc.frequency.setValueAtTime(hv.baseFreq * 0.96, now);
-        osc.frequency.exponentialRampToValueAtTime(hv.baseFreq * 1.04, now + 0.6);
-        osc.frequency.exponentialRampToValueAtTime(hv.baseFreq * 0.98, now + 1.05);
-        osc.frequency.exponentialRampToValueAtTime(hv.baseFreq * 1.07, now + 1.66);
-        osc.frequency.exponentialRampToValueAtTime(hv.baseFreq * 0.82, now + duration);
+        osc.type = rv.type;
+        osc.frequency.setValueAtTime(startRootHz * rv.ratio, now);
+        osc.frequency.exponentialRampToValueAtTime(peakRootHz * rv.ratio, now + spinUpEnd);
+        osc.frequency.linearRampToValueAtTime(peakRootHz * 1.025 * rv.ratio, now + plateauEnd);
+        osc.frequency.exponentialRampToValueAtTime(endRootHz * rv.ratio, now + duration);
+
+        rotorLfoGain.connect(osc.frequency);
 
         const g = ctx.createGain();
-        g.gain.setValueAtTime(hv.gainVal, now);
+        g.gain.setValueAtTime(rv.gainVal, now);
         osc.connect(g);
         g.connect(hornDrive);
         osc.start(now);
-        osc.stop(now + duration + 0.06);
+        osc.stop(now + duration + 0.08);
         stoppables.push(osc);
         cleanupTargets.push(osc, g);
       }
 
-      // 4. Urgent Tremolo Dread Siren (accelerating vibrato + dual rising/falling wail)
-      const sirenBus = ctx.createGain();
-      sirenBus.gain.setValueAtTime(0.001, now + 0.04);
-      sirenBus.gain.linearRampToValueAtTime(0.32, now + 0.18);
-      sirenBus.gain.setValueAtTime(0.36, now + 1.66);
-      sirenBus.gain.exponentialRampToValueAtTime(0.0008, now + duration);
+      // 3. Compressed-Air Turbine Rush (gives physical air-blast realism to the mechanical rotor)
+      const airSrc = ctx.createBufferSource();
+      airSrc.buffer = noiseBuf;
+      airSrc.loop = true;
 
-      const sirenFilter = ctx.createBiquadFilter();
-      sirenFilter.type = 'bandpass';
-      sirenFilter.Q.setValueAtTime(2.1, now);
-      sirenFilter.frequency.setValueAtTime(420, now);
-      sirenFilter.frequency.exponentialRampToValueAtTime(1450, now + 0.58);
-      sirenFilter.frequency.exponentialRampToValueAtTime(560, now + 1.04);
-      sirenFilter.frequency.exponentialRampToValueAtTime(1850, now + 1.64);
-      sirenFilter.frequency.exponentialRampToValueAtTime(320, now + duration);
+      const airBp = ctx.createBiquadFilter();
+      airBp.type = 'bandpass';
+      airBp.Q.setValueAtTime(2.0, now);
+      airBp.frequency.setValueAtTime(420, now);
+      airBp.frequency.exponentialRampToValueAtTime(1950, now + spinUpEnd);
+      airBp.frequency.linearRampToValueAtTime(1980, now + plateauEnd);
+      airBp.frequency.exponentialRampToValueAtTime(390, now + duration);
 
-      sirenFilter.connect(sirenBus);
-      sirenBus.connect(limiter);
-      sirenBus.connect(echoDelay);
-      cleanupTargets.push(sirenFilter, sirenBus);
+      const airGain = ctx.createGain();
+      airGain.gain.setValueAtTime(0.001, now);
+      airGain.gain.linearRampToValueAtTime(0.16, now + spinUpEnd);
+      airGain.gain.linearRampToValueAtTime(0.16, now + plateauEnd);
+      airGain.gain.exponentialRampToValueAtTime(0.0008, now + duration);
 
-      // Vibrato LFO speeds up from 7.5Hz to 13.5Hz for urgent suspense
-      const lfo = ctx.createOscillator();
-      lfo.type = 'sine';
-      lfo.frequency.setValueAtTime(7.5, now);
-      lfo.frequency.linearRampToValueAtTime(13.5, now + 1.66);
-      const lfoGain = ctx.createGain();
-      lfoGain.gain.setValueAtTime(12, now);
-      lfoGain.gain.linearRampToValueAtTime(22, now + 1.66);
-      lfo.connect(lfoGain);
-      lfo.start(now);
-      lfo.stop(now + duration + 0.06);
-      stoppables.push(lfo);
-      cleanupTargets.push(lfo, lfoGain);
-
-      const sirenRatios = [
-        { type: 'sawtooth' as OscillatorType, ratio: 1.0, gainVal: 0.45 },
-        { type: 'sawtooth' as OscillatorType, ratio: 1.011, gainVal: 0.36 },
-      ];
-      for (const sv of sirenRatios) {
-        const osc = ctx.createOscillator();
-        osc.type = sv.type;
-        osc.frequency.setValueAtTime(210 * sv.ratio, now);
-        osc.frequency.exponentialRampToValueAtTime(495 * sv.ratio, now + 0.58);
-        osc.frequency.exponentialRampToValueAtTime(240 * sv.ratio, now + 1.04);
-        osc.frequency.exponentialRampToValueAtTime(615 * sv.ratio, now + 1.64);
-        osc.frequency.exponentialRampToValueAtTime(145 * sv.ratio, now + duration);
-
-        lfoGain.connect(osc.frequency);
-
-        const g = ctx.createGain();
-        g.gain.setValueAtTime(sv.gainVal, now);
-        osc.connect(g);
-        g.connect(sirenFilter);
-        osc.start(now);
-        osc.stop(now + duration + 0.06);
-        stoppables.push(osc);
-        cleanupTargets.push(osc, g);
-      }
-
-      // 5. High Metallic Tension Riser culminating at the 1.65s siren climax
-      const riserSrc = ctx.createBufferSource();
-      riserSrc.buffer = noiseBuf;
-      riserSrc.loop = true;
-
-      const riserBp = ctx.createBiquadFilter();
-      riserBp.type = 'bandpass';
-      riserBp.Q.setValueAtTime(5.5, now);
-      riserBp.frequency.setValueAtTime(850, now);
-      riserBp.frequency.exponentialRampToValueAtTime(3600, now + 1.64);
-      riserBp.frequency.exponentialRampToValueAtTime(650, now + duration);
-
-      const riserGain = ctx.createGain();
-      riserGain.gain.setValueAtTime(0.001, now + 0.12);
-      riserGain.gain.exponentialRampToValueAtTime(0.16, now + 1.62);
-      riserGain.gain.exponentialRampToValueAtTime(0.0008, now + duration);
-
-      riserSrc.connect(riserBp);
-      riserBp.connect(riserGain);
-      riserGain.connect(limiter);
-      riserGain.connect(echoDelay);
-      riserSrc.start(now);
-      riserSrc.stop(now + duration + 0.05);
-      stoppables.push(riserSrc);
-      cleanupTargets.push(riserSrc, riserBp, riserGain);
+      airSrc.connect(airBp);
+      airBp.connect(airGain);
+      airGain.connect(limiter);
+      airGain.connect(echoDelay);
+      airSrc.start(now);
+      airSrc.stop(now + duration + 0.06);
+      stoppables.push(airSrc);
+      cleanupTargets.push(airSrc, airBp, airGain);
 
       window.setTimeout(() => {
         for (const s of stoppables) {
@@ -1427,7 +1390,7 @@ class AudioManager {
             // ignore
           }
         }
-      }, Math.ceil((duration + 0.75) * 1000));
+      }, Math.ceil((duration + 0.9) * 1000));
     } catch {
       // fail silently
     }
@@ -1772,6 +1735,7 @@ class AudioManager {
   }
 
   public playMenu() {
+    this.unduckMusic(150);
     this.playTrack('menu');
   }
 
@@ -1784,10 +1748,12 @@ class AudioManager {
   }
 
   public playBoss() {
+    this.unduckMusic(150);
     this.playTrack('boss');
   }
 
   public playGameOverStinger() {
+    this.unduckMusic(100);
     this.playTrack('stinger_gameover', true);
   }
 
@@ -1806,6 +1772,7 @@ class AudioManager {
 
   public stopBgm() {
     this.clearStingerTimer();
+    this.musicDuckFactor = 1.0;
     this.queuedTrackKey = null;
     this.currentTrackKey = null;
     if (!this.ctx || this.ctx.state === 'closed') return;

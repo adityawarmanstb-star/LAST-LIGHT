@@ -89,17 +89,98 @@ export class FilterUpscaleSharp extends Phaser.Renderer.WebGL.RenderNodes.BaseFi
   }
 }
 
+export type HardwareTier = 'low_end' | 'mid_end' | 'high_end';
+
+let cachedHardwareTier: HardwareTier | null = null;
+let cachedWeakGpuMatch: boolean | null = null;
+
 export function isAndroidOrMobileDevice(): boolean {
   if (typeof navigator === 'undefined') return false;
   return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
 }
 
+function detectWeakMobileGpu(rendererStr: string): boolean {
+  if (!rendererStr) return false;
+  // Older / budget mobile GPUs (Adreno 3xx/4xx/5xx/610, Mali-4xx/T7xx/T8xx/G51/G52/G31, PowerVR GE8xxx, software)
+  return /Adreno\s*\(?(?:TM)?\)?\s*[345]\d\d|Adreno\s*\(?(?:TM)?\)?\s*610|Mali-(?:4|T|G31|G51|G52)|PowerVR\s*(?:Rogue\s*)?GE8|SwiftShader|llvmpipe|Apple\s*A(?:9|10|11)\b/i.test(
+    rendererStr
+  );
+}
+
+export function probeWebGlRendererTier(gl?: WebGLRenderingContext | WebGL2RenderingContext | null): void {
+  if (!gl) return;
+  try {
+    const ext = gl.getExtension('WEBGL_debug_renderer_info');
+    if (ext) {
+      const renderer = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '');
+      cachedWeakGpuMatch = detectWeakMobileGpu(renderer);
+      if (cachedWeakGpuMatch && cachedHardwareTier !== 'low_end') {
+        cachedHardwareTier = 'low_end';
+      }
+    }
+  } catch {
+    // Ignore restricted WebGL debug extension
+  }
+}
+
+export function getHardwareTier(): HardwareTier {
+  if (cachedHardwareTier) return cachedHardwareTier;
+  if (typeof navigator === 'undefined') {
+    cachedHardwareTier = 'high_end';
+    return cachedHardwareTier;
+  }
+
+  const isMobile = isAndroidOrMobileDevice();
+  const cores = navigator.hardwareConcurrency || (isMobile ? 4 : 8);
+  const memGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+
+  if (cachedWeakGpuMatch === null && typeof document !== 'undefined') {
+    try {
+      const probeCanvas = document.createElement('canvas');
+      const gl =
+        (probeCanvas.getContext('webgl2', { powerPreference: 'high-performance' }) as WebGL2RenderingContext | null) ||
+        (probeCanvas.getContext('webgl', { powerPreference: 'high-performance' }) as WebGLRenderingContext | null);
+      if (gl) {
+        probeWebGlRendererTier(gl);
+        gl.getExtension('WEBGL_lose_context')?.loseContext();
+      }
+    } catch {
+      cachedWeakGpuMatch = false;
+    }
+  }
+
+  if (cachedWeakGpuMatch) {
+    cachedHardwareTier = 'low_end';
+  } else if (isMobile) {
+    if (cores <= 4 || (typeof memGb === 'number' && memGb <= 3) || dpr < 1.75) {
+      cachedHardwareTier = 'low_end';
+    } else if (cores <= 6 || (typeof memGb === 'number' && memGb <= 6)) {
+      cachedHardwareTier = 'mid_end';
+    } else {
+      cachedHardwareTier = 'high_end';
+    }
+  } else {
+    if (cores <= 2 || (typeof memGb === 'number' && memGb <= 2)) {
+      cachedHardwareTier = 'low_end';
+    } else if (cores <= 4 || (typeof memGb === 'number' && memGb <= 4)) {
+      cachedHardwareTier = 'mid_end';
+    } else {
+      cachedHardwareTier = 'high_end';
+    }
+  }
+
+  return cachedHardwareTier;
+}
+
 /**
  * Computes WebGL backing resolution scale factor over the 540x960 logical coordinate space.
- * - 1.5 => 810x1440 (HD+/90-120fps Android Lock)
- * - 2.0 => 1080x1920 (Full HD+ Crisp)
- * - 2.67 => 1440x2560 (QHD+ 2K)
- * - 4.0 => 2160x3840 (True 4K UHD Portrait)
+ * - 1.0  => 540x960  (Native sharp 1:1 logical pixels — zero excess fill-rate on older/low-end phones)
+ * - 1.125 => 608x1080 (Mid-end mobile sweet spot)
+ * - 1.25 => 675x1200 (High-end mobile)
+ * - 1.5  => 810x1440 (HD+)
+ * - 2.0  => 1080x1920 (Full HD+ Crisp)
+ * - 4.0  => 2160x3840 (True 4K UHD Portrait)
  */
 export function resolveRenderScale(
   mode: ResolutionQualityMode,
@@ -111,7 +192,7 @@ export function resolveRenderScale(
   let desired: number;
   switch (mode) {
     case 'performance':
-      desired = 1.5; // 810x1440
+      desired = isAndroidOrMobileDevice() ? 1.125 : 1.5;
       break;
     case 'fhd':
       desired = 2.0; // 1080x1920
@@ -121,14 +202,17 @@ export function resolveRenderScale(
       break;
     case 'auto':
     default: {
-      // On Android/mobile WebView, cap auto scale at 1.25 (675x1200) to keep fill-rate light & silky
       const isMobile = isAndroidOrMobileDevice();
-      const autoCap = isMobile ? 1.25 : 2.0;
-      desired = isMobile
-        ? Math.min(autoCap, Math.max(1, dpr))
-        : gameManager.getQualityTier() === 'low'
-          ? 1.0
-          : Math.min(autoCap, Math.max(1, dpr));
+      const hwTier = getHardwareTier();
+      if (gameManager.getQualityTier() === 'low') {
+        desired = 1.0;
+      } else if (isMobile) {
+        const tierCap = hwTier === 'low_end' ? 1.0 : hwTier === 'mid_end' ? 1.125 : 1.25;
+        desired = Math.min(tierCap, Math.max(1.0, dpr));
+      } else {
+        const desktopCap = hwTier === 'low_end' ? 1.25 : 2.0;
+        desired = Math.min(desktopCap, Math.max(1.0, dpr));
+      }
       break;
     }
   }
@@ -189,8 +273,12 @@ export function attachUpscaleSharpFilter(
     const sharpness = renderScale >= 3.5 ? 0.42 : renderScale >= 2.5 ? 0.58 : 0.74;
 
     const resolutionMode = gameManager.getGraphicsConfig().resolutionMode;
-    const effectiveEnabled =
-      enabled && !(isAndroidOrMobileDevice() && (resolutionMode === 'auto' || resolutionMode === 'performance'));
+    const hwTier = getHardwareTier();
+    const isMobile = isAndroidOrMobileDevice();
+    const skipOnTier =
+      hwTier === 'low_end' ||
+      (isMobile && (hwTier === 'mid_end' || resolutionMode === 'auto' || resolutionMode === 'performance'));
+    const effectiveEnabled = enabled && !skipOnTier;
 
     if (existing) {
       existing.sharpness = sharpness;
@@ -345,9 +433,9 @@ export class PerformanceRuntime {
       ? Math.min(60, this.currentConfig.targetFps)
       : this.currentConfig.targetFps;
     const budgetMs = 1000 / effectiveTargetFps;
-    // Allow normal 60Hz VSync jitter on mobile without falsely dropping to 'low' quality
-    const overloaded = this.avgFrameMs > (isMobile ? Math.max(22.5, budgetMs * 1.35) : budgetMs * 1.28);
-    const roomy = this.avgFrameMs < budgetMs * 1.05;
+    // Detect real drops below ~53fps on mobile promptly so mid/low devices stay locked at 60fps
+    const overloaded = this.avgFrameMs > (isMobile ? Math.max(18.8, budgetMs * 1.15) : budgetMs * 1.24);
+    const roomy = this.avgFrameMs < budgetMs * 0.96;
 
     const result: { nextQualityTier?: 'high' | 'low'; nextRenderScale?: number } = {};
 
@@ -363,13 +451,13 @@ export class PerformanceRuntime {
 
     // Adapt quality tier cleanly with >= 4s cooldown (never resize WebGL backing canvas mid-combat)
     const cooldownElapsed = nowMs - this.lastResAdjustAtMs >= 4000;
-    if (cooldownElapsed && this.lowPerfAccumMs >= 2500) {
+    if (cooldownElapsed && this.lowPerfAccumMs >= 1400) {
       this.lowPerfAccumMs = 0;
       this.lastResAdjustAtMs = nowMs;
       if (gameManager.getQualityTier() !== 'low') {
         result.nextQualityTier = 'low';
       }
-    } else if (cooldownElapsed && this.highHeadroomAccumMs >= 5000) {
+    } else if (cooldownElapsed && this.highHeadroomAccumMs >= 8000) {
       this.highHeadroomAccumMs = 0;
       this.lastResAdjustAtMs = nowMs;
       if (gameManager.getQualityTier() === 'low') {
@@ -382,7 +470,7 @@ export class PerformanceRuntime {
 
   /**
    * Millisecond-based temporal cadence for heavy offscreen RenderTexture redraws
-   * (~30Hz on Android/mobile with smooth 60Hz scroll compensation; ~60Hz on desktop).
+   * (~24-30Hz on Android/mobile with smooth 60Hz scroll compensation; ~60Hz on desktop).
    * Never uses frame or update-call counts.
    */
   public shouldRunTemporalHeavyPass(deltaMs: number, forceImmediate: boolean = false): boolean {
@@ -391,20 +479,88 @@ export class PerformanceRuntime {
       return true;
     }
     const isMobile = isAndroidOrMobileDevice();
+    const hwTier = getHardwareTier();
+    const qualityTier = gameManager.getQualityTier();
     const isHighRefresh = this.currentConfig.targetFps >= 90;
     const underLoad = this.avgFrameMs > (1000 / Math.max(60, this.currentConfig.targetFps)) * 0.9;
-    if (!isMobile && !isHighRefresh && !underLoad && gameManager.getQualityTier() !== 'low') {
+    if (!isMobile && !isHighRefresh && !underLoad && qualityTier !== 'low' && hwTier !== 'low_end') {
       this.temporalLightAccumMs = 0;
       return true;
     }
     this.temporalLightAccumMs += deltaMs;
-    const intervalMs = isMobile ? 32 : gameManager.getQualityTier() === 'low' ? 24 : 16;
+    const intervalMs =
+      hwTier === 'low_end' || qualityTier === 'low'
+        ? 42
+        : isMobile
+          ? 32
+          : underLoad
+            ? 20
+            : 16;
     if (this.temporalLightAccumMs >= intervalMs) {
       this.temporalLightAccumMs %= intervalMs;
       return true;
     }
     return false;
   }
+}
+
+export interface AdaptiveFxBudget {
+  hwTier: HardwareTier;
+  isLowQuality: boolean;
+  maxTorchCasters: number;
+  weatherParticles: number;
+  darknessRtScale: number;
+  groundShadowCap: number;
+  hitVfxScale: number;
+}
+
+export function getAdaptiveFxBudget(): AdaptiveFxBudget {
+  const hwTier = getHardwareTier();
+  const isMobile = isAndroidOrMobileDevice();
+  const isLowQuality = gameManager.getQualityTier() === 'low';
+
+  if (hwTier === 'low_end' || isLowQuality) {
+    return {
+      hwTier,
+      isLowQuality,
+      maxTorchCasters: 2,
+      weatherParticles: 14,
+      darknessRtScale: 0.34,
+      groundShadowCap: 110,
+      hitVfxScale: 0.72,
+    };
+  }
+  if (isMobile && hwTier === 'mid_end') {
+    return {
+      hwTier,
+      isLowQuality,
+      maxTorchCasters: 3,
+      weatherParticles: 24,
+      darknessRtScale: 0.4,
+      groundShadowCap: 165,
+      hitVfxScale: 0.85,
+    };
+  }
+  if (isMobile) {
+    return {
+      hwTier,
+      isLowQuality,
+      maxTorchCasters: 4,
+      weatherParticles: 32,
+      darknessRtScale: 0.45,
+      groundShadowCap: 215,
+      hitVfxScale: 1.0,
+    };
+  }
+  return {
+    hwTier,
+    isLowQuality,
+    maxTorchCasters: 5,
+    weatherParticles: 44,
+    darknessRtScale: 0.5,
+    groundShadowCap: 280,
+    hitVfxScale: 1.0,
+  };
 }
 
 export const performanceRuntime = new PerformanceRuntime(

@@ -17,6 +17,7 @@ export interface DifficultyPreset {
   spawnIntervalMult: number;
   bloodFogScale: number;
   coinMultiplier: number;
+  stageClearRewardGold: number;
 }
 
 export const DIFFICULTY_PRESETS: Record<GameDifficultyId, DifficultyPreset> = {
@@ -37,6 +38,7 @@ export const DIFFICULTY_PRESETS: Record<GameDifficultyId, DifficultyPreset> = {
     spawnIntervalMult: 1.35,
     bloodFogScale: 0.65,
     coinMultiplier: 0.85,
+    stageClearRewardGold: 1000,
   },
   pro: {
     id: 'pro',
@@ -55,6 +57,7 @@ export const DIFFICULTY_PRESETS: Record<GameDifficultyId, DifficultyPreset> = {
     spawnIntervalMult: 1.15,
     bloodFogScale: 0.82,
     coinMultiplier: 1.0,
+    stageClearRewardGold: 3000,
   },
   hacker: {
     id: 'hacker',
@@ -73,6 +76,7 @@ export const DIFFICULTY_PRESETS: Record<GameDifficultyId, DifficultyPreset> = {
     spawnIntervalMult: 1.0,
     bloodFogScale: 1.0,
     coinMultiplier: 1.0,
+    stageClearRewardGold: 10000,
   },
 };
 

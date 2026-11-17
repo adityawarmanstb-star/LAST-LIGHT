@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { getAdaptiveFxBudget, isAndroidOrMobileDevice } from './PerformanceEngine';
 
 export interface WorldTorchData {
   x: number;
@@ -184,11 +185,17 @@ export class ShadowCasterSystem {
   private shadowLightCount: number = 0;
 
   private emberAccumMs: number = 0;
+  private readonly isMobileDevice: boolean;
+  private lastMinCx: number = Number.NaN;
+  private lastMaxCx: number = Number.NaN;
+  private lastMinCy: number = Number.NaN;
+  private lastMaxCy: number = Number.NaN;
 
   constructor(scene: Phaser.Scene, spawnX: number, spawnY: number) {
     this.scene = scene;
     this.spawnX = spawnX;
     this.spawnY = spawnY;
+    this.isMobileDevice = isAndroidOrMobileDevice();
 
     this.ensureTextures();
 
@@ -534,95 +541,114 @@ export class ShadowCasterSystem {
     const minCy = Math.floor((camY - margin) / CELL_SIZE);
     const maxCy = Math.floor((camY + viewH + margin) / CELL_SIZE);
 
-    let torchIdx = 0;
-    let pillarIdx = 0;
+    const gridDirty =
+      minCx !== this.lastMinCx ||
+      maxCx !== this.lastMaxCx ||
+      minCy !== this.lastMinCy ||
+      maxCy !== this.lastMaxCy;
 
-    // Guaranteed starter torches near initial clearing so dynamic shadows are visible immediately
-    for (let i = 0; i < STARTER_TORCH_OFFSETS.length && torchIdx < MAX_TORCH_SLOTS; i++) {
-      const st = STARTER_TORCH_OFFSETS[i];
-      const tx = this.spawnX + st.dx;
-      const ty = this.spawnY + st.dy;
-      if (
-        tx >= camX - margin &&
-        tx <= camX + viewW + margin &&
-        ty >= camY - margin &&
-        ty <= camY + viewH + margin
-      ) {
-        this.activateTorchSlot(torchIdx++, tx, ty, 175, st.phase, timeSec);
-      }
-    }
+    if (gridDirty) {
+      this.lastMinCx = minCx;
+      this.lastMaxCx = maxCx;
+      this.lastMinCy = minCy;
+      this.lastMaxCy = maxCy;
 
-    for (let cy = minCy; cy <= maxCy; cy++) {
-      for (let cx = minCx; cx <= maxCx; cx++) {
-        // Cell roll for Pillar
-        const pillarRoll = hashCell(cx, cy, 11);
-        let pillarX = 0;
-        let pillarY = 0;
-        let hasPillar = false;
+      let torchIdx = 0;
+      let pillarIdx = 0;
 
-        if (pillarRoll < 0.42 && pillarIdx < MAX_PILLAR_SLOTS) {
-          const px = cx * CELL_SIZE + 85 + hashCell(cx, cy, 12) * (CELL_SIZE - 170);
-          const py = cy * CELL_SIZE + 85 + hashCell(cx, cy, 13) * (CELL_SIZE - 170);
-          const dxSpawn = px - this.spawnX;
-          const dySpawn = py - this.spawnY;
-          // Never block starting position or starter torches
-          if (dxSpawn * dxSpawn + dySpawn * dySpawn > 195 * 195) {
-            hasPillar = true;
-            pillarX = px;
-            pillarY = py;
-            const radius = 21 + hashCell(cx, cy, 14) * 5;
-            const heightScale = 0.92 + hashCell(cx, cy, 15) * 0.28;
-            this.activatePillarSlot(pillarIdx++, px, py, radius, heightScale);
-          }
+      // Guaranteed starter torches near initial clearing so dynamic shadows are visible immediately
+      const camLeft = this.spawnX - margin - viewW;
+      const camRight = this.spawnX + margin + viewW;
+      for (let i = 0; i < STARTER_TORCH_OFFSETS.length && torchIdx < MAX_TORCH_SLOTS; i++) {
+        const st = STARTER_TORCH_OFFSETS[i];
+        const tx = this.spawnX + st.dx;
+        const ty = this.spawnY + st.dy;
+        if (
+          tx >= camX - margin &&
+          tx <= camX + viewW + margin &&
+          ty >= camY - margin &&
+          ty <= camY + viewH + margin
+        ) {
+          this.configureTorchSlot(torchIdx++, tx, ty, 175, st.phase);
         }
+      }
+      void camLeft;
+      void camRight;
 
-        // Cell roll for Torch (avoid duplicating starter torches in spawn cell)
-        const torchRoll = hashCell(cx, cy, 21);
-        if (torchRoll < 0.34 && torchIdx < MAX_TORCH_SLOTS) {
-          const tx = cx * CELL_SIZE + 90 + hashCell(cx, cy, 22) * (CELL_SIZE - 180);
-          const ty = cy * CELL_SIZE + 90 + hashCell(cx, cy, 23) * (CELL_SIZE - 180);
-          const dxSpawn = tx - this.spawnX;
-          const dySpawn = ty - this.spawnY;
-          if (dxSpawn * dxSpawn + dySpawn * dySpawn > 240 * 240) {
-            const tooCloseToPillar =
-              hasPillar && (tx - pillarX) * (tx - pillarX) + (ty - pillarY) * (ty - pillarY) < 95 * 95;
-            if (!tooCloseToPillar) {
-              const baseR = 152 + hashCell(cx, cy, 24) * 28;
-              const phase = hashCell(cx, cy, 25) * Math.PI * 2;
-              this.activateTorchSlot(torchIdx++, tx, ty, baseR, phase, timeSec);
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        for (let cx = minCx; cx <= maxCx; cx++) {
+          const pillarRoll = hashCell(cx, cy, 11);
+          let pillarX = 0;
+          let pillarY = 0;
+          let hasPillar = false;
+
+          if (pillarRoll < 0.42 && pillarIdx < MAX_PILLAR_SLOTS) {
+            const px = cx * CELL_SIZE + 85 + hashCell(cx, cy, 12) * (CELL_SIZE - 170);
+            const py = cy * CELL_SIZE + 85 + hashCell(cx, cy, 13) * (CELL_SIZE - 170);
+            const dxSpawn = px - this.spawnX;
+            const dySpawn = py - this.spawnY;
+            if (dxSpawn * dxSpawn + dySpawn * dySpawn > 195 * 195) {
+              hasPillar = true;
+              pillarX = px;
+              pillarY = py;
+              const radius = 21 + hashCell(cx, cy, 14) * 5;
+              const heightScale = 0.92 + hashCell(cx, cy, 15) * 0.28;
+              this.activatePillarSlot(pillarIdx++, px, py, radius, heightScale);
+            }
+          }
+
+          const torchRoll = hashCell(cx, cy, 21);
+          if (torchRoll < 0.34 && torchIdx < MAX_TORCH_SLOTS) {
+            const tx = cx * CELL_SIZE + 90 + hashCell(cx, cy, 22) * (CELL_SIZE - 180);
+            const ty = cy * CELL_SIZE + 90 + hashCell(cx, cy, 23) * (CELL_SIZE - 180);
+            const dxSpawn = tx - this.spawnX;
+            const dySpawn = ty - this.spawnY;
+            if (dxSpawn * dxSpawn + dySpawn * dySpawn > 240 * 240) {
+              const tooCloseToPillar =
+                hasPillar && (tx - pillarX) * (tx - pillarX) + (ty - pillarY) * (ty - pillarY) < 95 * 95;
+              if (!tooCloseToPillar) {
+                const baseR = 152 + hashCell(cx, cy, 24) * 28;
+                const phase = hashCell(cx, cy, 25) * Math.PI * 2;
+                this.configureTorchSlot(torchIdx++, tx, ty, baseR, phase);
+              }
             }
           }
         }
       }
-    }
 
-    this.activeTorchCount = torchIdx;
-    this.activePillarCount = pillarIdx;
+      this.activeTorchCount = torchIdx;
+      this.activePillarCount = pillarIdx;
 
-    for (let i = torchIdx; i < MAX_TORCH_SLOTS; i++) {
-      const slot = this.torchPool[i];
-      if (slot.active) {
-        slot.active = false;
-        slot.brazier.setVisible(false);
-        slot.flame.setVisible(false);
-        slot.groundGlow.setVisible(false);
+      for (let i = torchIdx; i < MAX_TORCH_SLOTS; i++) {
+        const slot = this.torchPool[i];
+        if (slot.active) {
+          slot.active = false;
+          slot.brazier.setVisible(false);
+          slot.flame.setVisible(false);
+          slot.groundGlow.setVisible(false);
+        }
+      }
+
+      for (let i = pillarIdx; i < MAX_PILLAR_SLOTS; i++) {
+        const slot = this.pillarPool[i];
+        if (slot.active) {
+          slot.active = false;
+          slot.sprite.setVisible(false);
+        }
       }
     }
 
-    for (let i = pillarIdx; i < MAX_PILLAR_SLOTS; i++) {
-      const slot = this.pillarPool[i];
-      if (slot.active) {
-        slot.active = false;
-        slot.sprite.setVisible(false);
-      }
+    // Update flickering flames strictly for active torches
+    for (let i = 0; i < this.activeTorchCount; i++) {
+      this.updateTorchFlicker(i, timeSec);
     }
 
     // Subtle rising torch embers (throttled for 60 FPS)
-    if (onTorchEmber && torchIdx > 0 && !isLowQuality) {
+    if (onTorchEmber && this.activeTorchCount > 0 && !isLowQuality) {
       this.emberAccumMs += deltaMs;
-      if (this.emberAccumMs >= 180) {
+      if (this.emberAccumMs >= 200) {
         this.emberAccumMs = 0;
-        const pick = Math.floor(Math.random() * torchIdx);
+        const pick = Math.floor(Math.random() * this.activeTorchCount);
         const t = this.activeTorchData[pick];
         if (
           t.x >= camX - 40 &&
@@ -636,47 +662,53 @@ export class ShadowCasterSystem {
     }
   }
 
-  private activateTorchSlot(
+  private configureTorchSlot(
     index: number,
     wx: number,
     wy: number,
     baseRadius: number,
-    phase: number,
-    timeSec: number
+    phase: number
   ) {
     const slot = this.torchPool[index];
-    const flicker =
-      Math.sin(timeSec * 9.5 + phase) * 0.6 +
-      Math.sin(timeSec * 16.7 + phase * 1.4) * 0.4;
-    const radius = baseRadius * (1 + flicker * 0.065);
-    const intensity = 0.88 + flicker * 0.12;
-
     slot.active = true;
     slot.worldX = wx;
     slot.worldY = wy;
     slot.phase = phase;
     slot.baseRadius = baseRadius;
-    slot.currentRadius = radius;
-    slot.currentIntensity = intensity;
-
     slot.brazier.setPosition(wx, wy).setVisible(true);
-    slot.flame
-      .setPosition(wx + flicker * 1.1, wy - 33)
-      .setScale(0.92 + flicker * 0.1, 0.96 + Math.abs(flicker) * 0.16)
-      .setAlpha(0.84 + flicker * 0.14)
-      .setVisible(true);
-    slot.groundGlow
-      .setPosition(wx, wy - 8)
-      .setDisplaySize(radius * 1.9, radius * 1.9)
-      .setAlpha(0.72 * intensity)
-      .setVisible(true);
+    slot.flame.setVisible(true);
+    slot.groundGlow.setVisible(true);
 
     const out = this.activeTorchData[index];
     out.x = wx;
     out.y = wy - 16;
+    out.phase = phase;
+  }
+
+  private updateTorchFlicker(index: number, timeSec: number) {
+    const slot = this.torchPool[index];
+    const phase = slot.phase;
+    const flicker =
+      Math.sin(timeSec * 9.5 + phase) * 0.6 +
+      Math.sin(timeSec * 16.7 + phase * 1.4) * 0.4;
+    const radius = slot.baseRadius * (1 + flicker * 0.065);
+    const intensity = 0.88 + flicker * 0.12;
+
+    slot.currentRadius = radius;
+    slot.currentIntensity = intensity;
+
+    slot.flame
+      .setPosition(slot.worldX + flicker * 1.1, slot.worldY - 33)
+      .setScale(0.92 + flicker * 0.1, 0.96 + Math.abs(flicker) * 0.16)
+      .setAlpha(0.84 + flicker * 0.14);
+    slot.groundGlow
+      .setPosition(slot.worldX, slot.worldY - 8)
+      .setDisplaySize(radius * 1.9, radius * 1.9)
+      .setAlpha(0.72 * intensity);
+
+    const out = this.activeTorchData[index];
     out.radius = radius;
     out.intensity = intensity;
-    out.phase = phase;
   }
 
   private activatePillarSlot(
@@ -793,9 +825,10 @@ export class ShadowCasterSystem {
       isLowQuality,
     } = params;
 
-    const isMobile =
-      typeof navigator !== 'undefined' && /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+    const fxBudget = getAdaptiveFxBudget();
+    const isMobile = this.isMobileDevice;
     const liteShadows = isLowQuality || isMobile;
+    const shadowCap = Math.min(this.groundShadowPool.length, fxBudget.groundShadowCap);
 
     const prevGroundCount = this.activeGroundShadows;
     const prevOverlayCount = this.activeOverlayShadows;
@@ -811,7 +844,7 @@ export class ShadowCasterSystem {
     pSlot.strength = 1.0;
     pSlot.isPlayer = true;
 
-    const maxTorchCasters = liteShadows ? 2 : 4;
+    const maxTorchCasters = Math.min(liteShadows ? 2 : 4, fxBudget.maxTorchCasters);
     let addedTorches = 0;
     for (
       let i = 0;
@@ -892,14 +925,15 @@ export class ShadowCasterSystem {
     const maxY = camY + viewH + margin;
 
     for (let ei = 0; ei < enemies.length; ei++) {
-      if (this.activeGroundShadows >= this.groundShadowPool.length - 4) break;
+      if (this.activeGroundShadows >= shadowCap - 2) break;
       const enemy = enemies[ei];
       if (!enemy.active) continue;
       if (enemy.x < minX || enemy.x > maxX || enemy.y < minY || enemy.y > maxY) {
         continue;
       }
 
-      const edata = enemy.getData('data') as
+      const edata = ((enemy as unknown as { __enemyData?: unknown }).__enemyData ||
+        enemy.getData('data')) as
         | {
             type: 'wisp' | 'imp' | 'spitter' | 'brute' | 'boss';
             isElite?: boolean;

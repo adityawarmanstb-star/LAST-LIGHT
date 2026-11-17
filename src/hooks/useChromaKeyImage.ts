@@ -46,6 +46,7 @@ const inFlightCache = new Map<string, Promise<string>>();
 let lobbyPreloadPromise: Promise<void> | null = null;
 
 const MAX_PROCESSED_DIMENSION = 1024;
+const MAX_NAV_BAR_DIMENSION = 640;
 
 function canvasToFastUrl(canvas: HTMLCanvasElement): Promise<string> {
   return new Promise((resolve) => {
@@ -122,10 +123,11 @@ export function processChromaKeyImage(
           return;
         }
 
-        // Scale oversized 2K/3K source graphics down to retina-sharp 1024px cap
-        // so pixel chroma-keying & encoding finish ~6-8x faster without jank.
+        // Scale oversized 2K/3K source graphics down to retina-sharp cap
+        // (640px for compact bottom nav bar, 1024px for hero/panel assets)
         const maxSide = Math.max(rawW, rawH);
-        const scale = maxSide > MAX_PROCESSED_DIMENSION ? MAX_PROCESSED_DIMENSION / maxSide : 1;
+        const dimCap = src === UI_ASSETS.navBarBg ? MAX_NAV_BAR_DIMENSION : MAX_PROCESSED_DIMENSION;
+        const scale = maxSide > dimCap ? dimCap / maxSide : 1;
         const w = Math.max(1, Math.round(rawW * scale));
         const h = Math.max(1, Math.round(rawH * scale));
 

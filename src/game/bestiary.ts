@@ -65,33 +65,35 @@ class BestiaryManager {
   }
 
   public getKillCount(id: BestiaryEnemyId): number {
-    return this.getKills()[id] ?? 0;
+    return saveDataStore.readFastRef().bestiaryKills[id] ?? 0;
   }
 
   public getTotalKills(): number {
-    const kills = this.getKills();
+    const kills = saveDataStore.readFastRef().bestiaryKills;
     return Object.values(kills).reduce((sum, count) => sum + count, 0);
   }
 
   public getDiscoveredCount(): number {
-    const kills = this.getKills();
+    const kills = saveDataStore.readFastRef().bestiaryKills;
     return BESTIARY_ENTRIES.filter((entry) => (kills[entry.id] ?? 0) > 0).length;
   }
 
   public recordKill(id: BestiaryEnemyId): void {
     this.pendingWrites++;
-    // Persist immediately on first discovery, on boss kill, or every 10 kills to keep 60 FPS smooth
+    // Persist immediately on first discovery, on boss kill, or every 25 kills to keep 60 FPS smooth
     const current = this.getKillCount(id);
-    const shouldWriteNow = current === 0 || id === 'boss' || this.pendingWrites >= 10;
+    const shouldWriteNow = current === 0 || id === 'boss' || this.pendingWrites >= 25;
     if (shouldWriteNow) {
       this.pendingWrites = 0;
     }
 
-    const updated = saveDataStore.update((draft) => {
-      draft.bestiaryKills[id] = (draft.bestiaryKills[id] ?? 0) + 1;
+    const updated = saveDataStore.mutateFast((cache) => {
+      cache.bestiaryKills[id] = (cache.bestiaryKills[id] ?? 0) + 1;
     }, shouldWriteNow);
 
-    this.notify(updated.bestiaryKills);
+    if (this.listeners.size > 0) {
+      this.notify(updated.bestiaryKills);
+    }
   }
 
   public flush(): void {
@@ -107,7 +109,9 @@ class BestiaryManager {
   }
 
   private notify(kills: BestiaryKillsMap): void {
-    this.listeners.forEach((listener) => listener({ ...kills }));
+    if (this.listeners.size === 0) return;
+    const snapshot = { ...kills };
+    this.listeners.forEach((listener) => listener(snapshot));
   }
 }
 

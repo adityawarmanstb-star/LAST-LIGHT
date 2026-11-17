@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LobbyTabId, TitleScreen } from './components/TitleScreen';
 import { ShopSubTab } from './components/lobby/ShopPage';
 import { HUD } from './components/HUD';
@@ -40,6 +40,7 @@ import {
 } from './game/types';
 import { MainScene } from './game/scenes/MainScene';
 import { initCapacitorMobile } from './mobile/capacitorBridge';
+import { haptics } from './mobile/haptics';
 
 export default function App() {
   const [gameState, setGameState] = useState<'TITLE' | 'PLAYING' | 'PAUSED' | 'GAME_OVER'>('TITLE');
@@ -63,6 +64,10 @@ export default function App() {
   const [musicVolume, setMusicVolume] = useState<number>(soundManager.getMusicVolume());
   const [sfxVolume, setSfxVolume] = useState<number>(soundManager.getSfxVolume());
   const [goreLevel, setGoreLevel] = useState<GoreLevel>(() => gameManager.getGoreLevel());
+  const [hapticsEnabled, setHapticsEnabled] = useState<boolean>(() => haptics.isEnabled());
+  const [screenShakeEnabled, setScreenShakeEnabled] = useState<boolean>(() =>
+    gameManager.isScreenShakeEnabled()
+  );
 
   // In-run state
   const [hp, setHp] = useState<number>(100);
@@ -469,10 +474,10 @@ export default function App() {
     handleStartGame();
   };
 
-  const handleToggleMute = () => {
+  const handleToggleMute = useCallback(() => {
     const muted = soundManager.toggleMute();
     setIsMuted(muted);
-  };
+  }, []);
 
   const handleMasterVolumeChange = (val: number) => {
     soundManager.setMasterVolume(val);
@@ -494,13 +499,24 @@ export default function App() {
     setGoreLevel(level);
   };
 
-  const handleOpenSettings = () => {
+  const handleToggleHaptics = () => {
+    const next = haptics.toggle();
+    setHapticsEnabled(next);
+  };
+
+  const handleToggleScreenShake = () => {
+    const next = !gameManager.isScreenShakeEnabled();
+    gameManager.setScreenShakeEnabled(next);
+    setScreenShakeEnabled(next);
+  };
+
+  const handleOpenSettings = useCallback(() => {
     soundManager.playUiClick();
-    if (gameState === 'PLAYING') {
-      handleTogglePause();
+    if (gameStateRef.current === 'PLAYING') {
+      handleTogglePauseRef.current();
     }
     setShowSettings(true);
-  };
+  }, []);
 
   const handleCloseHowToPlay = () => {
     saveDataStore.update((draft) => {
@@ -511,10 +527,17 @@ export default function App() {
   };
 
   // Toggle pause: handles physics, timers, tweens, anims, DarknessScene, audio without conflicting with level up
+  const handleStableTogglePause = useCallback(() => {
+    handleTogglePauseRef.current();
+  }, []);
+
   const handleTogglePause = () => {
-    soundManager.playUiClick();
     const scene = gameManager.activeScene as MainScene | null;
     const isSceneReady = Boolean(scene && scene.sys?.isActive());
+    if (gameState === 'PLAYING' && isSceneReady && scene?.isRunFinished()) {
+      return;
+    }
+    soundManager.playUiClick();
     if (gameState === 'PLAYING') {
       gameManager.setGameState('PAUSED');
       setGameState('PAUSED');
@@ -598,12 +621,19 @@ export default function App() {
     }
   };
 
-  const handleSpawnBossNow = () => {
+  const handleSpawnBossNow = useCallback(() => {
     const scene = gameManager.activeScene as MainScene | null;
     if (scene && scene.sys?.isActive()) {
-      scene.spawnBoss();
+      scene.spawnBoss(1);
     }
-  };
+  }, []);
+
+  const handleTriggerDash = useCallback(() => {
+    const scene = gameManager.activeScene as MainScene | null;
+    if (scene && scene.sys?.isActive()) {
+      scene.triggerDash();
+    }
+  }, []);
 
   return (
     <main className="relative w-screen h-[100dvh] overflow-hidden bg-[#08090d]">
@@ -658,14 +688,9 @@ export default function App() {
           isPaused={gameState === 'PAUSED'}
           onToggleMute={handleToggleMute}
           onOpenSettings={handleOpenSettings}
-          onTogglePause={handleTogglePause}
+          onTogglePause={handleStableTogglePause}
           onSpawnBossNow={handleSpawnBossNow}
-          onTriggerDash={() => {
-            const scene = gameManager.activeScene as MainScene | null;
-            if (scene && scene.sys?.isActive()) {
-              scene.triggerDash();
-            }
-          }}
+          onTriggerDash={handleTriggerDash}
         />
       )}
 
@@ -682,7 +707,7 @@ export default function App() {
         />
       )}
 
-      {/* Modal: Settings (Audio & Gore) */}
+      {/* Modal: Settings (Audio, Feedback & Gore) */}
       <SettingsModal
         isOpen={showSettings && !showHowToPlay}
         onClose={() => setShowSettings(false)}
@@ -691,11 +716,15 @@ export default function App() {
         sfxVolume={sfxVolume}
         isMuted={isMuted}
         goreLevel={goreLevel}
+        hapticsEnabled={hapticsEnabled}
+        screenShakeEnabled={screenShakeEnabled}
         onMasterVolumeChange={handleMasterVolumeChange}
         onMusicVolumeChange={handleMusicVolumeChange}
         onSfxVolumeChange={handleSfxVolumeChange}
         onToggleMute={handleToggleMute}
         onGoreLevelChange={handleGoreLevelChange}
+        onToggleHaptics={handleToggleHaptics}
+        onToggleScreenShake={handleToggleScreenShake}
       />
 
       {/* Modal: Difficulty Selection before entering arena */}
