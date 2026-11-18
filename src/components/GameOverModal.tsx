@@ -2,14 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { soundManager } from '../game/audio';
 import { dailyMissions } from '../game/dailyMissions';
 import { RunStats } from '../game/types';
-import {
-  UI_ASSETS,
-  preloadAllChromaKeyUiAssets,
-  useChromaKeyImage,
-} from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
 import { Icon } from './Icon';
-import { IronCard } from './IronCard';
+import { NineSlice } from './ui/NineSlice';
+import { UiButton } from './ui/UiButton';
+import { UiChainDivider } from './ui/UiControls';
 
 interface GameOverModalProps {
   stats: RunStats;
@@ -31,10 +28,8 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
   const [unclaimedMissions, setUnclaimedMissions] = useState<number>(() =>
     dailyMissions.getUnclaimedCount()
   );
-  const { processedSrc: playBtnSrc, hasError: playBtnError } = useChromaKeyImage(UI_ASSETS.btnPlay);
 
   useEffect(() => {
-    preloadAllChromaKeyUiAssets();
     const unsub = dailyMissions.subscribe(() => {
       setUnclaimedMissions(dailyMissions.getUnclaimedCount());
     });
@@ -80,33 +75,37 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="gameover-modal-title"
-      className="fixed inset-0 flex flex-col items-center justify-center safe-area-pad z-50 select-none"
+      className="fixed inset-0 flex flex-col items-center justify-center safe-area-pad z-50 select-none overflow-x-hidden"
       style={{
-        backdropFilter: 'blur(6px)',
-        WebkitBackdropFilter: 'blur(6px)',
-        background: 'rgba(5, 8, 12, 0.85)',
+        background: 'rgba(4, 5, 8, 0.90)',
         boxShadow: stats.victory
-          ? 'inset 0 0 130px rgba(212, 148, 36, 0.28)'
-          : 'inset 0 0 120px rgba(120, 10, 16, 0.35)',
+          ? 'inset 0 0 120px rgba(212, 148, 36, 0.25)'
+          : 'inset 0 0 120px rgba(120, 10, 16, 0.34)',
       }}
     >
-      <div className="w-[92%] max-w-[400px] max-h-[92vh] flex flex-col">
-        <IronCard
+      <div className="w-full max-w-[540px] max-h-[92dvh] flex flex-col px-1">
+        <NineSlice
+          variant="panelIronDark"
+          tileTexture="stone"
           highlight={stats.victory ? 'gold' : 'blood'}
-          className="w-full max-h-[92vh] flex flex-col"
-          contentClassName="p-5 sm:p-6 flex flex-col items-center text-center max-h-[92vh] overflow-y-auto"
+          className="w-full max-h-[92dvh] flex flex-col shadow-[0_18px_44px_rgba(0,0,0,0.95)]"
+          contentClassName="p-3.5 sm:p-4 flex flex-col items-center text-center max-h-[92dvh] overflow-y-auto overflow-x-hidden no-scrollbar"
         >
           {/* Stage 1 Completion Notification Banner */}
           {stats.victory && (
-            <div
-              role="status"
-              aria-live="polite"
-              className="w-full mb-3.5 px-3.5 py-2.5 rounded-[10px] border border-[#f2a93b]/70 bg-gradient-to-r from-[#261a08]/95 via-[#33220a]/95 to-[#261a08]/95 flex items-center justify-between gap-2.5 shadow-[0_0_18px_rgba(242,169,59,0.28)]"
+            <NineSlice
+              variant="bannerCrimson"
+              tileTexture="row"
+              highlight="gold"
+              padding="0px"
+              borderWidth="clamp(10px, 1.8vw, 14px) clamp(18px, 3.4vw, 28px)"
+              className="w-full mb-3"
+              contentClassName="px-2 py-1.5 flex items-center justify-between gap-2"
             >
-              <div className="flex items-center gap-2 min-w-0 text-left">
+              <div role="status" aria-live="polite" className="flex items-center gap-2 min-w-0 text-left">
                 <Icon id="ui_crown" size={20} className="shrink-0" />
                 <div className="flex flex-col min-w-0">
-                  <span className="font-display text-[11px] font-black tracking-[0.16em] text-[#f2c464] uppercase leading-tight">
+                  <span className="font-display text-[11px] font-black tracking-[0.14em] text-[#f2c464] uppercase leading-tight">
                     STAGE {stats.stageCleared ?? 1} COMPLETE!
                   </span>
                   <span className="font-body text-[11px] text-[#e6d5b2] truncate">
@@ -115,17 +114,17 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                 </div>
               </div>
               {difficultyLabel && (
-                <span className="shrink-0 px-2 py-0.5 rounded bg-[#140e06] border border-[#f2a93b]/50 font-display text-[9px] font-bold tracking-[0.14em] text-[#f7d88a] uppercase">
+                <span className="shrink-0 px-2 py-0.5 rounded bg-[#140e06] border border-[#f2a93b]/55 font-display text-[9px] font-bold tracking-[0.12em] text-[#f7d88a] uppercase">
                   {difficultyLabel}
                 </span>
               )}
-            </div>
+            </NineSlice>
           )}
 
           {/* Header Typography */}
-          <div className="w-full flex flex-col items-center mb-4">
+          <div className="w-full flex flex-col items-center mb-3">
             <span
-              className={`font-display text-[11px] font-bold uppercase tracking-[0.26em] mb-1 ${
+              className={`font-display text-[11px] font-bold uppercase tracking-[0.24em] mb-1 ${
                 stats.victory ? 'text-[#f2a93b]' : 'text-[#e5303a]'
               }`}
               style={{ textShadow: '0 1px 4px rgba(0, 0, 0, 0.95)' }}
@@ -135,33 +134,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
 
             <h2
               id="gameover-modal-title"
-              className="font-display font-black text-[26px] sm:text-[28px] tracking-[0.08em] leading-tight uppercase"
-              style={{
-                backgroundImage: stats.victory
-                  ? 'linear-gradient(180deg, #fff3cc 0%, #f2b749 52%, #a86416 100%)'
-                  : 'linear-gradient(180deg, #f9f2df 0%, #dfc48e 52%, #9a7438 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                filter:
-                  'drop-shadow(0 2px 0 #140806) drop-shadow(0 4px 12px rgba(0, 0, 0, 0.92))',
-              }}
+              className={`font-display font-black text-[clamp(22px,5vw,28px)] tracking-[0.08em] leading-tight uppercase ${
+                stats.victory ? 'text-[#ffd978]' : 'text-[#efe2c2]'
+              }`}
+              style={{ textShadow: '0 2px 3px #140806' }}
             >
               {stats.victory ? 'STAGE 1 COMPLETE' : 'THE LIGHT FADES'}
             </h2>
 
-            {/* Glowing Divider Line */}
-            <div
-              aria-hidden="true"
-              className="w-4/5 h-[2px] my-2.5 rounded-full"
-              style={{
-                background: stats.victory
-                  ? 'linear-gradient(90deg, transparent 0%, #b87318 20%, #f2c464 50%, #b87318 80%, transparent 100%)'
-                  : 'linear-gradient(90deg, transparent 0%, #7d0d13 18%, #e5303a 50%, #7d0d13 82%, transparent 100%)',
-                boxShadow: stats.victory
-                  ? '0 0 12px rgba(242, 169, 59, 0.7)'
-                  : '0 0 12px rgba(229, 48, 58, 0.78)',
-              }}
-            />
+            <UiChainDivider className="my-2" />
 
             <p className="font-body text-sm font-medium text-[#cbbba0] leading-snug">
               {stats.victory
@@ -178,15 +159,19 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
 
           {/* Dedicated Stage 1 Gold Reward Callout */}
           {stats.victory && stageRewardGold > 0 && (
-            <IronCard
+            <NineSlice
+              variant="plateWideIron"
+              tileTexture="row"
               highlight="gold"
-              className="w-full mb-3.5"
-              contentClassName="px-3.5 py-2.5 flex items-center justify-between gap-3"
+              padding="0px"
+              borderWidth="clamp(8px, 1.4vw, 12px) clamp(12px, 2vw, 18px)"
+              className="w-full mb-3"
+              contentClassName="px-2.5 py-2 flex items-center justify-between gap-2.5"
             >
               <div className="flex items-center gap-2.5 min-w-0 text-left">
                 <Icon id="soul_coin" size={24} className="shrink-0" />
                 <div className="flex flex-col min-w-0">
-                  <span className="font-display text-[11px] font-bold tracking-[0.14em] text-[#f2c464] uppercase">
+                  <span className="font-display text-[11px] font-bold tracking-[0.12em] text-[#f2c464] uppercase">
                     Stage 1 Clear Reward
                   </span>
                   <span className="font-body text-[11px] text-[#cbbba0]">
@@ -198,188 +183,141 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                 </div>
               </div>
               <span
-                className="font-display font-black text-lg text-[#ffd978] tabular-nums shrink-0"
-                style={{
-                  textShadow: '0 0 14px rgba(242, 196, 100, 0.55), 0 2px 3px rgba(0, 0, 0, 0.95)',
-                }}
+                className="font-display font-black text-base sm:text-lg text-[#ffd978] tabular-nums shrink-0"
+                style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.95)' }}
               >
                 +{stageRewardGold.toLocaleString()} GOLD
               </span>
-            </IronCard>
+            </NineSlice>
           )}
 
-          {/* 3 Side-by-Side Stat Cards using panel_iron_card.png */}
-          <div className="grid grid-cols-3 gap-2.5 w-full mb-5">
-            <IronCard
+          {/* 3 Side-by-Side Stat Cards */}
+          <div className="grid grid-cols-3 gap-2 w-full mb-4">
+            <NineSlice
+              variant="miniPlate"
+              tileTexture="row"
+              padding="0px"
               className="w-full"
-              contentClassName="px-2 py-3 flex flex-col items-center justify-center gap-0.5"
+              contentClassName="px-1.5 py-2.5 flex flex-col items-center justify-center gap-0.5"
             >
               <div
-                className="font-display font-bold text-xl sm:text-2xl leading-none text-[#f4e7c8] tabular-nums"
-                style={{
-                  textShadow:
-                    '0 0 12px rgba(242, 214, 152, 0.35), 0 2px 3px rgba(0, 0, 0, 0.95)',
-                }}
+                className="font-display font-bold text-[clamp(17px,4vw,22px)] leading-none text-[#f4e7c8] tabular-nums"
+                style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.95)' }}
               >
                 {timeFormatted}
               </div>
               <div className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[#a89a7e] mt-1">
                 TIME
               </div>
-            </IronCard>
+            </NineSlice>
 
-            <IronCard
+            <NineSlice
+              variant="miniPlate"
+              tileTexture="row"
+              padding="0px"
               className="w-full"
-              contentClassName="px-2 py-3 flex flex-col items-center justify-center gap-0.5"
+              contentClassName="px-1.5 py-2.5 flex flex-col items-center justify-center gap-0.5"
             >
               <div
-                className="font-display font-bold text-xl sm:text-2xl leading-none text-[#f4e7c8] tabular-nums"
-                style={{
-                  textShadow:
-                    '0 0 12px rgba(229, 48, 58, 0.35), 0 2px 3px rgba(0, 0, 0, 0.95)',
-                }}
+                className="font-display font-bold text-[clamp(17px,4vw,22px)] leading-none text-[#f4e7c8] tabular-nums"
+                style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.95)' }}
               >
                 {stats.enemiesKilled}
               </div>
               <div className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[#a89a7e] mt-1">
                 KILLS
               </div>
-            </IronCard>
+            </NineSlice>
 
-            <IronCard
+            <NineSlice
+              variant="miniPlate"
+              tileTexture="row"
+              padding="0px"
               className="w-full"
-              contentClassName="px-2 py-3 flex flex-col items-center justify-center gap-0.5"
+              contentClassName="px-1.5 py-2.5 flex flex-col items-center justify-center gap-0.5"
             >
               <div
-                className="font-display font-bold text-xl sm:text-2xl leading-none text-[#f2c464] tabular-nums"
-                style={{
-                  textShadow:
-                    '0 0 14px rgba(242, 196, 100, 0.45), 0 2px 3px rgba(0, 0, 0, 0.95)',
-                }}
+                className="font-display font-bold text-[clamp(17px,4vw,22px)] leading-none text-[#f2c464] tabular-nums"
+                style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.95)' }}
               >
                 +{stats.coinsEarned.toLocaleString()}
               </div>
               <div className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[#a89a7e] mt-1">
                 GOLD
               </div>
-            </IronCard>
+            </NineSlice>
           </div>
 
-          {/* Tactile Mobile Action Buttons */}
-          <div className="flex flex-col gap-2.5 w-full">
-            {/* Primary Button: ONE MORE RUN using btn_play.png */}
-            <button
-              type="button"
+          {/* Action Buttons */}
+          <div className="flex flex-col gap-2 w-full">
+            <UiButton
+              tone="blood"
+              size="lg"
+              haptic="medium"
               onClick={() => {
                 soundManager.playUiClick();
                 haptics.tap('heavy');
                 onRestart();
               }}
-              className="group relative w-full h-[68px] flex items-center justify-center gap-2.5 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
+              className="w-full"
             >
-              {playBtnSrc ? (
-                <img
-                  src={playBtnSrc}
-                  alt=""
-                  aria-hidden="true"
-                  referrerPolicy="no-referrer"
-                  style={{
-                    filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
-                  }}
-                  className="pointer-events-none absolute inset-0 w-full h-full object-fill select-none"
-                />
-              ) : playBtnError ? (
-                <div
-                  aria-hidden="true"
-                  style={{
-                    filter: 'drop-shadow(0 0 16px rgba(220, 38, 38, 0.55))',
-                  }}
-                  className="pointer-events-none absolute inset-0 rounded-[10px] rusted-play-bar border border-[#942027]"
-                />
-              ) : null}
+              <Icon id="ui_restart" size={18} />
+              <span>ONE MORE RUN</span>
+            </UiButton>
 
-              <span className="relative z-10 flex items-center justify-center transition-transform duration-150 group-hover:-rotate-45">
-                <Icon id="ui_restart" size={20} />
-              </span>
-              <span
-                className="relative z-10 font-display font-black text-[18px] tracking-[0.14em] uppercase whitespace-nowrap"
-                style={{
-                  backgroundImage:
-                    'linear-gradient(180deg, #fff1c7 0%, #eab24e 52%, #a26318 100%)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  filter:
-                    'drop-shadow(0 0 10px rgba(242, 169, 59, 0.6)) drop-shadow(0 2px 0 #1b0705)',
-                }}
-              >
-                ONE MORE RUN
-              </span>
-            </button>
-
-            {/* Secondary 2-Column Quick-Access Row: MISSIONS & SHOP */}
-            <div className="grid grid-cols-2 gap-2.5 w-full">
-              <IronCard
-                asButton
-                highlight={unclaimedMissions > 0 ? 'gold' : 'none'}
+            <div className="grid grid-cols-2 gap-2 w-full">
+              <UiButton
+                tone="iron"
+                size="md"
+                active={unclaimedMissions > 0}
                 onClick={() => {
                   soundManager.playUiClick();
-                  haptics.tap('light');
                   onOpenMissions();
                 }}
-                className="w-full h-[56px] active:scale-95"
-                contentClassName="h-full px-3 flex items-center justify-center gap-2"
+                className="w-full"
               >
                 <div className="relative shrink-0 flex items-center justify-center">
-                  <Icon id="nav_missions" size={24} />
+                  <Icon id="nav_missions" size={20} />
                   {unclaimedMissions > 0 && (
                     <span
                       aria-label={`${unclaimedMissions} unclaimed`}
-                      className="absolute -top-1 -right-1.5 min-w-[16px] h-[16px] px-1 rounded-full bg-[#b3121a] border border-[#f2a93b] font-display text-[9px] font-bold text-[#fae8b8] flex items-center justify-center"
+                      className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-[#b3121a] border border-[#f2a93b] font-display text-[9px] font-bold text-[#fae8b8] flex items-center justify-center"
                     >
                       {unclaimedMissions}
                     </span>
                   )}
                 </div>
-                <span className="font-display font-bold text-[13px] tracking-[0.1em] text-[#ede0c4] whitespace-nowrap">
-                  MISSIONS
-                </span>
-              </IronCard>
+                <span>MISSIONS</span>
+              </UiButton>
 
-              <IronCard
-                asButton
+              <UiButton
+                tone="iron"
+                size="md"
                 onClick={() => {
                   soundManager.playUiClick();
-                  haptics.tap('light');
                   onOpenShop('upgrades');
                 }}
-                className="w-full h-[56px] active:scale-95"
-                contentClassName="h-full px-3 flex items-center justify-center gap-2"
+                className="w-full"
               >
-                <Icon id="nav_shop" size={24} />
-                <span className="font-display font-bold text-[13px] tracking-[0.1em] text-[#ede0c4] whitespace-nowrap">
-                  SHOP
-                </span>
-              </IronCard>
+                <Icon id="nav_shop" size={20} />
+                <span>SHOP</span>
+              </UiButton>
             </div>
 
-            {/* Bottom Button: MAIN MENU */}
-            <IronCard
-              asButton
+            <UiButton
+              tone="iron"
+              size="md"
               onClick={() => {
                 soundManager.playUiClick();
-                haptics.tap('light');
                 onQuitToTitle();
               }}
-              className="w-full h-[56px] active:scale-95"
-              contentClassName="h-full px-4 flex items-center justify-center gap-2.5"
+              className="w-full"
             >
-              <Icon id="nav_home" size={24} />
-              <span className="font-display font-bold text-[15px] tracking-[0.14em] text-[#ede0c4] whitespace-nowrap">
-                MAIN MENU
-              </span>
-            </IronCard>
+              <Icon id="nav_home" size={20} />
+              <span>MAIN MENU</span>
+            </UiButton>
           </div>
-        </IronCard>
+        </NineSlice>
       </div>
     </div>
   );

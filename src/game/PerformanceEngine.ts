@@ -93,10 +93,18 @@ export type HardwareTier = 'low_end' | 'mid_end' | 'high_end';
 
 let cachedHardwareTier: HardwareTier | null = null;
 let cachedWeakGpuMatch: boolean | null = null;
+let cachedIsMobileDevice: boolean | null = null;
+
+const GPU_TIER_SESSION_KEY = 'll_weak_gpu_v1';
 
 export function isAndroidOrMobileDevice(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  if (cachedIsMobileDevice !== null) return cachedIsMobileDevice;
+  if (typeof navigator === 'undefined') {
+    cachedIsMobileDevice = false;
+    return false;
+  }
+  cachedIsMobileDevice = /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+  return cachedIsMobileDevice;
 }
 
 function detectWeakMobileGpu(rendererStr: string): boolean {
@@ -114,6 +122,11 @@ export function probeWebGlRendererTier(gl?: WebGLRenderingContext | WebGL2Render
     if (ext) {
       const renderer = String(gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) || '');
       cachedWeakGpuMatch = detectWeakMobileGpu(renderer);
+      try {
+        sessionStorage.setItem(GPU_TIER_SESSION_KEY, cachedWeakGpuMatch ? '1' : '0');
+      } catch {
+        // Ignore storage quota / private mode
+      }
       if (cachedWeakGpuMatch && cachedHardwareTier !== 'low_end') {
         cachedHardwareTier = 'low_end';
       }
@@ -134,6 +147,16 @@ export function getHardwareTier(): HardwareTier {
   const cores = navigator.hardwareConcurrency || (isMobile ? 4 : 8);
   const memGb = (navigator as Navigator & { deviceMemory?: number }).deviceMemory;
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+
+  if (cachedWeakGpuMatch === null && typeof sessionStorage !== 'undefined') {
+    try {
+      const stored = sessionStorage.getItem(GPU_TIER_SESSION_KEY);
+      if (stored === '1') cachedWeakGpuMatch = true;
+      else if (stored === '0') cachedWeakGpuMatch = false;
+    } catch {
+      // Ignore storage restrictions
+    }
+  }
 
   if (cachedWeakGpuMatch === null && typeof document !== 'undefined') {
     try {
@@ -192,7 +215,7 @@ export function resolveRenderScale(
   let desired: number;
   switch (mode) {
     case 'performance':
-      desired = isAndroidOrMobileDevice() ? 1.125 : 1.5;
+      desired = isAndroidOrMobileDevice() ? 1.0 : 1.5;
       break;
     case 'fhd':
       desired = 2.0; // 1080x1920
@@ -490,9 +513,9 @@ export class PerformanceRuntime {
     this.temporalLightAccumMs += deltaMs;
     const intervalMs =
       hwTier === 'low_end' || qualityTier === 'low'
-        ? 42
+        ? 44
         : isMobile
-          ? 32
+          ? 36
           : underLoad
             ? 20
             : 16;
@@ -514,13 +537,21 @@ export interface AdaptiveFxBudget {
   hitVfxScale: number;
 }
 
+let cachedBudgetKey = '';
+let cachedBudgetValue: AdaptiveFxBudget | null = null;
+
 export function getAdaptiveFxBudget(): AdaptiveFxBudget {
   const hwTier = getHardwareTier();
   const isMobile = isAndroidOrMobileDevice();
   const isLowQuality = gameManager.getQualityTier() === 'low';
+  const cacheKey = `${hwTier}_${isMobile ? 1 : 0}_${isLowQuality ? 1 : 0}`;
+  if (cachedBudgetValue && cachedBudgetKey === cacheKey) {
+    return cachedBudgetValue;
+  }
+  cachedBudgetKey = cacheKey;
 
   if (hwTier === 'low_end' || isLowQuality) {
-    return {
+    cachedBudgetValue = {
       hwTier,
       isLowQuality,
       maxTorchCasters: 2,
@@ -529,9 +560,10 @@ export function getAdaptiveFxBudget(): AdaptiveFxBudget {
       groundShadowCap: 110,
       hitVfxScale: 0.72,
     };
+    return cachedBudgetValue;
   }
   if (isMobile && hwTier === 'mid_end') {
-    return {
+    cachedBudgetValue = {
       hwTier,
       isLowQuality,
       maxTorchCasters: 3,
@@ -540,9 +572,10 @@ export function getAdaptiveFxBudget(): AdaptiveFxBudget {
       groundShadowCap: 165,
       hitVfxScale: 0.85,
     };
+    return cachedBudgetValue;
   }
   if (isMobile) {
-    return {
+    cachedBudgetValue = {
       hwTier,
       isLowQuality,
       maxTorchCasters: 4,
@@ -551,8 +584,9 @@ export function getAdaptiveFxBudget(): AdaptiveFxBudget {
       groundShadowCap: 215,
       hitVfxScale: 1.0,
     };
+    return cachedBudgetValue;
   }
-  return {
+  cachedBudgetValue = {
     hwTier,
     isLowQuality,
     maxTorchCasters: 5,
@@ -561,6 +595,7 @@ export function getAdaptiveFxBudget(): AdaptiveFxBudget {
     groundShadowCap: 280,
     hitVfxScale: 1.0,
   };
+  return cachedBudgetValue;
 }
 
 export const performanceRuntime = new PerformanceRuntime(

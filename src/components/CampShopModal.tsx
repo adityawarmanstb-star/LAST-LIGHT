@@ -216,17 +216,17 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
 
   return (
     <div
-      className="fixed inset-0 backdrop-blur-md flex flex-col items-center justify-center safe-area-pad z-50"
+      className="fixed inset-0 flex flex-col items-center justify-center safe-area-pad z-50 overflow-x-hidden"
       style={{
         background:
-          'radial-gradient(circle at center, rgba(16, 15, 18, 0.8) 0%, rgba(30, 10, 13, 0.92) 100%)',
+          'radial-gradient(circle at center, rgba(16, 15, 18, 0.88) 0%, rgba(30, 10, 13, 0.96) 100%)',
       }}
     >
       <ForgedIronFrame
         seed="camp-shop-modal"
         dripCount={4}
         maxDripLength={22}
-        className="max-w-2xl w-full flex flex-col max-h-[90vh]"
+        className="max-w-[540px] w-full flex flex-col max-h-[90vh]"
         contentClassName="flex flex-col max-h-[90vh] overflow-hidden"
       >
         {/* Clean Header: Title on left, single unobstructed Close button on right */}
@@ -438,7 +438,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
                         type="button"
                         onClick={() => handleUnequipRelic(equippedInSlot.id)}
                         title={`Unequip ${equippedInSlot.name}`}
-                        className="group min-h-[68px] p-2.5 rounded-[10px] border text-left flex items-center gap-2.5 transition-all hover:brightness-110 active:scale-[0.98] cursor-pointer"
+                        className="group min-h-[68px] p-2.5 rounded-[10px] border text-left flex items-center gap-2.5 transition-transform active:scale-[0.98] cursor-pointer"
                         style={{
                           backgroundColor: rarityMeta.bgTint,
                           borderColor: rarityMeta.borderColor,

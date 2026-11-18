@@ -207,133 +207,133 @@ export const ICON_MAP: Record<string, IconMapEntry> = {
     display: 'Lantern Flare',
     category: 'shop',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561516_caac768d.png',
+    assetUrl: './assets/aistudio/1000561516_caac768d.webp',
   },
   swiftness: {
     display: 'Zephyr Steps',
     category: 'shop',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561517_b1af7bbb.png',
+    assetUrl: './assets/aistudio/1000561517_b1af7bbb.webp',
   },
   magnet: {
     display: 'Soul Attractor',
     category: 'shop',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561518_8c0ee6ac.png',
+    assetUrl: './assets/aistudio/1000561518_8c0ee6ac.webp',
   },
   cooldown: {
     display: 'Rapid Incantation',
     category: 'shop',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561520_7a4de8b0.png',
+    assetUrl: './assets/aistudio/1000561520_7a4de8b0.webp',
   },
   revive: {
     display: 'Undying Ember',
     category: 'shop',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561523_e1799dc8.png',
+    assetUrl: './assets/aistudio/1000561523_e1799dc8.webp',
   },
   ui_skull: {
     display: 'Warden Skull',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561526_599bfa37.png',
+    assetUrl: './assets/aistudio/1000561526_599bfa37.webp',
   },
   ui_check: {
     display: 'Completed',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561527_f5d9ce6f.png',
+    assetUrl: './assets/aistudio/1000561527_f5d9ce6f.webp',
   },
   ui_play: {
     display: 'Play',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561528_0453ddd4.png',
+    assetUrl: './assets/aistudio/1000561528_0453ddd4.webp',
   },
   ui_restart: {
     display: 'Restart',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561529_0fa5579e.png',
+    assetUrl: './assets/aistudio/1000561529_0fa5579e.webp',
   },
   ui_heart: {
     display: 'Health',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561530_ce46ab6a.png',
+    assetUrl: './assets/aistudio/1000561530_ce46ab6a.webp',
   },
   ui_clock: {
     display: 'Survival Timer',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561532_980e3a0e.png',
+    assetUrl: './assets/aistudio/1000561532_980e3a0e.webp',
   },
   ui_crown: {
     display: 'Boss Crown',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561533_a87cac33.png',
+    assetUrl: './assets/aistudio/1000561533_a87cac33.webp',
   },
   ui_sparkles: {
     display: 'Milestones',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561534_d8a6c269.png',
+    assetUrl: './assets/aistudio/1000561534_d8a6c269.webp',
   },
   ui_scroll: {
     display: 'Daily Missions',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561535_7f57d995.png',
+    assetUrl: './assets/aistudio/1000561535_7f57d995.webp',
   },
   ui_swords: {
     display: 'Combat Slay',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561536_de0bf80d.png',
+    assetUrl: './assets/aistudio/1000561536_de0bf80d.webp',
   },
   ui_warning: {
     display: 'Warning',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561537_da206f1f.png',
+    assetUrl: './assets/aistudio/1000561537_da206f1f.webp',
   },
   ui_flame: {
     display: 'Enraged Flame',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561538_f069f9fe.png',
+    assetUrl: './assets/aistudio/1000561538_f069f9fe.webp',
   },
   ui_shield: {
     display: 'Pact Shield',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561539_72604844.png',
+    assetUrl: './assets/aistudio/1000561539_72604844.webp',
   },
   ui_trophy: {
     display: 'Trophy',
     category: 'ui',
     atlas: 'standalone_direct',
-    assetUrl: './assets/aistudio/1000561540_c9af37f7.png',
+    assetUrl: './assets/aistudio/1000561540_c9af37f7.webp',
   },
   difficulty_baby: {
     display: 'Baby Difficulty',
     category: 'ui',
     atlas: 'standalone_chroma',
-    assetUrl: './assets/aistudio/baby_2a82300e.png',
+    assetUrl: './assets/aistudio/baby_2a82300e.webp',
   },
   difficulty_pro: {
     display: 'Pro Difficulty',
     category: 'ui',
     atlas: 'standalone_chroma',
-    assetUrl: './assets/aistudio/pro_61caf01c.png',
+    assetUrl: './assets/aistudio/pro_61caf01c.webp',
   },
   difficulty_hacker: {
     display: 'Hacker Difficulty',
     category: 'ui',
     atlas: 'standalone_chroma',
-    assetUrl: './assets/aistudio/hacker_98e53967.png',
+    assetUrl: './assets/aistudio/hacker_98e53967.webp',
   },
   ui_settings: { display: 'Settings', category: 'ui', atlas: 'icons_atlas' },
   ui_sound_on: { display: 'Sound on', category: 'ui', atlas: 'icons_atlas' },
@@ -460,33 +460,52 @@ const loggedMissingIds = new Set<string>();
 const preloadedImages = new Map<string, HTMLImageElement>();
 let atlasesPreloadPromise: Promise<void> | null = null;
 
-export function preloadIconAtlases(): Promise<void> {
+const DIRECT_ICON_URLS: readonly string[] = Object.values(ICON_MAP)
+  .filter((entry) => entry.atlas === 'standalone_direct' && entry.assetUrl)
+  .map((entry) => entry.assetUrl as string);
+
+export function getIconAtlasPreloadCount(): number {
+  return (
+    Object.keys(ICON_ATLAS_URLS).length +
+    DIRECT_ICON_URLS.length +
+    Object.keys(ICON_ATLAS_JSON_URLS).length
+  );
+}
+
+export function preloadIconAtlases(onItemDone?: () => void): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
-  if (atlasesPreloadPromise) return atlasesPreloadPromise;
+  if (atlasesPreloadPromise) {
+    return atlasesPreloadPromise.then(() => {
+      if (onItemDone) {
+        const count = getIconAtlasPreloadCount();
+        for (let i = 0; i < count; i++) onItemDone();
+      }
+    });
+  }
 
   const atlasKeys = Object.keys(ICON_ATLAS_URLS) as SpriteAtlasId[];
-  const directAssets = Object.values(ICON_MAP)
-    .filter((entry) => entry.atlas === 'standalone_direct' && entry.assetUrl)
-    .map((entry) => entry.assetUrl as string);
-
   const urlsToPreload: Array<{ key: string; url: string }> = [
     ...atlasKeys.map((atlasId) => ({ key: atlasId, url: ICON_ATLAS_URLS[atlasId] })),
-    ...directAssets.map((url) => ({ key: url, url })),
+    ...DIRECT_ICON_URLS.map((url) => ({ key: url, url })),
   ];
 
   const imagePromises = urlsToPreload.map(
     ({ key, url }) =>
       new Promise<void>((resolve) => {
+        const finish = () => {
+          onItemDone?.();
+          resolve();
+        };
         const img = new Image();
         img.decoding = 'async';
         img.onload = () => {
           if (typeof img.decode === 'function') {
-            img.decode().catch(() => {}).finally(() => resolve());
+            img.decode().catch(() => {}).finally(finish);
           } else {
-            resolve();
+            finish();
           }
         };
-        img.onerror = () => resolve();
+        img.onerror = finish;
         img.src = url;
         preloadedImages.set(key, img);
       })
@@ -494,8 +513,8 @@ export function preloadIconAtlases(): Promise<void> {
 
   const jsonPromises = Object.values(ICON_ATLAS_JSON_URLS).map((url) =>
     fetch(url)
-      .then(() => undefined)
       .catch(() => undefined)
+      .finally(() => onItemDone?.())
   );
 
   atlasesPreloadPromise = Promise.all([...imagePromises, ...jsonPromises]).then(() => undefined);

@@ -4,7 +4,10 @@ import { soundManager } from '../../game/audio';
 import { AchievementDefinition, AchievementsProgressState } from '../../game/types';
 import { haptics } from '../../mobile/haptics';
 import { Icon } from '../Icon';
-import { IronCard } from '../IronCard';
+import { NineSlice } from '../ui/NineSlice';
+import { UiBar } from '../ui/UiBar';
+import { UiButton } from '../ui/UiButton';
+import { UI_SPRITES } from '../ui/uiConfig';
 
 type AchievementFilter = 'all' | 'ready' | 'locked';
 
@@ -84,11 +87,11 @@ export const AchievementsPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full flex-1 min-h-0 flex flex-col px-3 pb-2 overflow-hidden gap-2.5">
+    <div className="w-full flex-1 min-h-0 flex flex-col px-2 sm:px-3 pb-2 overflow-hidden gap-2">
       {/* Page Title & Claim All */}
       <div className="shrink-0 flex items-center justify-between gap-2">
         <div>
-          <h1 className="font-display font-bold text-xl tracking-[0.14em] text-[#e8dcc2]">
+          <h1 className="font-display font-bold text-[clamp(17px,3.5vw,21px)] tracking-[0.14em] text-[#e8dcc2]">
             ACHIEVEMENTS
           </h1>
           <p className="font-body text-xs font-medium text-[#b5a589]">
@@ -104,18 +107,20 @@ export const AchievementsPage: React.FC = () => {
         </div>
 
         {unclaimedTotal > 0 && (
-          <button
-            type="button"
-            onClick={handleClaimAll}
-            className="min-h-[56px] px-3.5 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-[11px] tracking-wider text-[#f2a93b] cursor-pointer active:scale-95 shrink-0"
-          >
+          <UiButton tone="blood" size="sm" onClick={handleClaimAll}>
             CLAIM ALL (+{unclaimedTotal})
-          </button>
+          </UiButton>
         )}
       </div>
 
-      {/* Lifetime Telemetry Summary + Filter Strip */}
-      <IronCard className="shrink-0" contentClassName="p-3 flex flex-col gap-2.5">
+      {/* Lifetime Summary + Filter Strip */}
+      <NineSlice
+        variant="panelIronDark"
+        tileTexture="stone"
+        padding="0px"
+        className="shrink-0"
+        contentClassName="p-2.5 flex flex-col gap-2"
+      >
         <div className="grid grid-cols-4 gap-2 text-center">
           <div>
             <div className="font-body text-[11px] text-[#9c8e72]">Kills</div>
@@ -153,29 +158,25 @@ export const AchievementsPage: React.FC = () => {
                   ? `Unlocked (${unlockedCount})`
                   : `Active (${ACHIEVEMENTS.length - unlockedCount})`;
             return (
-              <button
+              <UiButton
                 key={tab}
-                type="button"
+                tone={active ? 'blood' : 'iron'}
+                active={active}
+                size="xs"
                 onClick={() => {
                   soundManager.playUiClick();
-                  haptics.tap('light');
                   setFilter(tab);
                 }}
-                className={`min-h-[56px] px-2 rounded-[6px] border font-display font-bold text-[11px] cursor-pointer transition-colors ${
-                  active
-                    ? 'bg-[#360f14] border-[#b3121a] text-[#f2dfba]'
-                    : 'bg-[#121418] border-[#3a3f47] text-[#9c8e72]'
-                }`}
               >
                 {label}
-              </button>
+              </UiButton>
             );
           })}
         </div>
-      </IronCard>
+      </NineSlice>
 
       {/* Scrollable Achievements List */}
-      <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 flex flex-col gap-2.5 pb-2">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-0.5 flex flex-col gap-2 pb-2">
         {visibleAchievements.map((ach) => {
           const currentVal = state.stats[ach.statKey] ?? 0;
           const isUnlocked = unlockedSet.has(ach.id);
@@ -184,22 +185,30 @@ export const AchievementsPage: React.FC = () => {
           const pct = Math.max(0, Math.min(100, (currentVal / ach.target) * 100));
 
           return (
-            <IronCard
+            <NineSlice
               key={ach.id}
+              variant={canClaim ? 'cardOrnateGold' : 'panelIronDark'}
+              tileTexture="stone"
               highlight={canClaim ? 'gold' : 'none'}
-              contentClassName="p-3.5 flex items-center justify-between gap-3"
+              padding="0px"
+              contentClassName="p-3 flex items-center justify-between gap-2.5"
             >
-              <div className="flex items-start gap-3 flex-1 min-w-0">
+              <div className="flex items-start gap-2.5 flex-1 min-w-0">
                 <div
-                  className={`w-11 h-11 rounded-[9px] border flex items-center justify-center shrink-0 ${
-                    canClaim
-                      ? 'bg-[#24190c] border-[#f2a93b]'
-                      : isUnlocked
-                        ? 'bg-[#17151a] border-[#6b3a2a]'
-                        : 'bg-[#101216] border-[#3a3f47] opacity-80'
-                  }`}
+                  style={{ width: 44, aspectRatio: '1 / 1' }}
+                  className="relative flex items-center justify-center shrink-0"
                 >
-                  {renderAchievementIcon(ach.icon, isUnlocked)}
+                  <img
+                    src={UI_SPRITES.roundSquareSocket}
+                    alt=""
+                    aria-hidden="true"
+                    draggable={false}
+                    style={{ imageRendering: 'auto' }}
+                    className="pointer-events-none absolute inset-0 w-full h-full object-contain"
+                  />
+                  <span className="relative z-10 flex items-center justify-center">
+                    {renderAchievementIcon(ach.icon, isUnlocked)}
+                  </span>
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -216,16 +225,13 @@ export const AchievementsPage: React.FC = () => {
                     {ach.description}
                   </p>
 
-                  <div className="mt-2 flex items-center gap-2.5">
-                    <div className="flex-1 h-2.5 rounded-[4px] bg-[#090a0d] border border-[#3a3f47] overflow-hidden p-[1px]">
-                      <div
-                        className="h-full rounded-[3px] transition-all duration-200"
-                        style={{
-                          width: `${pct}%`,
-                          background: isUnlocked
-                            ? 'linear-gradient(90deg, #b85c14 0%, #f2a93b 100%)'
-                            : 'linear-gradient(90deg, #6e0b12 0%, #c91c24 55%, #ef6c28 100%)',
-                        }}
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <UiBar
+                        percent={pct}
+                        fill={isUnlocked ? 'gold' : 'crimson'}
+                        heightClassName="h-[13px]"
+                        frameBorderWidth="2px 6px"
                       />
                     </div>
                     <span className="font-mono-numbers text-[11px] font-bold text-[#e8dcc2] shrink-0">
@@ -237,26 +243,22 @@ export const AchievementsPage: React.FC = () => {
 
               <div className="shrink-0">
                 {isClaimed ? (
-                  <div className="min-h-[56px] px-2.5 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
+                  <div className="min-h-[40px] px-2 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
                     <Icon id="ui_check" size={16} />
                     <span>CLAIMED</span>
                   </div>
                 ) : canClaim ? (
-                  <button
-                    type="button"
-                    onClick={() => handleClaim(ach.id)}
-                    className="min-h-[56px] min-w-[82px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
-                  >
+                  <UiButton tone="blood" size="sm" onClick={() => handleClaim(ach.id)}>
                     CLAIM
-                  </button>
+                  </UiButton>
                 ) : (
-                  <div className="min-h-[56px] px-2 flex items-center gap-1 font-display font-bold text-[11px] text-[#7c7361]">
+                  <div className="min-h-[40px] px-2 flex items-center gap-1 font-display font-bold text-[11px] text-[#7c7361]">
                     <Icon id="ui_lock_closed" size={16} muted />
                     <span>LOCKED</span>
                   </div>
                 )}
               </div>
-            </IronCard>
+            </NineSlice>
           );
         })}
       </div>

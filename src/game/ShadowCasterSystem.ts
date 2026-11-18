@@ -763,6 +763,10 @@ export class ShadowCasterSystem {
     }
   }
 
+  public hasActivePillars(): boolean {
+    return this.activePillarCount > 0;
+  }
+
   private pushGroundShadow(
     texKey: 'world_shadow_oval' | 'world_shadow_wedge' | 'world_shadow_cast',
     x: number,
@@ -779,23 +783,25 @@ export class ShadowCasterSystem {
     if (spr.texture.key !== texKey) {
       spr.setTexture(texKey);
     }
-    spr
-      .setOrigin(originX, originY)
-      .setPosition(x, y)
-      .setDisplaySize(displayW, displayH)
-      .setRotation(rotation)
-      .setAlpha(alpha)
-      .setVisible(true);
+    if (spr.originX !== originX || spr.originY !== originY) {
+      spr.setOrigin(originX, originY);
+    }
+    spr.x = x;
+    spr.y = y;
+    spr.setDisplaySize(displayW, displayH);
+    spr.rotation = rotation;
+    spr.setAlpha(alpha);
+    if (!spr.visible) spr.setVisible(true);
   }
 
   private pushOverlayShadow(x: number, y: number, displayW: number, displayH: number, alpha: number) {
     if (this.activeOverlayShadows >= this.overlayShadowPool.length || alpha <= 0.02) return;
     const spr = this.overlayShadowPool[this.activeOverlayShadows++];
-    spr
-      .setPosition(x, y)
-      .setDisplaySize(displayW, displayH)
-      .setAlpha(alpha)
-      .setVisible(true);
+    spr.x = x;
+    spr.y = y;
+    spr.setDisplaySize(displayW, displayH);
+    spr.setAlpha(alpha);
+    if (!spr.visible) spr.setVisible(true);
   }
 
   /**

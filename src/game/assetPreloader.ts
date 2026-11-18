@@ -1,10 +1,26 @@
 import { soundManager } from './audio';
-import { preloadIconAtlases } from './iconRegistry';
+import { getIconAtlasPreloadCount, preloadIconAtlases } from './iconRegistry';
 import {
   UI_ASSETS,
   getChromaKeyPreloadCount,
   preloadAllChromaKeyUiAssets,
 } from '../hooks/useChromaKeyImage';
+import { UI_KIT_TEXTURES } from '../components/ui/uiConfig';
+import { isAndroidOrMobileDevice } from './PerformanceEngine';
+import {
+  getPreloadedImage,
+  normalizeAssetUrl,
+  registerPreloadedImage,
+} from './imageCache';
+
+export { getPreloadedImage, normalizeAssetUrl, registerPreloadedImage };
+
+const LOADBAR_TEXTURES: readonly string[] = [
+  './assets/aistudio/loadbar_track_9e8a26f0.webp',
+  './assets/aistudio/loadbar_fill_flow_sheet_6c87cf77.webp',
+  './assets/aistudio/loadbar_tip_e613ffa4.webp',
+  './assets/aistudio/loadbar_frame_762921f6.webp',
+];
 
 const ARENA_SPRITE_ASSETS: readonly string[] = [
   // Player sprites & sheets
@@ -39,24 +55,40 @@ const ARENA_SPRITE_ASSETS: readonly string[] = [
   './assets/aistudio/fx_lightning_sheet_03b57c80.webp',
   './assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.webp',
   // Enemy death blood pack (animated burst, primary stain & 9-frame decal atlas)
-  './assets/aistudio/blood_burst_sheet_71be5646.png',
-  './assets/aistudio/blood_burst_stain_dba05e4d.png',
-  './assets/aistudio/blood_decals_atlas_9700fcd9.png',
+  './assets/aistudio/blood_burst_sheet_71be5646.webp',
+  './assets/aistudio/blood_burst_stain_dba05e4d.webp',
+  './assets/aistudio/blood_decals_atlas_9700fcd9.webp',
 ];
 
-const STATIC_UI_IMAGES: readonly string[] = [
-  UI_ASSETS.loadingSplash,
-  UI_ASSETS.bgDungeon,
-  UI_ASSETS.appIcon,
-];
+function getStaticUiImages(): readonly string[] {
+  return Array.from(
+    new Set([
+      UI_ASSETS.loadingSplash,
+      UI_ASSETS.bgDungeon,
+      UI_ASSETS.appIcon,
+      ...LOADBAR_TEXTURES,
+      ...UI_KIT_TEXTURES,
+    ])
+  );
+}
 
 const ASSET_TIMEOUT_MS = 8000;
 const BOOT_PRELOAD_FAILSAFE_MS = 14000;
 
 let bootPreloadPromise: Promise<void> | null = null;
 
+function yieldFrame(): Promise<void> {
+  if (typeof requestAnimationFrame === 'function') {
+    return new Promise<void>((r) => requestAnimationFrame(() => r()));
+  }
+  return new Promise<void>((r) => window.setTimeout(r, 4));
+}
+
 function preloadSingleImage(src: string): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
+  const existing = getPreloadedImage(src);
+  if (existing) return Promise.resolve();
+
   return new Promise((resolve) => {
     let settled = false;
     const finish = () => {
@@ -68,8 +100,10 @@ function preloadSingleImage(src: string): Promise<void> {
 
     const timer = window.setTimeout(finish, ASSET_TIMEOUT_MS);
     const img = new Image();
+    img.crossOrigin = 'anonymous';
     img.decoding = 'async';
     img.onload = () => {
+      registerPreloadedImage(src, img);
       if (typeof img.decode === 'function') {
         img.decode().catch(() => {}).finally(finish);
       } else {
@@ -93,7 +127,7 @@ async function runImageBatch(
       if (!url) break;
       await preloadSingleImage(url);
       onItemDone();
-      await new Promise<void>((r) => window.setTimeout(r, 4));
+      await yieldFrame();
     }
   };
   await Promise.all(Array.from({ length: concurrency }, () => worker()));
@@ -113,10 +147,12 @@ export function preloadAllGameAssets(
     });
   }
 
+  const staticUiImages = getStaticUiImages();
+  const atlasItemCount = getIconAtlasPreloadCount();
   const totalUnits =
     1 + // fonts
-    STATIC_UI_IMAGES.length +
-    1 + // icon atlases (2 textures + 2 json descriptors)
+    staticUiImages.length +
+    atlasItemCount +
     getChromaKeyPreloadCount() +
     ARENA_SPRITE_ASSETS.length +
     soundManager.getPreloadAssetCount();
@@ -137,19 +173,23 @@ export function preloadAllGameAssets(
 
   report('Kindling the First Flame…');
 
+  const isMobile = isAndroidOrMobileDevice();
+  const uiBatchConcurrency = isMobile ? 3 : 4;
+  const arenaBatchConcurrency = isMobile ? 3 : 4;
+
   const workPromise = (async () => {
-    // 1. Fonts & Core UI Atlases / Static Backgrounds
+    // 1. Fonts, Core UI Kit & Icon Atlases / Direct Icons
     const fontsTask = (document.fonts?.ready ?? Promise.resolve())
       .catch(() => {})
       .finally(() => markUnitDone());
 
-    const staticUiTask = runImageBatch(STATIC_UI_IMAGES, 3, () =>
+    const staticUiTask = runImageBatch(staticUiImages, uiBatchConcurrency, () =>
       markUnitDone('Preparing Sanctuary Icons…')
     );
 
-    const atlasTask = preloadIconAtlases()
-      .catch(() => {})
-      .finally(() => markUnitDone('Preparing Sanctuary Icons…'));
+    const atlasTask = preloadIconAtlases(() =>
+      markUnitDone('Preparing Sanctuary Icons…')
+    ).catch(() => {});
 
     // 2. All Chroma-Keyed Lobby, Relic, Skill, Weapon & Shop Icons
     const chromaTask = preloadAllChromaKeyUiAssets(() =>
@@ -160,7 +200,7 @@ export function preloadAllGameAssets(
 
     // 3. All Arena, Bestiary & FX Spritesheets + All Music & SFX Buffers
     report('Forging Arsenal & Bestiary…');
-    const arenaTask = runImageBatch(ARENA_SPRITE_ASSETS, 4, () =>
+    const arenaTask = runImageBatch(ARENA_SPRITE_ASSETS, arenaBatchConcurrency, () =>
       markUnitDone('Forging Arsenal & Bestiary…')
     );
 

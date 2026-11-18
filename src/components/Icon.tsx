@@ -48,7 +48,8 @@ const DirectAssetIcon: React.FC<{
     draggable={false}
     decoding="async"
     referrerPolicy="no-referrer"
-    className={`w-full h-full object-contain select-none pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] ${className}`}
+    style={{ imageRendering: 'auto' }}
+    className={`w-full h-full object-contain select-none pointer-events-none ${className}`}
   />
 );
 
@@ -67,7 +68,8 @@ const CustomAssetIcon: React.FC<{
       draggable={false}
       decoding="async"
       referrerPolicy="no-referrer"
-      className={`w-full h-full object-contain select-none pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] ${className}`}
+      style={{ imageRendering: 'auto' }}
+      className={`w-full h-full object-contain select-none pointer-events-none ${className}`}
     />
   );
 };

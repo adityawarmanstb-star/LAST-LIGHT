@@ -467,6 +467,13 @@ class AudioManager {
   }
 
   private async preloadAllAudio(onItemDone?: () => void): Promise<void> {
+    if (this.ctx) {
+      this.getUiNoiseBuffer(this.ctx);
+      this.getBloodSplashNoiseBuffer(this.ctx);
+      this.getBossTensionNoiseBuffer(this.ctx);
+    }
+    this.getBrassDriveCurve();
+
     // Load Music (.ogg)
     const musicKeys = Object.keys(MUSIC_ASSETS) as MusicTrackKey[];
     const musicPromises = musicKeys.map(async (key) => {

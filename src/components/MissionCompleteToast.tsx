@@ -3,27 +3,28 @@ import { dailyMissions } from '../game/dailyMissions';
 import { soundManager } from '../game/audio';
 import { DailyMission } from '../game/types';
 import { haptics } from '../mobile/haptics';
-import { ForgedIronFrame } from './ForgedIronFrame';
 import { Icon } from './Icon';
+import { NineSlice } from './ui/NineSlice';
+import { UI_SPRITES } from './ui/uiConfig';
 
 const TOAST_DURATION_MS = 3600;
 
 function renderMissionIcon(mission: DailyMission) {
   switch (mission.icon) {
     case 'skull':
-      return <Icon id="ui_skull" size={24} />;
+      return <Icon id="ui_skull" size={22} />;
     case 'clock':
-      return <Icon id="ui_clock" size={24} />;
+      return <Icon id="ui_clock" size={22} />;
     case 'coins':
-      return <Icon id="soul_coin" size={24} />;
+      return <Icon id="soul_coin" size={22} />;
     case 'crown':
-      return <Icon id="ui_crown" size={24} />;
+      return <Icon id="ui_crown" size={22} />;
     case 'sparkles':
-      return <Icon id="ui_sparkles" size={24} />;
+      return <Icon id="ui_sparkles" size={22} />;
     case 'flame':
-      return <Icon id="ui_day_flame" size={24} />;
+      return <Icon id="ui_day_flame" size={22} />;
     default:
-      return <Icon id="ui_scroll" size={24} />;
+      return <Icon id="ui_scroll" size={22} />;
   }
 }
 
@@ -51,7 +52,6 @@ export const MissionCompleteToast: React.FC = () => {
 
   useEffect(() => {
     const unsub = dailyMissions.onMissionCompleted((mission) => {
-      // Trigger haptic feedback & celebratory chime immediately when requirement is met
       haptics.onMissionComplete();
       soundManager.playCoinCollect();
 
@@ -78,26 +78,35 @@ export const MissionCompleteToast: React.FC = () => {
     <div
       role="status"
       aria-live="polite"
-      className="fixed left-1/2 -translate-x-1/2 z-[60] w-[calc(100%-2rem)] max-w-sm pointer-events-none"
+      className="fixed left-1/2 -translate-x-1/2 z-[60] w-[calc(100%-2rem)] max-w-[540px] pointer-events-none"
       style={{
         top: 'calc(max(16px, env(safe-area-inset-top)) + 96px)',
       }}
     >
       <div key={activeMission.id} className="mission-banner-enter">
-        <ForgedIronFrame
-          seed={`mission-complete-toast-${activeMission.id}`}
-          dripCount={3}
-          maxDripLength={14}
-          borderColor="#f2a93b"
-          glowColor="#f2a93b"
-          glowStrength={14}
-          contentClassName="relative overflow-hidden px-4 py-3"
+        <NineSlice
+          variant="plateWideIron"
+          tileTexture="row"
+          highlight="gold"
+          padding="0px"
+          className="relative overflow-hidden shadow-[0_12px_28px_rgba(0,0,0,0.9)]"
+          contentClassName="relative overflow-hidden px-3 py-2"
         >
           <div className="flex items-center justify-between gap-3">
             {/* Left: Mission Icon & Details */}
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-[9px] bg-[#121417] border border-[#f2a93b]/70 flex items-center justify-center shrink-0 shadow-[0_0_12px_rgba(242,169,59,0.28)]">
-                {renderMissionIcon(activeMission)}
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative w-10 h-10 aspect-square flex items-center justify-center shrink-0">
+                <img
+                  src={UI_SPRITES.roundSquareSocket}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  style={{ aspectRatio: '1 / 1', imageRendering: 'auto' }}
+                  className="absolute inset-0 w-full h-full object-contain select-none"
+                />
+                <div className="relative z-10 flex items-center justify-center">
+                  {renderMissionIcon(activeMission)}
+                </div>
               </div>
 
               <div className="flex flex-col min-w-0">
@@ -133,12 +142,11 @@ export const MissionCompleteToast: React.FC = () => {
             </div>
           </div>
 
-          {/* Forge-gold auto-dismiss timer bar */}
           <div
             className="mission-banner-progress absolute bottom-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-[#b3121a] via-[#f2a93b] to-[#ffe19c]"
             style={{ '--toast-duration': `${TOAST_DURATION_MS}ms` } as React.CSSProperties}
           />
-        </ForgedIronFrame>
+        </NineSlice>
       </div>
     </div>
   );

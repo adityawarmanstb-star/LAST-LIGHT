@@ -1,5 +1,7 @@
 import React from 'react';
-import { UI_ASSETS, useChromaKeyImage } from '../hooks/useChromaKeyImage';
+import { useChromaKeyImage } from '../hooks/useChromaKeyImage';
+import { NineSlice } from './ui/NineSlice';
+import { UiSliceKey } from './ui/uiConfig';
 
 interface ChromaKeyImgProps extends React.ImgHTMLAttributes<HTMLImageElement> {
   src: string;
@@ -24,6 +26,7 @@ export const ChromaKeyImg: React.FC<ChromaKeyImgProps> = ({
       src={processedSrc ?? src}
       alt={alt}
       referrerPolicy="no-referrer"
+      style={{ imageRendering: 'auto' }}
       className={`${className} ${processedSrc ? 'opacity-100' : 'opacity-0'} transition-opacity duration-150`}
       {...rest}
     />
@@ -35,51 +38,41 @@ interface IronCardProps {
   className?: string;
   contentClassName?: string;
   highlight?: 'none' | 'gold' | 'blood' | 'cyan' | 'ember';
+  variant?: UiSliceKey;
+  tileTexture?: 'stone' | 'row' | 'none';
   onClick?: () => void;
   asButton?: boolean;
   ariaLabel?: string;
   disabled?: boolean;
 }
 
-const HIGHLIGHT_STYLES: Record<NonNullable<IronCardProps['highlight']>, string> = {
-  none: 'shadow-[0_10px_22px_rgba(0,0,0,0.85)]',
-  gold: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#c9a24b]/55',
-  blood: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#b3121a]/65',
-  cyan: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#5de4ff]/45',
-  ember: 'shadow-[0_6px_18px_rgba(0,0,0,0.9)] ring-1 ring-[#c9a24b]/40',
-};
-
+/**
+ * Legacy wrapper migrated to use the single reusable NineSlice component
+ * with zero object-fill stretching.
+ */
 export const IronCard: React.FC<IronCardProps> = ({
   children,
   className = '',
   contentClassName = 'p-4',
   highlight = 'none',
+  variant = 'panelIronDark',
+  tileTexture = 'stone',
   onClick,
   asButton = false,
   ariaLabel,
   disabled = false,
 }) => {
-  const { processedSrc } = useChromaKeyImage(UI_ASSETS.panelIronCard);
-
-  const inner = (
-    <>
-      {!processedSrc && (
-        <div
-          aria-hidden="true"
-          className={`pointer-events-none absolute inset-0 rounded-[6px] bg-gradient-to-b from-[#23262d] via-[#15171c] to-[#0b0c0f] border border-[#3a3f47]/60 ${HIGHLIGHT_STYLES[highlight]}`}
-        />
-      )}
-      {processedSrc && (
-        <img
-          src={processedSrc}
-          alt=""
-          aria-hidden="true"
-          referrerPolicy="no-referrer"
-          className={`pointer-events-none absolute inset-0 w-full h-full object-fill select-none ${HIGHLIGHT_STYLES[highlight]}`}
-        />
-      )}
-      <div className={`relative z-10 w-full ${contentClassName}`}>{children}</div>
-    </>
+  const framedBody = (
+    <NineSlice
+      variant={variant}
+      tileTexture={tileTexture}
+      highlight={highlight}
+      padding="0px"
+      className="w-full h-full shadow-[0_8px_18px_rgba(0,0,0,0.82)]"
+      contentClassName={`w-full h-full ${contentClassName}`}
+    >
+      {children}
+    </NineSlice>
   );
 
   if (asButton || onClick) {
@@ -93,14 +86,10 @@ export const IronCard: React.FC<IronCardProps> = ({
           disabled ? 'opacity-65 cursor-not-allowed' : 'cursor-pointer'
         } ${className}`}
       >
-        {inner}
+        {framedBody}
       </button>
     );
   }
 
-  return (
-    <div className={`relative ${className}`}>
-      {inner}
-    </div>
-  );
+  return <div className={`relative ${className}`}>{framedBody}</div>;
 };

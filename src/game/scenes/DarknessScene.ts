@@ -147,6 +147,7 @@ export class DarknessScene extends Phaser.Scene {
 
     this.ensureRadialLightTexture();
     this.ensureBossAmberTexture();
+    this.ensureBossVoidGlowTexture();
     this.ensureProceduralFogTexture();
     this.ensureAlertAndIndicatorTextures();
     upgradeTextureFiltering(this);
@@ -203,9 +204,9 @@ export class DarknessScene extends Phaser.Scene {
       this.torchGlowPool.push(tg);
     }
 
-    // Subtle amber glow for the boss so it stays visible from afar
+    // Dark-magic purple/violet void aura for the boss so it stands out in darkness
     this.bossGlowSprite = this.add
-      .image(0, 0, 'light_amber_glow')
+      .image(0, 0, 'light_boss_void_glow')
       .setOrigin(0.5, 0.5)
       .setBlendMode(Phaser.BlendModes.ADD)
       .setDepth(6)
@@ -367,6 +368,23 @@ export class DarknessScene extends Phaser.Scene {
     grad.addColorStop(0.45, 'rgba(242, 169, 59, 0.45)');
     grad.addColorStop(0.8, 'rgba(229, 72, 77, 0.14)');
     grad.addColorStop(1.0, 'rgba(242, 169, 59, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    tex.refresh();
+  }
+
+  private ensureBossVoidGlowTexture() {
+    if (this.textures.exists('light_boss_void_glow')) return;
+    const size = 256;
+    const tex = this.textures.createCanvas('light_boss_void_glow', size, size);
+    if (!tex) return;
+    const ctx = tex.getContext();
+    const half = size / 2;
+    const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+    grad.addColorStop(0.0, 'rgba(184, 58, 255, 0.92)');
+    grad.addColorStop(0.4, 'rgba(130, 26, 224, 0.52)');
+    grad.addColorStop(0.76, 'rgba(64, 10, 128, 0.18)');
+    grad.addColorStop(1.0, 'rgba(20, 4, 48, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size, size);
     tex.refresh();
@@ -800,7 +818,7 @@ export class DarknessScene extends Phaser.Scene {
         }
       }
       for (let i = torchGlowIdx; i < this.torchGlowPool.length; i++) {
-        this.torchGlowPool[i].setVisible(false);
+        if (this.torchGlowPool[i].visible) this.torchGlowPool[i].setVisible(false);
       }
 
       // Priority 3: Active Boss (240px amber, visible from afar)
@@ -808,14 +826,15 @@ export class DarknessScene extends Phaser.Scene {
         pushLight(snap.activeBoss.x, snap.activeBoss.y, LIGHT.sources.bossRadius, 1);
         const bsx = snap.activeBoss.x - scrollX;
         const bsy = snap.activeBoss.y - scrollY;
-        this.bossGlowSprite.setPosition(bsx, bsy);
+        this.bossGlowSprite.x = bsx;
+        this.bossGlowSprite.y = bsy;
         const bossDiameter = LIGHT.sources.bossRadius * 2.1;
         this.bossGlowSprite.setDisplaySize(bossDiameter, bossDiameter);
         this.bossGlowSprite.setAlpha(
           LIGHT.sources.bossAmberAlpha * (0.9 + 0.1 * Math.sin(this.effectTimeMs * 0.005))
         );
-        this.bossGlowSprite.setVisible(true);
-      } else {
+        if (!this.bossGlowSprite.visible) this.bossGlowSprite.setVisible(true);
+      } else if (this.bossGlowSprite.visible) {
         this.bossGlowSprite.setVisible(false);
       }
 

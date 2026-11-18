@@ -1,10 +1,8 @@
 import { useEffect, useState } from 'react';
+import { getPreloadedImage, registerPreloadedImage } from '../game/imageCache';
 
 export const UI_ASSETS = {
   bgDungeon: './assets/ui/bg_dungeon.webp',
-  btnPlay: './assets/ui/btn_play.webp',
-  panelIronCard: './assets/ui/panel_iron_card.webp',
-  navBarBg: './assets/aistudio/bottom_nav_frame_ab4c5386.png',
   gameTitleLogo: './assets/ui/game_title_logo.webp',
   loadingSplash: './assets/ui/loading_splash.webp',
   appIcon: './assets/ui/app_icon.png',
@@ -36,9 +34,9 @@ export const UI_ASSETS = {
   dealWardenTribute: './assets/aistudio/warden_tribute_b165309f.webp',
   upgradeLantern: './assets/aistudio/lantern_6d635f24.webp',
   upgradeVitality: './assets/aistudio/vitality_0e6c8215.webp',
-  diffBaby: './assets/aistudio/baby_2a82300e.png',
-  diffPro: './assets/aistudio/pro_61caf01c.png',
-  diffHacker: './assets/aistudio/hacker_98e53967.png',
+  diffBaby: './assets/aistudio/baby_2a82300e.webp',
+  diffPro: './assets/aistudio/pro_61caf01c.webp',
+  diffHacker: './assets/aistudio/hacker_98e53967.webp',
 } as const;
 
 const resolvedDataUrlCache = new Map<string, string>();
@@ -46,7 +44,6 @@ const inFlightCache = new Map<string, Promise<string>>();
 let lobbyPreloadPromise: Promise<void> | null = null;
 
 const MAX_PROCESSED_DIMENSION = 1024;
-const MAX_NAV_BAR_DIMENSION = 640;
 
 function canvasToFastUrl(canvas: HTMLCanvasElement): Promise<string> {
   return new Promise((resolve) => {
@@ -102,15 +99,19 @@ export function processChromaKeyImage(
       return;
     }
 
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.decoding = 'async';
-    if ('fetchPriority' in img) {
-      (img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = priority;
+    const cachedImg = getPreloadedImage(src);
+    const img = cachedImg ?? new Image();
+    if (!cachedImg) {
+      img.crossOrigin = 'anonymous';
+      img.decoding = 'async';
+      if ('fetchPriority' in img) {
+        (img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = priority;
+      }
     }
 
     const processLoadedImage = async () => {
       try {
+        registerPreloadedImage(src, img);
         if (typeof img.decode === 'function') {
           await img.decode().catch(() => {});
         }
@@ -124,10 +125,8 @@ export function processChromaKeyImage(
         }
 
         // Scale oversized 2K/3K source graphics down to retina-sharp cap
-        // (640px for compact bottom nav bar, 1024px for hero/panel assets)
         const maxSide = Math.max(rawW, rawH);
-        const dimCap = src === UI_ASSETS.navBarBg ? MAX_NAV_BAR_DIMENSION : MAX_PROCESSED_DIMENSION;
-        const scale = maxSide > dimCap ? dimCap / maxSide : 1;
+        const scale = maxSide > MAX_PROCESSED_DIMENSION ? MAX_PROCESSED_DIMENSION / maxSide : 1;
         const w = Math.max(1, Math.round(rawW * scale));
         const h = Math.max(1, Math.round(rawH * scale));
 
@@ -217,6 +216,13 @@ export function processChromaKeyImage(
         }
 
         const fastUrl = await canvasToFastUrl(outputCanvas);
+        if (typeof Image !== 'undefined' && fastUrl.startsWith('blob:')) {
+          const decodedPreview = new Image();
+          decodedPreview.src = fastUrl;
+          if (typeof decodedPreview.decode === 'function') {
+            await decodedPreview.decode().catch(() => {});
+          }
+        }
         resolvedDataUrlCache.set(src, fastUrl);
         resolve(fastUrl);
       } catch (err) {
@@ -225,6 +231,11 @@ export function processChromaKeyImage(
         inFlightCache.delete(src);
       }
     };
+
+    if (cachedImg && cachedImg.complete && cachedImg.naturalWidth > 0) {
+      void processLoadedImage();
+      return;
+    }
 
     img.onload = () => {
       void processLoadedImage();
@@ -256,9 +267,6 @@ export function preloadCriticalLoadingLogo(): Promise<string | null> {
 }
 
 const SECONDARY_CHROMA_ASSETS: readonly string[] = [
-  UI_ASSETS.btnPlay,
-  UI_ASSETS.panelIronCard,
-  UI_ASSETS.navBarBg,
   UI_ASSETS.iconHome,
   UI_ASSETS.iconMissions,
   UI_ASSETS.iconBestiary,
@@ -296,6 +304,13 @@ export function getChromaKeyPreloadCount(): number {
   return 1 + SECONDARY_CHROMA_ASSETS.length;
 }
 
+function yieldFrameUi(): Promise<void> {
+  if (typeof requestAnimationFrame === 'function') {
+    return new Promise<void>((r) => requestAnimationFrame(() => r()));
+  }
+  return new Promise<void>((r) => window.setTimeout(r, 4));
+}
+
 export function preloadAllChromaKeyUiAssets(onItemDone?: () => void): Promise<void> {
   if (typeof window === 'undefined') return Promise.resolve();
   if (lobbyPreloadPromise) {
@@ -313,14 +328,17 @@ export function preloadAllChromaKeyUiAssets(onItemDone?: () => void): Promise<vo
     })
     .then(async () => {
       const queue = [...SECONDARY_CHROMA_ASSETS];
-      const concurrency = 4;
+      const isMobile =
+        typeof navigator !== 'undefined' &&
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+      const concurrency = isMobile ? 2 : 4;
       const runWorker = async () => {
         while (queue.length > 0) {
           const asset = queue.shift();
           if (!asset) break;
           await processChromaKeyImage(asset, 'low').catch(() => {});
           onItemDone?.();
-          await new Promise<void>((r) => window.setTimeout(r, 4));
+          await yieldFrameUi();
         }
       };
       await Promise.all(Array.from({ length: concurrency }, () => runWorker()));

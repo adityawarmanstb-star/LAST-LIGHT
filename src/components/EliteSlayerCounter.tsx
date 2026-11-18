@@ -5,8 +5,9 @@ import {
 } from '../game/achievements';
 import { soundManager } from '../game/audio';
 import { haptics } from '../mobile/haptics';
-import { ForgedIronFrame } from './ForgedIronFrame';
 import { Icon } from './Icon';
+import { NineSlice } from './ui/NineSlice';
+import { UiBar } from './ui/UiBar';
 
 const MILESTONE_BANNER_DURATION_MS = 4600;
 
@@ -106,19 +107,14 @@ export const EliteSlayerCounter: React.FC = () => {
           left: 'max(12px, env(safe-area-inset-left))',
         }}
       >
-        <div
-          className={`min-w-[138px] max-w-[184px] rounded-[8px] px-2.5 py-1.5 border transition-colors duration-300 ${
-            isHighlighted
-              ? 'border-[#f2a93b]/85 shadow-[0_0_16px_rgba(242,169,59,0.4)]'
-              : milestoneTier > 0
-                ? 'border-[#c48a34]/55 shadow-[0_4px_12px_rgba(0,0,0,0.65)]'
-                : 'border-[#3a424d]/70 shadow-[0_4px_12px_rgba(0,0,0,0.65)]'
-          }`}
-          style={{
-            background: isHighlighted
-              ? 'linear-gradient(180deg, rgba(44, 30, 10, 0.92) 0%, rgba(16, 12, 8, 0.94) 100%)'
-              : 'rgba(10, 14, 20, 0.86)',
-          }}
+        <NineSlice
+          variant="miniPlate"
+          tileTexture="row"
+          highlight={isHighlighted ? 'gold' : milestoneTier > 0 ? 'ember' : 'none'}
+          borderWidth="5px 9px"
+          padding="0px"
+          className="min-w-[144px] max-w-[186px] shadow-[0_6px_14px_rgba(0,0,0,0.82)]"
+          contentClassName="px-2 py-1"
         >
           <div className="flex items-center justify-between gap-2 leading-none">
             <div className="flex items-center gap-1 min-w-0">
@@ -151,7 +147,7 @@ export const EliteSlayerCounter: React.FC = () => {
               }`}
               style={
                 isHighlighted
-                  ? { textShadow: '0 0 10px rgba(242, 196, 100, 0.6)' }
+                  ? { textShadow: '0 0 8px rgba(242, 196, 100, 0.55)' }
                   : undefined
               }
             >
@@ -162,22 +158,15 @@ export const EliteSlayerCounter: React.FC = () => {
             </span>
           </div>
 
-          {/* Slim Milestone Progress Bar */}
-          <div className="mt-1 w-full h-[2.5px] rounded-full overflow-hidden bg-[#0a0c10] border border-[#3a424d]/70">
-            <div
-              className="h-full rounded-full transition-[width] duration-200 ease-out"
-              style={{
-                width: `${progressPct}%`,
-                background: isHighlighted
-                  ? 'linear-gradient(90deg, #f2a93b 0%, #ffe49c 100%)'
-                  : 'linear-gradient(90deg, #b3121a 0%, #f2a93b 100%)',
-                boxShadow: isHighlighted
-                  ? '0 0 6px rgba(242, 196, 100, 0.75)'
-                  : 'none',
-              }}
+          <div className="mt-1">
+            <UiBar
+              percent={progressPct}
+              fill="gold"
+              heightClassName="h-[7px]"
+              frameBorderWidth="2px 4px"
             />
           </div>
-        </div>
+        </NineSlice>
       </div>
 
       {/* Prominent Milestone Celebration Banner (every 10,000 lifetime kills) */}
@@ -185,24 +174,22 @@ export const EliteSlayerCounter: React.FC = () => {
         <div
           role="status"
           aria-live="polite"
-          className="fixed left-1/2 -translate-x-1/2 z-[55] w-[calc(100%-2rem)] max-w-sm pointer-events-none"
+          className="fixed left-1/2 -translate-x-1/2 z-[55] w-[calc(100%-2rem)] max-w-[440px] pointer-events-none"
           style={{
             top: 'calc(max(8px, env(safe-area-inset-top)) + 54px)',
           }}
         >
           <div key={`elite-milestone-${milestoneBannerSeq}`} className="mission-banner-enter">
-            <ForgedIronFrame
-              seed={`elite-slayer-milestone-${activeMilestone}`}
-              dripCount={3}
-              maxDripLength={14}
-              borderColor="#f2a93b"
-              glowColor="#f2a93b"
-              glowStrength={16}
-              contentClassName="relative overflow-hidden px-4 py-3"
+            <NineSlice
+              variant="bannerCrimson"
+              tileTexture="stone"
+              highlight="gold"
+              padding="0px"
+              contentClassName="relative overflow-hidden px-3.5 py-2.5"
             >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-10 h-10 rounded-[9px] bg-[#1c1409] border border-[#f2a93b]/80 flex items-center justify-center shrink-0 shadow-[0_0_16px_rgba(242,169,59,0.42)]">
+                  <div className="w-10 h-10 rounded-[8px] bg-[#1c1409] border border-[#f2a93b]/80 flex items-center justify-center shrink-0">
                     <Icon id="ui_trophy" size={24} />
                   </div>
 
@@ -241,7 +228,7 @@ export const EliteSlayerCounter: React.FC = () => {
                   } as React.CSSProperties
                 }
               />
-            </ForgedIronFrame>
+            </NineSlice>
           </div>
         </div>
       )}

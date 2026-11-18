@@ -3,6 +3,7 @@ import { BossIntroInfo } from '../game/types';
 import { gameManager } from '../game/GameManager';
 import { Icon } from './Icon';
 import { haptics } from '../mobile/haptics';
+import { NineSlice } from './ui/NineSlice';
 
 interface BossIntroModalProps {
   bossIntro: BossIntroInfo;
@@ -112,7 +113,7 @@ export const BossIntroModal: React.FC<BossIntroModalProps> = ({
       onTouchStart={(e) => e.stopPropagation()}
       className="fixed inset-0 h-[100dvh] z-[45] flex items-center justify-center safe-area-pad select-none overflow-hidden cursor-pointer"
       style={{
-        background: 'rgba(18, 2, 5, 0.24)',
+        background: 'rgba(18, 2, 5, 0.28)',
       }}
     >
       {/* Camera shake stage wrapper (initial heavy quake + pulse aftershocks) */}
@@ -133,56 +134,45 @@ export const BossIntroModal: React.FC<BossIntroModalProps> = ({
           }
         />
 
-        {/* Transparent Red WARNING!! Pop-up Banner */}
-        <div className="boss-intro-enter relative z-10 w-full max-w-xl px-2">
-          <div
-            className="relative w-full overflow-hidden rounded-xl border-y-2 border-[#ff3b47]/85 px-5 py-4 sm:px-8 sm:py-5 flex flex-col items-center justify-center text-center gap-1.5"
-            style={{
-              background:
-                'linear-gradient(90deg, rgba(110, 10, 18, 0.28) 0%, rgba(185, 16, 26, 0.52) 50%, rgba(110, 10, 18, 0.28) 100%)',
-              backdropFilter: 'blur(4px)',
-              WebkitBackdropFilter: 'blur(4px)',
-              boxShadow:
-                '0 0 36px rgba(229, 48, 58, 0.55), inset 0 0 26px rgba(229, 48, 58, 0.36)',
-            }}
+        {/* Forged Crimson Banner Pop-up (NineSlice + linear text, zero CSS filter/blur) */}
+        <div className="boss-intro-enter relative z-10 w-full max-w-[540px] px-2">
+          <NineSlice
+            variant="bannerCrimson"
+            tileTexture="row"
+            highlight="blood"
+            padding="0px"
+            borderWidth="clamp(14px, 2.5vw, 22px) clamp(24px, 4.5vw, 38px)"
+            className="relative w-full overflow-hidden shadow-[0_0_36px_rgba(229,48,58,0.5)]"
+            contentClassName="px-3 py-3.5 sm:px-5 sm:py-4 flex flex-col items-center justify-center text-center gap-1.5"
           >
-            {/* Pulsing crimson outer glow */}
-            <div
-              aria-hidden="true"
-              className="boss-danger-pulse pointer-events-none absolute inset-0 rounded-xl"
-              style={{
-                boxShadow: 'inset 0 0 30px rgba(255, 62, 74, 0.65)',
-              }}
-            />
-
-            {/* Urgent blood-edge-impact pulse overlay on the UI_WARNING banner */}
+            {/* Urgent blood-edge-impact pulse overlay */}
             <div
               key={`boss-warning-impact-${bossIntro.seq}-${pulseBeat}`}
               aria-hidden="true"
-              className="blood-edge-impact pointer-events-none absolute inset-0 rounded-xl"
+              className="blood-edge-impact pointer-events-none absolute inset-0"
               style={
                 {
-                  '--splatter-opacity': '0.94',
+                  '--splatter-opacity': '0.88',
                   background:
-                    'radial-gradient(ellipse at center, rgba(229, 48, 58, 0.12) 32%, rgba(229, 48, 58, 0.54) 100%)',
-                  boxShadow: 'inset 0 0 34px rgba(255, 52, 66, 0.9)',
+                    'radial-gradient(ellipse at center, rgba(229, 48, 58, 0.08) 32%, rgba(229, 48, 58, 0.44) 100%)',
                 } as React.CSSProperties
               }
             />
 
             {/* Banner Headline Row with ui_warning icons */}
-            <div className="relative z-10 flex items-center justify-center gap-3 sm:gap-4">
-              <Icon id="ui_warning" size={32} className="shrink-0 drop-shadow-[0_0_10px_rgba(255,60,70,0.85)]" />
+            <div className="relative z-10 flex items-center justify-center gap-3">
+              <Icon id="ui_warning" size={30} className="shrink-0" />
               <h2
                 id="boss-intro-title"
-                className="font-blood text-2xl sm:text-4xl font-black tracking-[0.22em] uppercase text-[#ff4d57] drop-shadow-[0_2px_12px_rgba(229,48,58,0.95)]"
+                className="font-blood text-[clamp(22px,5.2vw,34px)] font-black tracking-[0.2em] uppercase text-[#ff5862]"
+                style={{ textShadow: '0 2px 10px rgba(179, 18, 26, 0.9)' }}
               >
                 WARNING!!
               </h2>
-              <Icon id="ui_warning" size={32} className="shrink-0 drop-shadow-[0_0_10px_rgba(255,60,70,0.85)]" />
+              <Icon id="ui_warning" size={30} className="shrink-0" />
             </div>
 
-            {/* Slim unboxed boss name & HP line */}
+            {/* Boss name, HP & recommended level line */}
             <div className="relative z-10 flex flex-wrap items-center justify-center gap-x-2 text-xs sm:text-sm font-display font-bold tracking-[0.08em] text-[#ffe8ea]">
               <span>{bossIntro.name}</span>
               <span aria-hidden="true" className="text-[#ff8a92]">
@@ -191,8 +181,14 @@ export const BossIntroModal: React.FC<BossIntroModalProps> = ({
               <span className="font-mono-numbers tabular-nums text-[#ffd2d5]">
                 {safeMaxHp.toLocaleString()} HP
               </span>
+              <span aria-hidden="true" className="text-[#ff8a92]">
+                ·
+              </span>
+              <span className="font-mono-numbers tabular-nums text-[#f2c464]">
+                Rec. Lv.{bossIntro.recommendedLevel}
+              </span>
             </div>
-          </div>
+          </NineSlice>
         </div>
       </div>
     </div>

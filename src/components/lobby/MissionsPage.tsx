@@ -4,7 +4,10 @@ import { soundManager } from '../../game/audio';
 import { DailyMission, DailyMissionsState } from '../../game/types';
 import { haptics } from '../../mobile/haptics';
 import { Icon } from '../Icon';
-import { IronCard } from '../IronCard';
+import { NineSlice } from '../ui/NineSlice';
+import { UiBar } from '../ui/UiBar';
+import { UiButton } from '../ui/UiButton';
+import { UI_SPRITES } from '../ui/uiConfig';
 
 interface MissionsPageProps {
   onStartGame: () => void;
@@ -78,28 +81,28 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
   const renderIcon = (mission: DailyMission) => {
     switch (mission.icon) {
       case 'skull':
-        return <Icon id="ui_skull" size={26} />;
+        return <Icon id="ui_skull" size={24} />;
       case 'clock':
-        return <Icon id="ui_clock" size={26} />;
+        return <Icon id="ui_clock" size={24} />;
       case 'coins':
-        return <Icon id="soul_coin" size={26} />;
+        return <Icon id="soul_coin" size={24} />;
       case 'crown':
-        return <Icon id="ui_crown" size={26} />;
+        return <Icon id="ui_crown" size={24} />;
       case 'sparkles':
-        return <Icon id="ui_sparkles" size={26} />;
+        return <Icon id="ui_sparkles" size={24} />;
       case 'flame':
-        return <Icon id="ui_day_flame" size={26} />;
+        return <Icon id="ui_day_flame" size={24} />;
       default:
-        return <Icon id="ui_scroll" size={26} />;
+        return <Icon id="ui_scroll" size={24} />;
     }
   };
 
   return (
-    <div className="w-full flex-1 min-h-0 flex flex-col px-3 pb-2 overflow-hidden">
+    <div className="w-full flex-1 min-h-0 flex flex-col px-2 sm:px-3 pb-2 overflow-hidden">
       {/* Page Title */}
-      <div className="shrink-0 flex items-center justify-between gap-2 pb-2.5">
+      <div className="shrink-0 flex items-center justify-between gap-2 pb-2">
         <div>
-          <h1 className="font-display font-bold text-xl tracking-[0.14em] text-[#e8dcc2]">
+          <h1 className="font-display font-bold text-[clamp(17px,3.5vw,21px)] tracking-[0.14em] text-[#e8dcc2]">
             DAILY MISSIONS
           </h1>
           <p className="font-body text-xs font-medium text-[#b5a589]">
@@ -112,33 +115,39 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
         </div>
 
         {unclaimedCount > 0 && (
-          <button
-            type="button"
-            onClick={handleClaimAll}
-            className="min-h-[56px] px-3.5 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#6e121a] to-[#34070c] font-display font-bold text-[11px] tracking-wider text-[#f2a93b] cursor-pointer active:scale-95 shrink-0"
-          >
+          <UiButton tone="blood" size="sm" onClick={handleClaimAll}>
             CLAIM ALL ({unclaimedCount})
-          </button>
+          </UiButton>
         )}
       </div>
 
       {/* Scrollable Body */}
-      <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 flex flex-col gap-3 pb-2">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden pr-0.5 flex flex-col gap-2.5 pb-2">
         {/* Daily Chest Progress Tracker */}
-        <IronCard
+        <NineSlice
+          variant={canClaimChest ? 'cardOrnateGold' : 'panelIronDark'}
+          tileTexture="stone"
           highlight={canClaimChest ? 'gold' : 'ember'}
-          contentClassName="p-3.5 flex flex-col gap-2.5"
+          padding="0px"
+          contentClassName="p-3 flex flex-col gap-2"
         >
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5 min-w-0">
               <div
-                className={`w-11 h-11 rounded-[9px] border flex items-center justify-center shrink-0 ${
-                  canClaimChest
-                    ? 'bg-[#251a0c] border-[#f2a93b]'
-                    : 'bg-[#101216] border-[#4b3c32]'
-                }`}
+                style={{ width: 44, aspectRatio: '1 / 1' }}
+                className="relative flex items-center justify-center shrink-0"
               >
-                <Icon id="ui_crown" size={26} />
+                <img
+                  src={UI_SPRITES.roundSquareSocket}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  style={{ imageRendering: 'auto' }}
+                  className="pointer-events-none absolute inset-0 w-full h-full object-contain"
+                />
+                <span className="relative z-10 flex items-center justify-center">
+                  <Icon id="ui_crown" size={24} />
+                </span>
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -158,18 +167,14 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
 
             <div className="shrink-0">
               {chestClaimed ? (
-                <div className="min-h-[56px] px-3 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
+                <div className="min-h-[40px] px-2.5 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
                   <Icon id="ui_check" size={16} />
                   <span>CLAIMED</span>
                 </div>
               ) : canClaimChest ? (
-                <button
-                  type="button"
-                  onClick={handleClaimChest}
-                  className="min-h-[56px] px-3.5 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
-                >
+                <UiButton tone="blood" size="sm" onClick={handleClaimChest}>
                   CLAIM CHEST
-                </button>
+                </UiButton>
               ) : (
                 <span className="font-mono-numbers text-xs font-bold text-[#9c8e72] px-2">
                   {Math.round(chestPct)}%
@@ -178,21 +183,12 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
             </div>
           </div>
 
-          {/* Fiery Chest Progress Bar */}
-          <div className="w-full h-3 rounded-[4px] bg-[#090a0d] border border-[#463830] overflow-hidden p-[1px]">
-            <div
-              className="h-full rounded-[3px] transition-all duration-300"
-              style={{
-                width: `${chestPct}%`,
-                background:
-                  completedCount >= 3
-                    ? 'linear-gradient(90deg, #b85c14 0%, #f2a93b 55%, #fae4b0 100%)'
-                    : 'linear-gradient(90deg, #6b0b12 0%, #b3121a 55%, #ea580c 100%)',
-                boxShadow: '0 0 10px rgba(234, 88, 12, 0.55)',
-              }}
-            />
-          </div>
-        </IronCard>
+          <UiBar
+            percent={chestPct}
+            fill={completedCount >= 3 ? 'gold' : 'crimson'}
+            heightClassName="h-[15px]"
+          />
+        </NineSlice>
 
         {/* Scrollable Quest Cards */}
         {state.missions.map((mission) => {
@@ -200,20 +196,30 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
           const canClaim = mission.completed && !mission.claimed;
 
           return (
-            <IronCard
+            <NineSlice
               key={mission.id}
+              variant="panelIronDark"
+              tileTexture="stone"
               highlight={canClaim ? 'gold' : 'none'}
-              contentClassName="p-3.5 flex items-center justify-between gap-3"
+              padding="0px"
+              contentClassName="p-3 flex items-center justify-between gap-2.5"
             >
-              <div className="flex items-start gap-3 flex-1 min-w-0">
+              <div className="flex items-start gap-2.5 flex-1 min-w-0">
                 <div
-                  className={`w-11 h-11 rounded-[9px] border flex items-center justify-center shrink-0 ${
-                    canClaim
-                      ? 'bg-[#24190c] border-[#f2a93b]'
-                      : 'bg-[#101216] border-[#454c57]'
-                  }`}
+                  style={{ width: 44, aspectRatio: '1 / 1' }}
+                  className="relative flex items-center justify-center shrink-0"
                 >
-                  {renderIcon(mission)}
+                  <img
+                    src={UI_SPRITES.roundSquareSocket}
+                    alt=""
+                    aria-hidden="true"
+                    draggable={false}
+                    style={{ imageRendering: 'auto' }}
+                    className="pointer-events-none absolute inset-0 w-full h-full object-contain"
+                  />
+                  <span className="relative z-10 flex items-center justify-center">
+                    {renderIcon(mission)}
+                  </span>
                 </div>
 
                 <div className="flex-1 min-w-0">
@@ -233,20 +239,13 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
                     {mission.description}
                   </p>
 
-                  {/* Fiery Progress Bar */}
-                  <div className="mt-2 flex items-center gap-2.5">
-                    <div className="flex-1 h-2.5 rounded-[4px] bg-[#090a0d] border border-[#3a3f47] overflow-hidden p-[1px]">
-                      <div
-                        className="h-full rounded-[3px] transition-all duration-200"
-                        style={{
-                          width: `${pct}%`,
-                          background: mission.completed
-                            ? 'linear-gradient(90deg, #b85c14 0%, #f2a93b 100%)'
-                            : 'linear-gradient(90deg, #6e0b12 0%, #c91c24 52%, #ef6c28 100%)',
-                          boxShadow: canClaim
-                            ? '0 0 10px rgba(242, 169, 59, 0.55)'
-                            : '0 0 8px rgba(229, 48, 58, 0.4)',
-                        }}
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="flex-1 min-w-0">
+                      <UiBar
+                        percent={pct}
+                        fill={mission.completed ? 'gold' : 'crimson'}
+                        heightClassName="h-[13px]"
+                        frameBorderWidth="2px 6px"
                       />
                     </div>
                     <span className="font-mono-numbers text-[11px] font-bold text-[#e8dcc2] shrink-0">
@@ -256,37 +255,31 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
                 </div>
               </div>
 
-              {/* Action Button: GO / CLAIM / CLAIMED */}
               <div className="shrink-0">
                 {mission.claimed ? (
-                  <div className="min-h-[56px] px-2.5 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
+                  <div className="min-h-[40px] px-2 flex items-center gap-1 font-display font-bold text-xs text-[#f2a93b]">
                     <Icon id="ui_check" size={16} />
                     <span>CLAIMED</span>
                   </div>
                 ) : canClaim ? (
-                  <button
-                    type="button"
-                    onClick={() => handleClaim(mission.id)}
-                    className="min-h-[56px] min-w-[82px] px-3 rounded-[7px] border border-[#f2a93b] bg-gradient-to-b from-[#7a161e] to-[#3c090e] font-display font-bold text-xs tracking-wider text-[#fae4b0] shadow-[0_0_16px_rgba(242,169,59,0.5)] cursor-pointer active:scale-95"
-                  >
+                  <UiButton tone="blood" size="sm" onClick={() => handleClaim(mission.id)}>
                     CLAIM
-                  </button>
+                  </UiButton>
                 ) : (
-                  <button
-                    type="button"
+                  <UiButton
+                    tone="iron"
+                    size="sm"
                     onClick={() => {
                       soundManager.playUiClick();
-                      haptics.tap('medium');
                       onStartGame();
                     }}
-                    className="min-h-[56px] min-w-[74px] px-3 rounded-[7px] border border-[#545c6a] bg-gradient-to-b from-[#2b2f38] to-[#13151a] font-display font-bold text-xs tracking-wider text-[#e8dcc2] flex items-center justify-center gap-1.5 cursor-pointer active:scale-95"
                   >
-                    <Icon id="ui_play" size={16} />
+                    <Icon id="ui_play" size={14} />
                     <span>GO</span>
-                  </button>
+                  </UiButton>
                 )}
               </div>
-            </IronCard>
+            </NineSlice>
           );
         })}
       </div>

@@ -1,7 +1,9 @@
 import React from 'react';
 import { BossInfo } from '../game/types';
-import { ForgedIronFrame } from './ForgedIronFrame';
 import { Icon } from './Icon';
+import { NineSlice } from './ui/NineSlice';
+import { UiBar } from './ui/UiBar';
+import { UI_SPRITES } from './ui/uiConfig';
 
 interface BossHealthOverlayProps {
   boss: BossInfo | null;
@@ -18,45 +20,43 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
   const clampedHp = Math.max(0, Math.min(safeMaxHp, Math.round(boss.currentHp)));
   const hpPercent = (clampedHp / safeMaxHp) * 100;
   const isDangerLow = hpPercent > 0 && hpPercent < 25;
-  const recLevel = boss.recommendedLevel ?? 60;
+  const recLevel = boss.recommendedLevel ?? 30;
   const isUnderLeveled = playerLevel < recLevel;
 
   return (
     <div
       role="status"
       aria-label={`${boss.name} health ${clampedHp} of ${safeMaxHp}`}
-      className="fixed left-1/2 -translate-x-1/2 z-30 w-[calc(100%-2rem)] max-w-md pointer-events-none"
+      className="fixed left-1/2 -translate-x-1/2 z-30 w-[calc(100%-2rem)] max-w-[460px] pointer-events-none"
       style={{
-        top: 'calc(max(8px, env(safe-area-inset-top)) + 52px)',
+        top: 'calc(max(8px, env(safe-area-inset-top)) + 54px)',
       }}
     >
-      <div className="relative">
-        {/* Subtle crimson danger aura pulse when boss is below 25% HP */}
-        {isDangerLow && (
-          <div
-            aria-hidden="true"
-            className="boss-danger-pulse absolute -inset-1 rounded-[14px] pointer-events-none"
-            style={{
-              boxShadow:
-                '0 0 22px rgba(229, 48, 58, 0.55), inset 0 0 14px rgba(229, 48, 58, 0.35)',
-              border: '1px solid rgba(229, 48, 58, 0.65)',
-            }}
-          />
-        )}
-
-        <ForgedIronFrame
-          seed={`boss-overlay-${boss.name}-${isDangerLow ? 'danger' : 'normal'}`}
-          dripCount={4}
-          maxDripLength={18}
-          borderColor={isDangerLow ? '#e5303a' : '#b3121a'}
-          glowColor="#e5303a"
-          glowStrength={isDangerLow ? 14 : 8}
-          contentClassName="px-3.5 py-2.5 sm:px-4 sm:py-3"
+      <div className={isDangerLow ? 'boss-danger-pulse' : ''}>
+        <NineSlice
+          variant="plateWideBlood"
+          tileTexture="row"
+          highlight="blood"
+          padding="0px"
+          className="shadow-[0_12px_26px_rgba(0,0,0,0.92)]"
+          contentClassName="px-3 py-2 sm:px-3.5 sm:py-2.5"
         >
-          {/* Header Row: Boss Name, Danger Indicator (<25%), Numeric & % Health */}
-          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-2">
-            <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
-              <Icon id="ui_crown" size={18} />
+          {/* Header Row: Skull/Crown Badge, Boss Name, Rec Level, Numeric & % HP */}
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 mb-1.5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <div
+                style={{ width: 22, aspectRatio: '1 / 1' }}
+                className="relative flex items-center justify-center shrink-0"
+              >
+                <img
+                  src={UI_SPRITES.roundSkullBadge}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  style={{ imageRendering: 'auto' }}
+                  className="w-full h-full object-contain select-none"
+                />
+              </div>
               <span className="font-display text-xs sm:text-sm font-bold tracking-wider text-[#e5303a] truncate">
                 {boss.name}
               </span>
@@ -91,66 +91,28 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
             </div>
           </div>
 
-          {/* Forged-Iron Health Tube with Delayed Damage Trail & 25% Threshold Tick */}
-          <div
-            className="relative w-full h-3.5 rounded-full overflow-hidden"
-            style={{
-              background: 'linear-gradient(180deg, #090a0d 0%, #14161a 100%)',
-              borderTop: '1.5px solid #4a515e',
-              borderBottom: '1.5px solid #07080a',
-              borderLeft: '1.5px solid #3a3f47',
-              borderRight: '1.5px solid #090a0c',
-              boxShadow: 'inset 0 2px 4px rgba(0, 0, 0, 0.85)',
-            }}
+          {/* Boss Bar: clip-path crimson fill drawn BEHIND NineSlice barFrame */}
+          <UiBar
+            percent={hpPercent}
+            trailPercent={hpPercent}
+            fill="crimson"
+            heightClassName="h-[18px]"
+            frameBorderWidth="clamp(3px, 0.7vw, 5px) clamp(8px, 1.5vw, 14px)"
           >
-            {/* Delayed lighter-red damage trail */}
-            <div
-              className="absolute inset-y-0 left-0 rounded-full transition-all duration-500 ease-out opacity-70"
-              style={{
-                width: `${hpPercent}%`,
-                background: 'linear-gradient(180deg, #ff7a82 0%, #e5303a 100%)',
-              }}
-            />
-
-            {/* Primary blood-red active health bar */}
-            <div
-              className={`relative h-full rounded-full transition-all duration-150 ease-out ${
-                isDangerLow ? 'boss-danger-pulse' : ''
-              }`}
-              style={{
-                width: `${hpPercent}%`,
-                background: isDangerLow
-                  ? 'linear-gradient(180deg, #ff4b55 0%, #c9141d 55%, #4a0b10 100%)'
-                  : 'linear-gradient(180deg, #e5303a 0%, #b3121a 55%, #3a0a0e 100%)',
-                boxShadow: isDangerLow
-                  ? '0 0 16px rgba(229, 48, 58, 0.85)'
-                  : '0 0 12px rgba(229, 48, 58, 0.6)',
-              }}
-            >
-              {/* Glossy top liquid sheen */}
-              <div
-                className="absolute top-[1px] left-1 right-1 h-[3px] rounded-full opacity-45"
-                style={{
-                  background: 'linear-gradient(90deg, transparent, #ffd2d5 40%, transparent)',
-                }}
-              />
-            </div>
-
-            {/* Segment ticks: highlight 25% danger threshold */}
             <div
               aria-hidden="true"
-              className="absolute inset-y-0 left-[25%] w-[1.5px] bg-[#f2a93b]/55"
+              className="absolute inset-y-0 left-[25%] w-[1.5px] bg-[#f2a93b]/70"
             />
             <div
               aria-hidden="true"
-              className="absolute inset-y-0 left-[50%] w-px bg-[#0b0c0e]/70"
+              className="absolute inset-y-0 left-[50%] w-px bg-[#0b0c0e]/75"
             />
             <div
               aria-hidden="true"
-              className="absolute inset-y-0 left-[75%] w-px bg-[#0b0c0e]/70"
+              className="absolute inset-y-0 left-[75%] w-px bg-[#0b0c0e]/75"
             />
-          </div>
-        </ForgedIronFrame>
+          </UiBar>
+        </NineSlice>
       </div>
     </div>
   );

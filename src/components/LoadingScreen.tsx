@@ -4,6 +4,7 @@ import {
   preloadCriticalLoadingLogo,
   useChromaKeyImage,
 } from '../hooks/useChromaKeyImage';
+import { getPreloadedImage, registerPreloadedImage } from '../game/assetPreloader';
 
 interface LoadingScreenProps {
   visible: boolean;
@@ -49,13 +50,15 @@ const CANVAS_H = FRAME_H + PAD_TOP + PAD_BOTTOM; // 195
 const BAR_CENTER_X = PAD_X + FRAME_W * 0.5;
 const BAR_CENTER_Y = PAD_TOP + FRAME_H * 0.5;
 
-// 4-second smooth loading lifecycle (3.5s smooth fill + 0.1s completion flash + 0.4s fade-out = 4.0s)
-const FADE_IN_MS = 260;
-const MIN_DISPLAY_TIME_MS = 3500;
-const FLASH_HOLD_MS = 100;
-const FADE_OUT_MS = 400; // 0.4s
+// Smooth loading lifecycle (boot enforces showcase window; arena launches fast using preloaded cache)
+const FADE_IN_MS = 240;
+const BOOT_MIN_DISPLAY_TIME_MS = 2600;
+const ARENA_MIN_DISPLAY_TIME_MS = 160;
+const FLASH_HOLD_MS = 85;
+const BOOT_FADE_OUT_MS = 360;
+const ARENA_FADE_OUT_MS = 180;
 const EMBER_LIFE_MS = 400; // 400ms
-const EMBER_POOL_SIZE = 160;
+const EMBER_POOL_SIZE = 140;
 const VISUAL_PRELOAD_FAILSAFE_MS = 650;
 
 interface EmberParticle {
@@ -84,6 +87,8 @@ let cachedSplashPromise: Promise<boolean> | null = null;
 let cachedSplashReady = false;
 
 function loadImage(src: string, highPriority = false): Promise<HTMLImageElement> {
+  const preloaded = getPreloadedImage(src);
+  if (preloaded) return Promise.resolve(preloaded);
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
@@ -92,6 +97,7 @@ function loadImage(src: string, highPriority = false): Promise<HTMLImageElement>
       (img as HTMLImageElement & { fetchPriority?: string }).fetchPriority = 'high';
     }
     img.onload = () => {
+      registerPreloadedImage(src, img);
       if (typeof img.decode === 'function') {
         img.decode().catch(() => {}).finally(() => resolve(img));
       } else {
@@ -464,12 +470,15 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         }
       }
 
-      // 1. Smoothly tween displayed progress toward real loader progress across 3.5s (+0.5s flash/fade = 4.0s)
+      // 1. Smoothly tween displayed progress toward real loader progress (instantaneous on arena mode)
+      const isArenaMode = modeRef.current === 'arena';
+      const minDisplayMs = isArenaMode ? ARENA_MIN_DISPLAY_TIME_MS : BOOT_MIN_DISPLAY_TIME_MS;
+      const fadeOutMs = isArenaMode ? ARENA_FADE_OUT_MS : BOOT_FADE_OUT_MS;
+
       if (completionState === 'loading') {
         let visualTarget: number;
-        if (elapsedMs < MIN_DISPLAY_TIME_MS) {
-          const t = Math.max(0, Math.min(1, elapsedMs / MIN_DISPLAY_TIME_MS));
-          // Gentle, continuous curve with zero sudden jumps or end-stall
+        if (elapsedMs < minDisplayMs) {
+          const t = Math.max(0, Math.min(1, elapsedMs / minDisplayMs));
           const smoothCurve = 0.4 * t + 0.6 * (1 - Math.pow(1 - t, 1.45));
           const minWindowPace = Math.max(0.03, smoothCurve * 0.985);
           visualTarget = Math.min(realProgress, minWindowPace);
@@ -477,13 +486,13 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
           visualTarget = loaderFinished ? 1.0 : realProgress;
         }
 
-        const tweenAlpha = 1 - Math.exp(-7.5 * dtSec);
+        const tweenAlpha = 1 - Math.exp(-(isArenaMode ? 18 : 7.5) * dtSec);
         displayProgress += (visualTarget - displayProgress) * tweenAlpha;
-        if (loaderFinished && elapsedMs >= MIN_DISPLAY_TIME_MS) {
-          displayProgress = Math.min(1, displayProgress + 0.25 * dtSec);
+        if (loaderFinished && elapsedMs >= minDisplayMs) {
+          displayProgress = Math.min(1, displayProgress + (isArenaMode ? 2.8 : 0.35) * dtSec);
         }
 
-        if (elapsedMs >= MIN_DISPLAY_TIME_MS && loaderFinished && displayProgress >= 0.992) {
+        if (elapsedMs >= minDisplayMs && loaderFinished && displayProgress >= (isArenaMode ? 0.96 : 0.992)) {
           displayProgress = 1.0;
           completionState = 'flashing';
           completionAtMs = nowMs;
@@ -494,15 +503,15 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
         }
       } else if (completionState === 'flashing') {
         displayProgress = 1.0;
-        flashIntensity = Math.max(0, 1 - (nowMs - completionAtMs) / 260);
+        flashIntensity = Math.max(0, 1 - (nowMs - completionAtMs) / 220);
         if (nowMs - completionAtMs >= FLASH_HOLD_MS) {
           completionState = 'fading';
           fadeStartMs = nowMs;
         }
       } else if (completionState === 'fading') {
         displayProgress = 1.0;
-        flashIntensity = Math.max(0, 1 - (nowMs - completionAtMs) / 260);
-        const fadeT = Math.min(1, (nowMs - fadeStartMs) / FADE_OUT_MS);
+        flashIntensity = Math.max(0, 1 - (nowMs - completionAtMs) / 220);
+        const fadeT = Math.min(1, (nowMs - fadeStartMs) / fadeOutMs);
         if (rootRef.current) {
           rootRef.current.style.opacity = String(1 - fadeT);
         }
@@ -705,7 +714,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
       {/* Lower-Middle Logo, Subtitle & Animated Forged Runic Progress Bar */}
       <div
         ref={contentRef}
-        className="relative z-10 w-full max-w-[460px] px-4 flex flex-col items-center text-center"
+        className="relative z-10 w-full max-w-[540px] px-4 flex flex-col items-center text-center"
         style={{ willChange: 'opacity' }}
       >
         {titleLogoSrc && !titleLogoError ? (
@@ -713,37 +722,21 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             src={titleLogoSrc}
             alt="LAST LIGHT"
             referrerPolicy="no-referrer"
+            style={{ imageRendering: 'auto' }}
             className="w-[80%] max-w-[310px] h-auto object-contain select-none"
-            style={{
-              filter:
-                'drop-shadow(0 4px 12px rgba(0, 0, 0, 0.98)) drop-shadow(0 0 14px rgba(242, 169, 59, 0.36)) drop-shadow(0 0 18px rgba(179, 18, 26, 0.45))',
-            }}
           />
         ) : (
           <h1
-            className="font-display font-black tracking-[0.16em] text-3xl sm:text-4xl leading-none uppercase"
-            style={{
-              backgroundImage:
-                'linear-gradient(180deg, #fff1c7 0%, #e6aa45 50%, #9b5d14 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              filter:
-                'drop-shadow(0 3px 0 #170805) drop-shadow(0 6px 14px rgba(0, 0, 0, 0.96))',
-            }}
+            className="font-display font-black tracking-[0.16em] text-3xl sm:text-4xl leading-none uppercase text-[#f2c464]"
+            style={{ textShadow: '0 3px 0 #170805' }}
           >
             LAST LIGHT
           </h1>
         )}
 
         <p
-          className="mt-1.5 mb-2 font-display font-extrabold text-[11px] tracking-[0.28em] uppercase"
-          style={{
-            backgroundImage:
-              'linear-gradient(180deg, #f59a9e 0%, #d4202a 55%, #73080e 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            filter: 'drop-shadow(0 2px 3px rgba(0, 0, 0, 0.98))',
-          }}
+          className="mt-1.5 mb-2 font-display font-extrabold text-[11px] tracking-[0.28em] uppercase text-[#e5303a]"
+          style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.98)' }}
         >
           ENTERING THE ASHFEN
         </p>
@@ -755,7 +748,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             className="w-full h-auto block pointer-events-none"
             style={{
               aspectRatio: `${CANVAS_W} / ${CANVAS_H}`,
-              filter: 'drop-shadow(0 8px 18px rgba(0, 0, 0, 0.9))',
+              imageRendering: 'auto',
             }}
           />
 
@@ -772,7 +765,7 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
 
       {/* Bottom Survival Tip in Rajdhani */}
       <div
-        className="relative z-10 w-full max-w-[400px] px-6 pt-3 text-center flex items-center justify-center"
+        className="relative z-10 w-full max-w-[540px] px-6 pt-3 text-center flex items-center justify-center"
         style={{
           paddingBottom: 'max(22px, env(safe-area-inset-bottom))',
         }}

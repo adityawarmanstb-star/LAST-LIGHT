@@ -191,13 +191,7 @@ export default function App() {
 
     const unsubLoadProgress = gameManager.onLoadProgress((payload) => {
       if (!payload.active) return;
-      setLoadingOverlay((prev) => ({
-        visible: true,
-        progress: Math.max(prev.mode === 'arena' ? prev.progress : 0, Math.round(payload.progress * 100)),
-        phase: payload.phase,
-        mode: 'arena',
-      }));
-
+      const nextProgress = Math.round(payload.progress * 100);
       if (payload.ready) {
         if (loadingFailsafeTimerRef.current !== null) {
           window.clearTimeout(loadingFailsafeTimerRef.current);
@@ -209,7 +203,25 @@ export default function App() {
           phase: payload.phase,
           visible: false,
         }));
+        return;
       }
+      setLoadingOverlay((prev) => {
+        const clampedProgress = Math.max(prev.mode === 'arena' ? prev.progress : 0, nextProgress);
+        if (
+          prev.visible &&
+          prev.mode === 'arena' &&
+          prev.progress === clampedProgress &&
+          prev.phase === payload.phase
+        ) {
+          return prev;
+        }
+        return {
+          visible: true,
+          progress: clampedProgress,
+          phase: payload.phase,
+          mode: 'arena',
+        };
+      });
     });
 
     return () => {

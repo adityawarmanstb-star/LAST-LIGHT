@@ -476,7 +476,12 @@ export class AtmosphereOverlay {
         drawAlpha *= 0.7 + 0.3 * Math.sin(timeSec * 6.5 + p.phase);
       }
 
-      p.sprite.setPosition(offset.x + p.x, offset.y + p.y).setAlpha(drawAlpha).setVisible(true);
+      p.sprite.x = offset.x + p.x;
+      p.sprite.y = offset.y + p.y;
+      if (Math.abs(p.sprite.alpha - drawAlpha) > 0.01) {
+        p.sprite.setAlpha(drawAlpha);
+      }
+      if (!p.sprite.visible) p.sprite.setVisible(true);
     }
   }
 

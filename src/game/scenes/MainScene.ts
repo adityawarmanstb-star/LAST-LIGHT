@@ -23,6 +23,7 @@ import {
   syncLogicalCamera,
   upgradeTextureFiltering,
 } from '../PerformanceEngine';
+import { getPreloadedImage } from '../assetPreloader';
 import {
   ActiveDynamicChallenge,
   BossInfo,
@@ -64,12 +65,12 @@ export const BALANCE = {
     damagePenaltyPerLevel: 0.06,    // -6% damage per projectile per level
   },
   xp: {
-    firstLevelXp: 8,                // ~8 kills for first level-up
-    xpGrowthMultiplier: 1.03,       // Steady +3% scaling within each 5-level bracket
-    xpFlatIncrement: 2,             // +2 XP base step within each 5-level bracket
-    milestoneInterval: 5,           // Every 5 levels triggers a hardcore XP wall
-    milestoneMultiplier: 1.45,      // +45% XP requirement spike at each 5-level gap
-    milestoneFlatPerTier: 16,       // +16 * tier flat XP surge at each 5-level gap (16, 32, 48...)
+    firstLevelXp: 24,               // ~20+ early kills for first level-up
+    xpGrowthMultiplier: 1.08,       // Significant +8% compounding step every level
+    xpFlatIncrement: 8,             // +8 XP base step within each 5-level bracket
+    milestoneInterval: 5,           // Every 5 levels triggers a hardcore XP surge
+    milestoneMultiplier: 1.22,      // +22% XP requirement spike at each 5-level gap
+    milestoneFlatPerTier: 28,       // +28 * tier flat XP surge at each 5-level gap (28, 56, 84...)
   },
   levelUp: {
     cardCount: 3,
@@ -137,7 +138,7 @@ export const SPAWN_TIMELINE = {
 // =========================================================================
 export const STAND_STILL_DELAY_MS = 80;
 export const ORBIT_BLADES_NEED_STANDING = false;
-export const BOSS_RECOMMENDED_LEVEL = 20;
+export const BOSS_RECOMMENDED_LEVEL = 30;
 
 // =========================================================================
 // HORDE FRENZY & BLOOD FOG EVENT CONSTANTS
@@ -168,7 +169,7 @@ export const ELITE_VARIANTS = {
   scaleMultiplier: 1.32,           // Larger silhouette
   xpMultiplier: 4,                 // 4x base enemy XP (min 10)
   bonusXpOrbs: 2,                  // Extra bonus XP orbs scattered on defeat
-  chestDropChance: 0.35,           // 35% chance for roaming Elite to drop an Upgrade Chest
+  chestDropChance: 0.22,           // 22% chance for roaming Elite to drop an Upgrade Chest
 } as const;
 
 const ELITE_AURA_STYLE: Record<
@@ -179,7 +180,7 @@ const ELITE_AURA_STYLE: Record<
   imp: { outerColor: 0xe5303a, innerColor: 0xff6b73, spriteTint: 0xff9a9e },
   spitter: { outerColor: 0x90df63, innerColor: 0xd9ff7a, spriteTint: 0xc9ffad },
   brute: { outerColor: 0xf2a93b, innerColor: 0xff4d54, spriteTint: 0xffcca3 },
-  boss: { outerColor: 0xf2a93b, innerColor: 0xe5303a, spriteTint: 0xffffff },
+  boss: { outerColor: 0x7b1fe8, innerColor: 0xc94eff, spriteTint: 0xe8ccff },
 };
 
 // =========================================================================
@@ -211,8 +212,8 @@ export const LIGHT = {
     fxRadius: 80,
     enemyProjRadius: 50,
     bossRadius: 240,
-    bossAmberColor: 0xf2a93b,
-    bossAmberAlpha: 0.24,
+    bossAmberColor: 0x9b26ff,
+    bossAmberAlpha: 0.28,
   },
   levelUp: {
     maxRadius: 600,                // Expanding reveal radius (px)
@@ -230,7 +231,7 @@ export const LIGHT = {
       brute: 0xf2a93b,             // Amber
       spitter: 0xc44cff,           // Magenta
       wisp: 0x5de4ff,              // Cyan
-      boss: 0xf2a93b,              // Amber
+      boss: 0xc44eff,              // Void Purple
     },
   },
   progression: {
@@ -268,7 +269,7 @@ export const LIGHT = {
   edgeIndicators: {
     margin: 26,
     topMargin: 74,
-    bossColor: 0xf2a93b,
+    bossColor: 0xa838ff,
     eliteColor: 0xe5484d,
   },
   brightness: {
@@ -635,6 +636,7 @@ interface Particle {
   sprite: Phaser.GameObjects.Sprite;
   vx: number;
   vy: number;
+  rotSpeed: number;
   life: number;
   maxLife: number;
   decay: number;
@@ -705,6 +707,11 @@ interface EnemyData {
   baseScale?: number;
   lastStompFrame?: number;
   tintResetAtMs?: number;
+  bossTier?: number;
+  enraged?: boolean;
+  isBossAttacking?: boolean;
+  attackShockwaveDone?: boolean;
+  lastBossVolley?: number;
 }
 
 type AttackSplashStyle = 'bolt' | 'shotgun' | 'spark' | 'ring' | 'blades' | 'lightning' | 'light_burst';
@@ -722,6 +729,9 @@ interface ProjectileData {
   originY?: number;
   maxRangeSq?: number;
   attackStyle?: AttackSplashStyle;
+  isBossAttack?: boolean;
+  rotSpeed?: number;
+  trailTimerMs?: number;
 }
 
 interface TelegraphEntry {
@@ -737,6 +747,7 @@ interface TelegraphEntry {
   speed: number;
   tint: number;
   sourceEnemy?: Phaser.Physics.Arcade.Sprite;
+  isDarkMagic?: boolean;
 }
 
 interface EffectPoolItem {
@@ -786,11 +797,15 @@ export class MainScene extends Phaser.Scene {
   // Pools & Round-Robin Cursors (O(1) acquisition, zero per-frame allocations)
   private particlePool: Particle[] = [];
   private particlePoolCursor: number = 0;
+  private hasActiveParticles: boolean = false;
   private readonly MAX_PARTICLES = 200;
   private goreParticlePool: GoreParticle[] = [];
   private hitSplashPool: GoreParticle[] = [];
   private goreDecalPool: GoreDecal[] = [];
   private bloodBurstPool: BloodBurstItem[] = [];
+  private hasActiveGoreParticles: boolean = false;
+  private hasActiveHitSplashes: boolean = false;
+  private hasActiveGoreDecals: boolean = false;
   private goreParticleSeq: number = 0;
   private hitSplashSeq: number = 0;
   private goreDecalSeq: number = 0;
@@ -809,6 +824,7 @@ export class MainScene extends Phaser.Scene {
     startScale: number;
   }> = [];
   private enemyTrailCursor: number = 0;
+  private hasActiveEnemyTrails: boolean = false;
   private expandingRingPool: Array<{
     sprite: Phaser.GameObjects.Sprite;
     active: boolean;
@@ -819,6 +835,16 @@ export class MainScene extends Phaser.Scene {
     startAlpha: number;
   }> = [];
   private expandingRingCursor: number = 0;
+  private hasActiveExpandingRings: boolean = false;
+  private voidSplatPool: Array<{
+    sprite: Phaser.GameObjects.Image;
+    active: boolean;
+    elapsedMs: number;
+    durationMs: number;
+    baseAlpha: number;
+  }> = [];
+  private voidSplatCursor: number = 0;
+  private hasActiveVoidSplats: boolean = false;
   private playerProjectilePool: Phaser.Physics.Arcade.Sprite[] = [];
   private pickupPool: Phaser.Physics.Arcade.Sprite[] = [];
   private enemyPool: Phaser.Physics.Arcade.Sprite[] = [];
@@ -826,6 +852,8 @@ export class MainScene extends Phaser.Scene {
   private playerProjCursor: number = 0;
   private pickupCursor: number = 0;
   private enemyCursor: number = 0;
+  private activeXpGemCount: number = 0;
+  private activeCoinCount: number = 0;
   private enemiesScratch: Phaser.Physics.Arcade.Sprite[] = [];
   private projsScratch: Phaser.Physics.Arcade.Sprite[] = [];
   private pickupsScratch: Phaser.Physics.Arcade.Sprite[] = [];
@@ -857,6 +885,8 @@ export class MainScene extends Phaser.Scene {
   // Floating text & batched damage number pools
   private floatingTexts: FloatingText[] = [];
   private damageNumbers: DamageBitmapItem[] = [];
+  private hasActiveFloatingTexts: boolean = false;
+  private hasActiveDamageNumbers: boolean = false;
   private readonly MAX_FLOATING_CALLOUTS = 18;
   private readonly MAX_DAMAGE_NUMBERS = 48;
 
@@ -948,6 +978,8 @@ export class MainScene extends Phaser.Scene {
   private xpMultiplierBonus: number = 0;
   private pendingOfferedChallenge: DynamicChallengeOffer | null = null;
   private activeChallenge: ActiveDynamicChallenge | null = null;
+  private activeChallengeSnapshot: ActiveDynamicChallenge | null = null;
+  private lastChallengeSig: string = '';
   private challengeBannerTimerMs: number = 0;
   private completedChallengeIds: Set<string> = new Set();
   private challengesCompletedCount: number = 0;
@@ -993,6 +1025,16 @@ export class MainScene extends Phaser.Scene {
     this.goreDecalPool = [];
     this.bloodBurstPool = [];
     this.damageNumbers = [];
+    this.hasActiveParticles = false;
+    this.hasActiveGoreParticles = false;
+    this.hasActiveHitSplashes = false;
+    this.hasActiveGoreDecals = false;
+    this.hasActiveEnemyTrails = false;
+    this.hasActiveExpandingRings = false;
+    this.hasActiveFloatingTexts = false;
+    this.hasActiveDamageNumbers = false;
+    this.activeXpGemCount = 0;
+    this.activeCoinCount = 0;
     this.goreParticleSeq = 0;
     this.hitSplashSeq = 0;
     this.goreDecalSeq = 0;
@@ -1062,11 +1104,17 @@ export class MainScene extends Phaser.Scene {
     this.xpMultiplierBonus = 0;
     this.pendingOfferedChallenge = null;
     this.activeChallenge = null;
+    this.activeChallengeSnapshot = null;
+    this.lastChallengeSig = '';
     this.challengeBannerTimerMs = 0;
     this.completedChallengeIds = new Set();
     this.challengesCompletedCount = 0;
     this.enemyProjectilePool = [];
     this.enemyTrailPool = [];
+    this.expandingRingPool = [];
+    this.voidSplatPool = [];
+    this.voidSplatCursor = 0;
+    this.hasActiveVoidSplats = false;
     this.playerProjectilePool = [];
     this.pickupPool = [];
     this.enemyPool = [];
@@ -1116,96 +1164,130 @@ export class MainScene extends Phaser.Scene {
       });
     });
 
+    const preloadImageOrCached = (key: string, url: string) => {
+      if (this.textures.exists(key)) return;
+      const cached = getPreloadedImage(url);
+      if (cached) {
+        this.textures.addImage(key, cached);
+        return;
+      }
+      this.load.image(key, url);
+    };
+
+    const preloadSpritesheetOrCached = (
+      key: string,
+      url: string,
+      frameConfig: Phaser.Types.Loader.FileTypes.ImageFrameConfig
+    ) => {
+      if (this.textures.exists(key)) return;
+      const cached = getPreloadedImage(url);
+      if (cached) {
+        this.textures.addSpriteSheet(key, cached, frameConfig);
+        return;
+      }
+      this.load.spritesheet(key, url, frameConfig);
+    };
+
     // Load player spritesheets (frame size 234x218)
-    this.load.spritesheet('player_walk', './assets/aistudio/player_walk_sheet_bb06b026.webp', {
+    preloadSpritesheetOrCached('player_walk', './assets/aistudio/player_walk_sheet_bb06b026.webp', {
       frameWidth: 234,
       frameHeight: 218,
     });
-    this.load.spritesheet('player_attack', './assets/aistudio/player_attack_sheet_dd4b205b.webp', {
+    preloadSpritesheetOrCached('player_attack', './assets/aistudio/player_attack_sheet_dd4b205b.webp', {
       frameWidth: 234,
       frameHeight: 218,
     });
 
     // Load monster spritesheets
-    this.load.spritesheet('brute_walk_sheet', './assets/aistudio/brute_walk_sheet_1167a56d.webp', {
+    preloadSpritesheetOrCached('brute_walk_sheet', './assets/aistudio/brute_walk_sheet_1167a56d.webp', {
       frameWidth: 300,
       frameHeight: 222,
     });
-    this.load.spritesheet('imp_run_sheet', './assets/aistudio/imp_run_sheet_6bc12170.webp', {
+    preloadSpritesheetOrCached('imp_run_sheet', './assets/aistudio/imp_run_sheet_6bc12170.webp', {
       frameWidth: 344,
       frameHeight: 197,
     });
-    this.load.spritesheet('spitter_walk_sheet', './assets/aistudio/spitter_walk_sheet_be385db7.webp', {
+    preloadSpritesheetOrCached('spitter_walk_sheet', './assets/aistudio/spitter_walk_sheet_be385db7.webp', {
       frameWidth: 183,
       frameHeight: 273,
     });
-    this.load.spritesheet('boss_idle_sheet', './assets/aistudio/boss_idle_sheet_45eee864.webp', {
+    preloadSpritesheetOrCached('boss_idle_sheet', './assets/aistudio/boss_idle_sheet_45eee864.webp', {
       frameWidth: 409,
       frameHeight: 253,
     });
-    this.load.spritesheet('boss_attack_sheet', './assets/aistudio/boss_attack_sheet_8e2697fa.webp', {
+    preloadSpritesheetOrCached('boss_attack_sheet', './assets/aistudio/boss_attack_sheet_8e2697fa.webp', {
       frameWidth: 409,
       frameHeight: 253,
     });
 
     // Load all actual sprite attachments (keep fx_bolt and fx_ring as static fallbacks)
-    this.load.image('player', './assets/aistudio/player_d0a77e5b.webp');
-    this.load.image('floor', './assets/aistudio/floor_2087ed42.webp');
-    this.load.image('enemy_wisp', './assets/aistudio/enemy_wisp_7d3c48f3.webp');
-    this.load.image('enemy_imp', './assets/aistudio/enemy_imp_60271be1.webp');
-    this.load.image('enemy_spitter', './assets/aistudio/enemy_spitter_51ce3872.webp');
-    this.load.image('enemy_brute', './assets/aistudio/enemy_brute_01eebbc9.webp');
-    this.load.image('boss', './assets/aistudio/boss_a9bb7d84.webp');
-    this.load.image('gem', './assets/aistudio/gem_dc28f9c8.webp');
-    this.load.image('coin', './assets/aistudio/coin_3bd84bab.webp');
-    this.load.image('fx_bolt', './assets/aistudio/fx_bolt_be8b486b.webp');
-    this.load.image('fx_ring', './assets/aistudio/fx_ring_7bdbb43c.webp');
-    this.load.image('fx_spark', './assets/aistudio/fx_spark_3ee901cb.webp');
+    preloadImageOrCached('player', './assets/aistudio/player_d0a77e5b.webp');
+    preloadImageOrCached('floor', './assets/aistudio/floor_2087ed42.webp');
+    preloadImageOrCached('enemy_wisp', './assets/aistudio/enemy_wisp_7d3c48f3.webp');
+    preloadImageOrCached('enemy_imp', './assets/aistudio/enemy_imp_60271be1.webp');
+    preloadImageOrCached('enemy_spitter', './assets/aistudio/enemy_spitter_51ce3872.webp');
+    preloadImageOrCached('enemy_brute', './assets/aistudio/enemy_brute_01eebbc9.webp');
+    preloadImageOrCached('boss', './assets/aistudio/boss_a9bb7d84.webp');
+    preloadImageOrCached('gem', './assets/aistudio/gem_dc28f9c8.webp');
+    preloadImageOrCached('coin', './assets/aistudio/coin_3bd84bab.webp');
+    preloadImageOrCached('fx_bolt', './assets/aistudio/fx_bolt_be8b486b.webp');
+    preloadImageOrCached('fx_ring', './assets/aistudio/fx_ring_7bdbb43c.webp');
+    preloadImageOrCached('fx_spark', './assets/aistudio/fx_spark_3ee901cb.webp');
 
     // Load Skill / Impact FX Spritesheets
-    this.load.spritesheet('fx_spark_sheet', './assets/aistudio/fx_spark_sheet_cecbd959.webp', {
+    preloadSpritesheetOrCached('fx_spark_sheet', './assets/aistudio/fx_spark_sheet_cecbd959.webp', {
       frameWidth: 192,
       frameHeight: 108,
     });
-    this.load.spritesheet('fx_death_sheet', './assets/aistudio/fx_death_sheet_bc303348.webp', {
+    preloadSpritesheetOrCached('fx_death_sheet', './assets/aistudio/fx_death_sheet_bc303348.webp', {
       frameWidth: 384,
       frameHeight: 216,
     });
-    this.load.spritesheet('fx_ring_sheet', './assets/aistudio/fx_ring_sheet_84634a3f.webp', {
+    preloadSpritesheetOrCached('fx_ring_sheet', './assets/aistudio/fx_ring_sheet_84634a3f.webp', {
       frameWidth: 512,
       frameHeight: 288,
     });
-    this.load.spritesheet('fx_slam_sheet', './assets/aistudio/fx_slam_sheet_61043650.webp', {
+    preloadSpritesheetOrCached('fx_slam_sheet', './assets/aistudio/fx_slam_sheet_61043650.webp', {
       frameWidth: 448,
       frameHeight: 252,
     });
-    this.load.spritesheet('fx_gem_sheet', './assets/aistudio/fx_gem_sheet_a8e4a0d7.webp', {
+    preloadSpritesheetOrCached('fx_gem_sheet', './assets/aistudio/fx_gem_sheet_a8e4a0d7.webp', {
       frameWidth: 128,
       frameHeight: 128,
     });
-    this.load.spritesheet('fx_blade_spin_sheet', './assets/aistudio/fx_blade_spin_sheet_46489d73.webp', {
+    preloadSpritesheetOrCached('fx_blade_spin_sheet', './assets/aistudio/fx_blade_spin_sheet_46489d73.webp', {
       frameWidth: 256,
       frameHeight: 256,
     });
-    this.load.spritesheet('fx_lightning_sheet', './assets/aistudio/fx_lightning_sheet_03b57c80.webp', {
+    preloadSpritesheetOrCached('fx_lightning_sheet', './assets/aistudio/fx_lightning_sheet_03b57c80.webp', {
       frameWidth: 384,
       frameHeight: 216,
     });
-    this.load.spritesheet('fx_spitter_orb_sheet', './assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.webp', {
+    preloadSpritesheetOrCached('fx_spitter_orb_sheet', './assets/aistudio/fx_spitter_orb_sheet_2e4ec3af.webp', {
       frameWidth: 128,
       frameHeight: 128,
     });
 
     // Load Attached Blood Pack Assets (burst sheet 256x256x14, burst stain, 9-frame decals atlas)
-    this.load.spritesheet('blood_burst_sheet', './assets/aistudio/blood_burst_sheet_71be5646.png', {
+    preloadSpritesheetOrCached('blood_burst_sheet', './assets/aistudio/blood_burst_sheet_71be5646.webp', {
       frameWidth: GORE.bloodPack.frameSize,
       frameHeight: GORE.bloodPack.frameSize,
     });
-    this.load.image('blood_burst_stain', './assets/aistudio/blood_burst_stain_dba05e4d.png');
-    this.load.spritesheet('blood_decals_atlas', './assets/aistudio/blood_decals_atlas_9700fcd9.png', {
+    preloadImageOrCached('blood_burst_stain', './assets/aistudio/blood_burst_stain_dba05e4d.webp');
+    preloadSpritesheetOrCached('blood_decals_atlas', './assets/aistudio/blood_decals_atlas_9700fcd9.webp', {
       frameWidth: GORE.bloodPack.frameSize,
       frameHeight: GORE.bloodPack.frameSize,
     });
+
+    if (this.load.list.size === 0) {
+      this.load.off(Phaser.Loader.Events.PROGRESS, handleProgress);
+      gameManager.emitLoadProgress({
+        active: true,
+        progress: 0.9,
+        phase: 'Igniting World Torches…',
+        ready: false,
+      });
+    }
   }
 
   create() {
@@ -1253,8 +1335,10 @@ export class MainScene extends Phaser.Scene {
     // 3. Object Pools: 200 Particles (ADD blend mode), Gore Pools (NORMAL blend mode) & Floating Combat Text
     this.ensureGoreTextures();
     this.ensureWeaponVfxTextures();
+    this.ensureBossDarkMagicTextures();
     this.initParticlePool();
     this.initGorePools();
+    this.initVoidSplatPool();
     this.initFloatingTextPool();
 
     // 4. Initialize Player Stats from Meta Progression & BALANCE starting HP
@@ -1334,6 +1418,15 @@ export class MainScene extends Phaser.Scene {
       repeat: 0,
     });
 
+    if (this.textures.exists('fx_celestial_hit_sheet') && !this.anims.exists('fx_celestial_hit_anim')) {
+      this.anims.create({
+        key: 'fx_celestial_hit_anim',
+        frames: this.anims.generateFrameNumbers('fx_celestial_hit_sheet', { start: 0, end: 9 }),
+        frameRate: 22,
+        repeat: 0,
+      });
+    }
+
     // fx_death_sheet: 384x216, 14 frames, 18 fps, on enemy death, tinted with enemy accent color, 2x size
     this.anims.create({
       key: 'fx_death_anim',
@@ -1389,6 +1482,24 @@ export class MainScene extends Phaser.Scene {
       frameRate: 24,
       repeat: -1,
     });
+
+    if (this.textures.exists('fx_void_orb_sheet') && !this.anims.exists('fx_void_orb_anim')) {
+      this.anims.create({
+        key: 'fx_void_orb_anim',
+        frames: this.anims.generateFrameNumbers('fx_void_orb_sheet', { start: 0, end: 29 }),
+        frameRate: 24,
+        repeat: -1,
+      });
+    }
+
+    if (this.textures.exists('fx_void_slam_sheet') && !this.anims.exists('fx_void_slam_anim')) {
+      this.anims.create({
+        key: 'fx_void_slam_anim',
+        frames: this.anims.generateFrameNumbers('fx_void_slam_sheet', { start: 0, end: 13 }),
+        frameRate: 14,
+        repeat: 0,
+      });
+    }
 
     // blood_burst_sheet: 256x256, 14 frames (7 cols x 2 rows), 22 fps, play ONCE, NORMAL blend
     this.anims.create({
@@ -1900,6 +2011,7 @@ export class MainScene extends Phaser.Scene {
       this.goreDecalPool = [];
       this.eliteAuraPool = [];
       this.expandingRingPool = [];
+      this.voidSplatPool = [];
       this.enemyTrailPool = [];
       this.unsubCritImpact?.();
       this.unsubCritImpact = null;
@@ -2014,6 +2126,7 @@ export class MainScene extends Phaser.Scene {
         sprite,
         vx: 0,
         vy: 0,
+        rotSpeed: 0,
         life: 0,
         maxLife: 1,
         decay: 1,
@@ -2027,14 +2140,17 @@ export class MainScene extends Phaser.Scene {
     x: number,
     y: number,
     count: number,
-    texture: 'fx_spark' | 'fx_bolt' | 'fx_ring' = 'fx_spark',
+    texture: 'fx_spark' | 'fx_bolt' | 'fx_ring' | 'void_wisp_particle' | 'fx_celestial_spark_particle' = 'fx_spark',
     speedMin: number = 80,
     speedMax: number = 220,
     scaleMin: number = 0.15,
     scaleMax: number = 0.35,
     tint?: number,
     maxLifeOverrideMs?: number,
-    alphaOverride: number = 0.82
+    alphaOverride: number = 0.82,
+    blendMode: Phaser.BlendModes = Phaser.BlendModes.ADD,
+    rotSpeedMin: number = 0,
+    rotSpeedMax: number = 0
   ) {
     const poolCap = this.particlePool.length;
     if (poolCap === 0) return;
@@ -2049,6 +2165,7 @@ export class MainScene extends Phaser.Scene {
         if (p.sprite.texture.key !== texture) {
           p.sprite.setTexture(texture);
         }
+        p.sprite.setBlendMode(blendMode);
         p.sprite.setPosition(x, y);
         p.sprite.setVisible(true);
         p.sprite.setActive(true);
@@ -2065,6 +2182,12 @@ export class MainScene extends Phaser.Scene {
         const spd = Phaser.Math.Between(speedMin, speedMax);
         p.vx = Math.cos(angle) * spd;
         p.vy = Math.sin(angle) * spd;
+        if (rotSpeedMin !== 0 || rotSpeedMax !== 0) {
+          const dir = spawned % 2 === 0 ? 1 : -1;
+          p.rotSpeed = dir * Phaser.Math.FloatBetween(rotSpeedMin, rotSpeedMax);
+        } else {
+          p.rotSpeed = 0;
+        }
         p.life = 0;
         p.maxLife = maxLifeOverrideMs ?? Phaser.Math.Between(250, 450);
         p.decay = 1 / p.maxLife;
@@ -2077,29 +2200,38 @@ export class MainScene extends Phaser.Scene {
         if (spawned >= count) break;
       }
     }
+    if (spawned > 0) this.hasActiveParticles = true;
     this.particlePoolCursor = cursor >= poolCap ? 0 : cursor;
   }
 
   private updateParticles(delta: number) {
+    if (!this.hasActiveParticles) return;
     const pDamp = Math.pow(0.95, delta / 16.6667);
     const dtSec = delta * 0.001;
     const pool = this.particlePool;
+    let anyActive = false;
     for (let i = 0; i < pool.length; i++) {
       const p = pool[i];
       if (!p.active) continue;
       p.life += delta;
       if (p.life >= p.maxLife) {
         p.active = false;
+        p.rotSpeed = 0;
         p.sprite.setVisible(false);
         p.sprite.setActive(false);
       } else {
+        anyActive = true;
         p.sprite.x += p.vx * dtSec;
         p.sprite.y += p.vy * dtSec;
+        if (p.rotSpeed !== 0) {
+          p.sprite.rotation += p.rotSpeed * dtSec;
+        }
         p.vx *= pDamp;
         p.vy *= pDamp;
         p.sprite.setAlpha(p.baseAlpha * (1 - p.life * p.decay));
       }
     }
+    this.hasActiveParticles = anyActive;
   }
 
   // -------------------------------------------------------------
@@ -2281,44 +2413,684 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private ensureWeaponVfxTextures() {
-    if (this.textures.exists('fx_bolt_gold') || !this.textures.exists('fx_bolt')) return;
-    const srcImg = this.textures.get('fx_bolt').getSourceImage() as
-      | HTMLImageElement
-      | HTMLCanvasElement
-      | undefined;
-    if (!srcImg) return;
-    const w = srcImg instanceof HTMLImageElement ? srcImg.naturalWidth || srcImg.width : srcImg.width;
-    const h = srcImg instanceof HTMLImageElement ? srcImg.naturalHeight || srcImg.height : srcImg.height;
-    if (!w || !h) return;
+  private drawFourPointStar(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    outerR: number,
+    innerR: number,
+    fillStyle: string
+  ) {
+    ctx.fillStyle = fillStyle;
+    ctx.beginPath();
+    for (let i = 0; i < 8; i++) {
+      const ang = (i * Math.PI) / 4;
+      const r = i % 2 === 0 ? outerR : innerR;
+      const px = x + Math.cos(ang) * r;
+      const py = y + Math.sin(ang) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
 
-    const tex = this.textures.createCanvas('fx_bolt_gold', w, h);
-    if (!tex) return;
-    const ctx = tex.getContext();
-    ctx.clearRect(0, 0, w, h);
-    ctx.drawImage(srcImg, 0, 0, w, h);
-    const imgData = ctx.getImageData(0, 0, w, h);
-    const d = imgData.data;
+  private drawCelestialStarburstFrame(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    radius: number,
+    seedInit: number,
+    innerHollowRatio: number,
+    alphaFactor: number,
+    includeOuterSparkles: boolean
+  ) {
+    let seed = seedInit;
+    const rand = () => {
+      seed = (seed * 16807) % 2147483647;
+      return (seed - 1) / 2147483646;
+    };
 
-    for (let i = 0; i < d.length; i += 4) {
-      const a = d[i + 3];
-      if (a === 0) continue;
-      const maxC = Math.max(d[i], d[i + 1], d[i + 2]) / 255;
-      if (maxC <= 0.001) continue;
-      const minC = Math.min(d[i], d[i + 1], d[i + 2]) / 255;
-      const core = Math.pow(minC, 1.35);
+    ctx.save();
+    ctx.globalAlpha = alphaFactor;
 
-      const goldR = 255 * Math.pow(maxC, 0.78);
-      const goldG = 204 * Math.pow(maxC, 0.88);
-      const goldB = 24 * maxC;
+    // 1. Soft radial seafoam-cyan glow halo
+    const aura = ctx.createRadialGradient(cx, cy, radius * 0.05, cx, cy, radius * 1.05);
+    aura.addColorStop(0.0, 'rgba(176, 255, 234, 0.72)');
+    aura.addColorStop(0.35, 'rgba(46, 232, 158, 0.44)');
+    aura.addColorStop(0.72, 'rgba(38, 224, 240, 0.18)');
+    aura.addColorStop(1.0, 'rgba(20, 180, 190, 0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius * 1.05, 0, Math.PI * 2);
+    ctx.fill();
 
-      d[i] = Math.min(255, Math.round(goldR + (255 - goldR) * core));
-      d[i + 1] = Math.min(255, Math.round(goldG + (248 - goldG) * core));
-      d[i + 2] = Math.min(255, Math.round(goldB + (205 - goldB) * core));
+    // 2. Outer aqua-cyan splash rays & teardrops
+    if (includeOuterSparkles) {
+      for (let i = 0; i < 14; i++) {
+        const ang = (i / 14) * Math.PI * 2 + (rand() - 0.5) * 0.25;
+        const rStart = radius * (0.48 + rand() * 0.14);
+        const rEnd = radius * (0.86 + rand() * 0.24);
+        const streakGrad = ctx.createLinearGradient(
+          cx + Math.cos(ang) * rStart,
+          cy + Math.sin(ang) * rStart,
+          cx + Math.cos(ang) * rEnd,
+          cy + Math.sin(ang) * rEnd
+        );
+        streakGrad.addColorStop(0, 'rgba(54, 242, 178, 0.92)');
+        streakGrad.addColorStop(0.55, 'rgba(58, 234, 255, 0.94)');
+        streakGrad.addColorStop(1, 'rgba(195, 255, 255, 0)');
+
+        ctx.strokeStyle = streakGrad;
+        ctx.lineWidth = 1.6 + rand() * 2.1;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * rStart, cy + Math.sin(ang) * rStart);
+        ctx.lineTo(cx + Math.cos(ang) * rEnd, cy + Math.sin(ang) * rEnd);
+        ctx.stroke();
+
+        // Glowing turquoise droplet outside spike tips
+        const dotDist = radius * (0.78 + rand() * 0.26);
+        const dx = cx + Math.cos(ang + 0.12) * dotDist;
+        const dy = cy + Math.sin(ang + 0.12) * dotDist;
+        const dotR = radius * (0.04 + rand() * 0.032);
+        const dg = ctx.createRadialGradient(dx, dy, 0, dx, dy, dotR * 2.1);
+        dg.addColorStop(0, 'rgba(225, 255, 255, 1)');
+        dg.addColorStop(0.45, 'rgba(66, 238, 255, 0.95)');
+        dg.addColorStop(1, 'rgba(40, 210, 240, 0)');
+        ctx.fillStyle = dg;
+        ctx.beginPath();
+        ctx.arc(dx, dy, dotR * 2.1, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
-    ctx.putImageData(imgData, 0, 0);
-    tex.refresh();
+    // 3. Jagged mint-emerald starburst crown (asymmetric spikes so rapid rotation reads crisply)
+    const spikePoints = 26;
+    const crownGrad = ctx.createRadialGradient(cx, cy, radius * 0.04, cx, cy, radius * 0.88);
+    crownGrad.addColorStop(0.0, 'rgba(235, 255, 248, 0.98)');
+    crownGrad.addColorStop(0.32, 'rgba(98, 252, 198, 0.96)');
+    crownGrad.addColorStop(0.68, 'rgba(34, 226, 148, 0.92)');
+    crownGrad.addColorStop(1.0, 'rgba(18, 178, 128, 0.72)');
+    ctx.fillStyle = crownGrad;
+    ctx.beginPath();
+    for (let i = 0; i < spikePoints; i++) {
+      const ang = (i / spikePoints) * Math.PI * 2 + (rand() - 0.5) * 0.08;
+      const isTip = i % 2 === 0;
+      const r = isTip
+        ? radius * (0.58 + (i % 4 === 0 ? 0.28 : 0.14) + rand() * 0.12)
+        : radius * (0.28 + rand() * 0.12);
+      const px = cx + Math.cos(ang) * r;
+      const py = cy + Math.sin(ang) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+
+    // 4. Inner bright white-mint radial needle rays
+    for (let i = 0; i < 10; i++) {
+      const ang = (i / 10) * Math.PI * 2 + rand() * 0.2;
+      const len = radius * (0.3 + rand() * 0.24);
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.92)' : 'rgba(170, 255, 236, 0.85)';
+      ctx.lineWidth = 1.4 + rand() * 1.4;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx, cy);
+      ctx.lineTo(cx + Math.cos(ang) * len, cy + Math.sin(ang) * len);
+      ctx.stroke();
+    }
+
+    // 5. Pure white-mint center core (unless hollowing in late fade frames)
+    if (innerHollowRatio <= 0.04) {
+      const coreGrad = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius * 0.34);
+      coreGrad.addColorStop(0.0, 'rgba(255, 255, 255, 1)');
+      coreGrad.addColorStop(0.45, 'rgba(216, 255, 245, 0.96)');
+      coreGrad.addColorStop(1.0, 'rgba(84, 248, 188, 0)');
+      ctx.fillStyle = coreGrad;
+      ctx.beginPath();
+      ctx.arc(cx, cy, radius * 0.34, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // 6. Crisp 4-point ice-cyan / white diamond stars around outer perimeter
+    if (includeOuterSparkles) {
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * Math.PI * 2 + 0.32 + rand() * 0.35;
+        const dist = radius * (0.76 + rand() * 0.22);
+        const sx = cx + Math.cos(ang) * dist;
+        const sy = cy + Math.sin(ang) * dist;
+        const starSize = radius * (0.095 + rand() * 0.055);
+        this.drawFourPointStar(ctx, sx, sy, starSize, starSize * 0.26, 'rgba(222, 255, 255, 0.96)');
+      }
+    }
+
+    // 7. Hollow ring carve-out for final dissipation frames (matches bottom-right frames of ref)
+    if (innerHollowRatio > 0.04) {
+      ctx.globalCompositeOperation = 'destination-out';
+      const carveR = radius * innerHollowRatio;
+      const carve = ctx.createRadialGradient(cx, cy, 0, cx, cy, carveR);
+      carve.addColorStop(0.0, 'rgba(0, 0, 0, 1)');
+      carve.addColorStop(0.68, 'rgba(0, 0, 0, 0.92)');
+      carve.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = carve;
+      ctx.beginPath();
+      ctx.arc(cx, cy, carveR, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+  }
+
+  private ensureWeaponVfxTextures() {
+    if (!this.textures.exists('fx_bolt_gold') && this.textures.exists('fx_bolt')) {
+      const srcImg = this.textures.get('fx_bolt').getSourceImage() as
+        | HTMLImageElement
+        | HTMLCanvasElement
+        | undefined;
+      if (srcImg) {
+        const w =
+          srcImg instanceof HTMLImageElement ? srcImg.naturalWidth || srcImg.width : srcImg.width;
+        const h =
+          srcImg instanceof HTMLImageElement ? srcImg.naturalHeight || srcImg.height : srcImg.height;
+        if (w && h) {
+          const tex = this.textures.createCanvas('fx_bolt_gold', w, h);
+          if (tex) {
+            const ctx = tex.getContext();
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(srcImg, 0, 0, w, h);
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const d = imgData.data;
+
+            for (let i = 0; i < d.length; i += 4) {
+              const a = d[i + 3];
+              if (a === 0) continue;
+              const maxC = Math.max(d[i], d[i + 1], d[i + 2]) / 255;
+              if (maxC <= 0.001) continue;
+              const minC = Math.min(d[i], d[i + 1], d[i + 2]) / 255;
+              const core = Math.pow(minC, 1.35);
+
+              const goldR = 255 * Math.pow(maxC, 0.78);
+              const goldG = 204 * Math.pow(maxC, 0.88);
+              const goldB = 24 * maxC;
+
+              d[i] = Math.min(255, Math.round(goldR + (255 - goldR) * core));
+              d[i + 1] = Math.min(255, Math.round(goldG + (248 - goldG) * core));
+              d[i + 2] = Math.min(255, Math.round(goldB + (205 - goldB) * core));
+            }
+
+            ctx.putImageData(imgData, 0, 0);
+            tex.refresh();
+          }
+        }
+      }
+    }
+
+    // Celestial Spark projectile texture: mint-emerald starburst + aqua-cyan outer droplets & 4-pt stars
+    if (!this.textures.exists('fx_celestial_spark')) {
+      const size = 128;
+      const tex = this.textures.createCanvas('fx_celestial_spark', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, size, size);
+        this.drawCelestialStarburstFrame(ctx, size * 0.5, size * 0.5, size * 0.43, 4199, 0, 1, true);
+        tex.refresh();
+      }
+    }
+
+    // Small fast-spinning Celestial Spark particle texture (4-pt star + mint flare + cyan droplets)
+    if (!this.textures.exists('fx_celestial_spark_particle')) {
+      const size = 64;
+      const tex = this.textures.createCanvas('fx_celestial_spark_particle', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, size, size);
+        const c = size * 0.5;
+
+        const glow = ctx.createRadialGradient(c, c, 1, c, c, 28);
+        glow.addColorStop(0.0, 'rgba(215, 255, 245, 0.95)');
+        glow.addColorStop(0.38, 'rgba(46, 236, 168, 0.78)');
+        glow.addColorStop(0.75, 'rgba(56, 234, 255, 0.32)');
+        glow.addColorStop(1.0, 'rgba(30, 210, 230, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(c, c, 28, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Asymmetric mint-emerald starburst pinwheel so rapid rotation is unmistakable
+        ctx.fillStyle = '#34f2a8';
+        ctx.beginPath();
+        for (let i = 0; i < 12; i++) {
+          const ang = (i / 12) * Math.PI * 2;
+          const r = i % 2 === 0 ? (i % 4 === 0 ? 26 : 19) : 8.5;
+          const px = c + Math.cos(ang) * r;
+          const py = c + Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Crisp aqua-cyan inner 4-point star + white core
+        this.drawFourPointStar(ctx, c, c, 20, 4.8, '#6cf6ff');
+        this.drawFourPointStar(ctx, c, c, 12, 3.2, '#ffffff');
+
+        // Satellite cyan dots
+        const dots = [
+          [c + 18, c - 14, 2.8],
+          [c - 17, c + 15, 2.5],
+          [c - 15, c - 17, 2.2],
+        ];
+        for (const [dx, dy, dr] of dots) {
+          ctx.fillStyle = '#8ef8ff';
+          ctx.beginPath();
+          ctx.arc(dx, dy, dr, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        tex.refresh();
+      }
+    }
+
+    // 10-frame animated Celestial Spark burst sheet matching the attached reference sequence
+    if (!this.textures.exists('fx_celestial_hit_sheet')) {
+      const frameSize = 144;
+      const frames = 10;
+      const tex = this.textures.createCanvas('fx_celestial_hit_sheet', frameSize * frames, frameSize);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, frameSize * frames, frameSize);
+        const half = frameSize * 0.5;
+        for (let f = 0; f < frames; f++) {
+          const ox = f * frameSize + half;
+          const oy = half;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(f * frameSize, 0, frameSize, frameSize);
+          ctx.clip();
+
+          if (f === 0) {
+            const g = ctx.createRadialGradient(ox, oy, 0, ox, oy, 18);
+            g.addColorStop(0, 'rgba(255, 255, 255, 1)');
+            g.addColorStop(0.45, 'rgba(66, 244, 255, 0.92)');
+            g.addColorStop(1, 'rgba(38, 224, 160, 0)');
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(ox, oy, 18, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (f === 1) {
+            this.drawCelestialStarburstFrame(ctx, ox, oy, 26, 3001 + f * 97, 0, 0.95, false);
+          } else if (f <= 3) {
+            const r = 34 + (f - 2) * 11;
+            this.drawCelestialStarburstFrame(ctx, ox, oy, r, 3001 + f * 97, 0, 1, f === 3);
+          } else if (f <= 5) {
+            const r = 56 + (f - 4) * 6;
+            this.drawCelestialStarburstFrame(ctx, ox, oy, r, 3001 + f * 97, 0, 1, true);
+          } else {
+            // Frames 6..9: hollowing ring + dispersing shards matching end frames of reference
+            const t = (f - 5) / 4;
+            const r = 62 + t * 4;
+            const hollow = 0.22 + t * 0.58;
+            const alpha = Math.max(0.16, 1 - t * 0.78);
+            this.drawCelestialStarburstFrame(ctx, ox, oy, r, 3001 + f * 97, hollow, alpha, f <= 7);
+          }
+          ctx.restore();
+        }
+        tex.refresh();
+        this.textures.addSpriteSheet('fx_celestial_hit_sheet', tex, {
+          frameWidth: frameSize,
+          frameHeight: frameSize,
+        });
+      }
+    }
+  }
+
+  private ensureBossDarkMagicTextures() {
+    // 1. Procedural black-ink & violet-rimmed shadow wisp particle (NORMAL blend)
+    if (!this.textures.exists('void_wisp_particle')) {
+      const size = 64;
+      const tex = this.textures.createCanvas('void_wisp_particle', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, size, size);
+        const c = size * 0.5;
+
+        // Soft obsidian shadow halo
+        const outerGrad = ctx.createRadialGradient(c, c, 3, c, c, 28);
+        outerGrad.addColorStop(0.0, 'rgba(6, 1, 12, 0.96)');
+        outerGrad.addColorStop(0.42, 'rgba(18, 4, 34, 0.86)');
+        outerGrad.addColorStop(0.75, 'rgba(84, 14, 168, 0.42)');
+        outerGrad.addColorStop(1.0, 'rgba(160, 44, 255, 0)');
+        ctx.fillStyle = outerGrad;
+        ctx.beginPath();
+        ctx.arc(c, c, 28, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Jagged ink tendrils radiating outward
+        let seed = 4207;
+        const rand = () => {
+          seed = (seed * 16807) % 2147483647;
+          return (seed - 1) / 2147483646;
+        };
+        for (let i = 0; i < 7; i++) {
+          const ang = (i / 7) * Math.PI * 2 + rand() * 0.45;
+          const len = 14 + rand() * 14;
+          const w = 4 + rand() * 5;
+          ctx.save();
+          ctx.translate(c, c);
+          ctx.rotate(ang);
+          ctx.fillStyle = i % 2 === 0 ? 'rgba(6, 1, 11, 0.94)' : 'rgba(138, 28, 232, 0.72)';
+          ctx.beginPath();
+          ctx.moveTo(0, -w * 0.5);
+          ctx.quadraticCurveTo(len * 0.65, -w * 0.9, len, 0);
+          ctx.quadraticCurveTo(len * 0.55, w * 0.75, 0, w * 0.5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+
+        // Sharp pitch-black core with subtle glowing purple spark
+        ctx.fillStyle = 'rgba(4, 1, 8, 0.98)';
+        ctx.beginPath();
+        ctx.arc(c, c, 10, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = 'rgba(196, 78, 255, 0.85)';
+        ctx.beginPath();
+        ctx.arc(c + 3, c - 2, 3.2, 0, Math.PI * 2);
+        ctx.fill();
+
+        tex.refresh();
+      }
+    }
+
+    // 2. Procedural abyssal void ink ground splatter with glowing purple magic fissures
+    if (!this.textures.exists('void_ink_splat')) {
+      const size = 160;
+      const tex = this.textures.createCanvas('void_ink_splat', size, size);
+      if (tex) {
+        const ctx = tex.getContext();
+        ctx.clearRect(0, 0, size, size);
+        const c = size * 0.5;
+        let seed = 8841;
+        const rand = () => {
+          seed = (seed * 16807) % 2147483647;
+          return (seed - 1) / 2147483646;
+        };
+
+        // Deep violet outer ground stain
+        const glow = ctx.createRadialGradient(c, c, 8, c, c, 72);
+        glow.addColorStop(0.0, 'rgba(116, 22, 214, 0.45)');
+        glow.addColorStop(0.55, 'rgba(32, 6, 58, 0.42)');
+        glow.addColorStop(1.0, 'rgba(6, 1, 12, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(c, c, 72, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Main irregular pitch-black ink pool
+        ctx.fillStyle = 'rgba(5, 1, 10, 0.94)';
+        ctx.beginPath();
+        const lobes = 18;
+        for (let i = 0; i <= lobes; i++) {
+          const ang = (i / lobes) * Math.PI * 2;
+          const r = 34 + (i % 2 === 0 ? 18 : -6) + rand() * 14;
+          const px = c + Math.cos(ang) * r;
+          const py = c + Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Radiating black ink tendrils & detached splatter droplets
+        for (let i = 0; i < 11; i++) {
+          const ang = (i / 11) * Math.PI * 2 + rand() * 0.35;
+          const len = 46 + rand() * 28;
+          ctx.save();
+          ctx.translate(c, c);
+          ctx.rotate(ang);
+          ctx.fillStyle = 'rgba(6, 1, 11, 0.92)';
+          ctx.beginPath();
+          ctx.moveTo(16, -6);
+          ctx.quadraticCurveTo(len * 0.65, -2.5, len, 0);
+          ctx.quadraticCurveTo(len * 0.6, 3.5, 16, 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+
+          const dotDist = len + 3 + rand() * 7;
+          ctx.fillStyle = rand() > 0.35 ? 'rgba(6, 1, 11, 0.92)' : 'rgba(164, 42, 255, 0.85)';
+          ctx.beginPath();
+          ctx.arc(
+            c + Math.cos(ang) * dotDist,
+            c + Math.sin(ang) * dotDist,
+            2 + rand() * 3.5,
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        }
+
+        // Vivid glowing purple/lavender magic pockets trapped inside the black ink puddle
+        const pockets = [
+          { x: c, y: c, r: 16 },
+          { x: c - 17, y: c + 8, r: 9 },
+          { x: c + 19, y: c - 10, r: 8 },
+          { x: c + 11, y: c + 16, r: 7 },
+          { x: c - 12, y: c - 16, r: 6.5 },
+        ];
+        for (let i = 0; i < pockets.length; i++) {
+          const p = pockets[i];
+          const pg = ctx.createRadialGradient(p.x, p.y, 1, p.x, p.y, p.r);
+          pg.addColorStop(0.0, 'rgba(242, 206, 255, 0.96)');
+          pg.addColorStop(0.38, 'rgba(196, 62, 255, 0.92)');
+          pg.addColorStop(0.78, 'rgba(118, 18, 224, 0.55)');
+          pg.addColorStop(1.0, 'rgba(18, 4, 34, 0)');
+          ctx.fillStyle = pg;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+
+        tex.refresh();
+      }
+    }
+
+    // 3. Remap fx_spitter_orb_sheet -> fx_void_orb_sheet (black shadow tendrils + glowing violet core)
+    if (!this.textures.exists('fx_void_orb_sheet') && this.textures.exists('fx_spitter_orb_sheet')) {
+      const srcImg = this.textures.get('fx_spitter_orb_sheet').getSourceImage() as
+        | HTMLImageElement
+        | HTMLCanvasElement
+        | undefined;
+      if (srcImg) {
+        const w =
+          srcImg instanceof HTMLImageElement ? srcImg.naturalWidth || srcImg.width : srcImg.width;
+        const h =
+          srcImg instanceof HTMLImageElement ? srcImg.naturalHeight || srcImg.height : srcImg.height;
+        if (w && h) {
+          const tex = this.textures.createCanvas('fx_void_orb_sheet', w, h);
+          if (tex) {
+            const ctx = tex.getContext();
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(srcImg, 0, 0, w, h);
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const d = imgData.data;
+
+            for (let i = 0; i < d.length; i += 4) {
+              const a = d[i + 3];
+              if (a === 0) continue;
+              const lum = (d[i] * 77 + d[i + 1] * 150 + d[i + 2] * 29) >> 8;
+
+              if (lum < 142 || a < 135) {
+                // Dark abyssal shadow ink tendrils wrapping the outer perimeter
+                const t = Math.min(1, lum / 142);
+                d[i] = Math.round(6 + 44 * t);
+                d[i + 1] = Math.round(2 + 8 * t);
+                d[i + 2] = Math.round(12 + 86 * t);
+                d[i + 3] = Math.min(255, Math.round(a * 1.28));
+              } else if (lum < 210) {
+                // Vivid electric purple swirling void arcs
+                const t = (lum - 142) / 68;
+                d[i] = Math.round(132 + 76 * t);
+                d[i + 1] = Math.round(20 + 68 * t);
+                d[i + 2] = 255;
+              } else {
+                // Radiant lavender-white void heart
+                const t = (lum - 210) / 45;
+                d[i] = Math.round(212 + 40 * t);
+                d[i + 1] = Math.round(125 + 112 * t);
+                d[i + 2] = 255;
+              }
+            }
+
+            ctx.putImageData(imgData, 0, 0);
+            tex.refresh();
+            this.textures.addSpriteSheet('fx_void_orb_sheet', tex, {
+              frameWidth: 128,
+              frameHeight: 128,
+            });
+          }
+        }
+      }
+    }
+
+    // 4. Remap fx_slam_sheet -> fx_void_slam_sheet (dark shadow fractures + electric purple fissures)
+    if (!this.textures.exists('fx_void_slam_sheet') && this.textures.exists('fx_slam_sheet')) {
+      const srcImg = this.textures.get('fx_slam_sheet').getSourceImage() as
+        | HTMLImageElement
+        | HTMLCanvasElement
+        | undefined;
+      if (srcImg) {
+        const w =
+          srcImg instanceof HTMLImageElement ? srcImg.naturalWidth || srcImg.width : srcImg.width;
+        const h =
+          srcImg instanceof HTMLImageElement ? srcImg.naturalHeight || srcImg.height : srcImg.height;
+        if (w && h) {
+          const tex = this.textures.createCanvas('fx_void_slam_sheet', w, h);
+          if (tex) {
+            const ctx = tex.getContext();
+            ctx.clearRect(0, 0, w, h);
+            ctx.drawImage(srcImg, 0, 0, w, h);
+            const imgData = ctx.getImageData(0, 0, w, h);
+            const d = imgData.data;
+
+            for (let i = 0; i < d.length; i += 4) {
+              const a = d[i + 3];
+              if (a === 0) continue;
+              const lum = (d[i] * 87 + d[i + 1] * 133 + d[i + 2] * 36) >> 8;
+
+              if (lum < 148 || a < 105) {
+                const t = Math.min(1, lum / 148);
+                d[i] = Math.round(8 + 46 * t);
+                d[i + 1] = Math.round(2 + 8 * t);
+                d[i + 2] = Math.round(15 + 78 * t);
+                d[i + 3] = Math.min(255, Math.round(a * 1.35));
+              } else if (lum < 204) {
+                const t = (lum - 148) / 56;
+                d[i] = Math.round(140 + 68 * t);
+                d[i + 1] = Math.round(26 + 64 * t);
+                d[i + 2] = 255;
+              } else {
+                const t = (lum - 204) / 51;
+                d[i] = Math.round(218 + 34 * t);
+                d[i + 1] = Math.round(145 + 95 * t);
+                d[i + 2] = 255;
+              }
+            }
+
+            ctx.putImageData(imgData, 0, 0);
+            tex.refresh();
+            this.textures.addSpriteSheet('fx_void_slam_sheet', tex, {
+              frameWidth: 448,
+              frameHeight: 252,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  private initVoidSplatPool() {
+    this.voidSplatPool = [];
+    this.voidSplatCursor = 0;
+    this.hasActiveVoidSplats = false;
+    if (!this.textures.exists('void_ink_splat')) return;
+    for (let i = 0; i < 12; i++) {
+      const sprite = this.add
+        .image(0, 0, 'void_ink_splat')
+        .setBlendMode(Phaser.BlendModes.NORMAL)
+        .setDepth(15)
+        .setVisible(false)
+        .setActive(false);
+      sprite.disableInteractive();
+      this.voidSplatPool.push({
+        sprite,
+        active: false,
+        elapsedMs: 0,
+        durationMs: 1200,
+        baseAlpha: 0.92,
+      });
+    }
+  }
+
+  private spawnVoidSplat(
+    x: number,
+    y: number,
+    scale: number = 1.0,
+    durationMs: number = 1200,
+    alpha: number = 0.92
+  ) {
+    const len = this.voidSplatPool.length;
+    if (len === 0) return;
+    let slot: (typeof this.voidSplatPool)[number] | undefined;
+    for (let step = 0; step < len; step++) {
+      const idx = (this.voidSplatCursor + step) % len;
+      const cand = this.voidSplatPool[idx];
+      if (!cand.active && cand.sprite?.scene) {
+        this.voidSplatCursor = (idx + 1) % len;
+        slot = cand;
+        break;
+      }
+    }
+    if (!slot) {
+      slot = this.voidSplatPool[this.voidSplatCursor];
+      this.voidSplatCursor = (this.voidSplatCursor + 1) % len;
+    }
+    if (!slot || !slot.sprite?.scene) return;
+
+    slot.active = true;
+    this.hasActiveVoidSplats = true;
+    slot.elapsedMs = 0;
+    slot.durationMs = Math.max(120, durationMs);
+    slot.baseAlpha = alpha;
+    slot.sprite
+      .setPosition(x, y)
+      .setRotation(Math.random() * Math.PI * 2)
+      .setScale(scale)
+      .setAlpha(alpha)
+      .setActive(true)
+      .setVisible(true);
+  }
+
+  private updateVoidSplats(delta: number) {
+    if (!this.hasActiveVoidSplats) return;
+    let anyActive = false;
+    for (let i = 0; i < this.voidSplatPool.length; i++) {
+      const s = this.voidSplatPool[i];
+      if (!s.active) continue;
+      s.elapsedMs += delta;
+      if (s.elapsedMs >= s.durationMs) {
+        s.active = false;
+        s.sprite.setVisible(false).setActive(false);
+      } else {
+        anyActive = true;
+        const p = s.elapsedMs / s.durationMs;
+        // Hold full opacity for first 45% then fade out cleanly
+        const fade = p < 0.45 ? 1 : 1 - (p - 0.45) / 0.55;
+        s.sprite.setAlpha(s.baseAlpha * fade);
+      }
+    }
+    this.hasActiveVoidSplats = anyActive;
   }
 
   private initGorePools() {
@@ -2520,6 +3292,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private acquireGoreParticle(maxActiveCap: number): GoreParticle {
+    this.hasActiveGoreParticles = true;
     let activeCount = 0;
     let freeSlot: GoreParticle | null = null;
     let oldestSlot = this.goreParticlePool[0];
@@ -2545,6 +3318,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private acquireHitSplashParticle(maxActiveCap: number): GoreParticle {
+    this.hasActiveHitSplashes = true;
     let activeCount = 0;
     let freeSlot: GoreParticle | null = null;
     let oldestSlot = this.hitSplashPool[0];
@@ -2570,6 +3344,7 @@ export class MainScene extends Phaser.Scene {
   }
 
   private acquireGoreDecal(maxActiveCap: number): GoreDecal {
+    this.hasActiveGoreDecals = true;
     let activeCount = 0;
     let freeSlot: GoreDecal | null = null;
     let oldestSlot = this.goreDecalPool[0];
@@ -3016,7 +3791,7 @@ export class MainScene extends Phaser.Scene {
       case 'shotgun':
         return { primary: 0xffd54f, secondary: 0xffe082, ring: 0xf59e0b };
       case 'spark':
-        return { primary: 0xfde047, secondary: 0xfef08a, ring: 0xf59e0b };
+        return { primary: 0x34f5ae, secondary: 0xb8fff0, ring: 0x3ae8ff };
       case 'ring':
         return { primary: 0x7df3ff, secondary: 0xe0f2fe, ring: 0x38bdf8 };
       case 'blades':
@@ -3049,6 +3824,7 @@ export class MainScene extends Phaser.Scene {
     const density = this.recentHitSplashCount;
 
     const palette = this.getMagicAttackPalette(attackStyle);
+    const isCelestialSpark = attackStyle === 'spark';
     const resolvedSize = enemyDisplaySize && enemyDisplaySize > 0 ? enemyDisplaySize : 110;
     const sizeScale = Phaser.Math.Clamp(resolvedSize / 115, 0.72, 1.55);
     const rawSparkScale =
@@ -3058,7 +3834,19 @@ export class MainScene extends Phaser.Scene {
     const sparkAlpha = isCrit ? HIT_VFX.critSparkAlpha : HIT_VFX.hitSparkAlpha;
 
     // 1. Thinned & deduplicated animated arcane splash burst at the impact point (ADD blend)
-    this.spawnSparkHitEffect(x, y, palette.primary, sparkScale, sparkAlpha, true);
+    if (isCelestialSpark && this.anims.exists('fx_celestial_hit_anim')) {
+      this.spawnSparkHitEffect(
+        x,
+        y,
+        undefined,
+        Math.min(0.95, sparkScale * 1.15),
+        Math.min(0.95, sparkAlpha + 0.14),
+        true,
+        'fx_celestial_hit_anim'
+      );
+    } else {
+      this.spawnSparkHitEffect(x, y, palette.primary, sparkScale, sparkAlpha, true);
+    }
 
     // 2. Adaptive droplet spray: thin out automatically when hitting crowds simultaneously
     let dropletCount: number = isCrit ? HIT_VFX.dropletCountCrit : HIT_VFX.dropletCountNormal;
@@ -3077,19 +3865,28 @@ export class MainScene extends Phaser.Scene {
       const speedMin = isCrit ? 85 : 65;
       const speedMax = isCrit ? 190 : 145;
       const poolCap = this.particlePool.length;
+      const useCelestialShard =
+        isCelestialSpark && this.textures.exists('fx_celestial_spark_particle');
       let spawned = 0;
 
       for (let i = 0; i < poolCap; i++) {
         const p = this.particlePool[i];
         if (!p.active) {
           p.active = true;
-          p.sprite.setTexture('fx_spark');
+          p.sprite.setTexture(useCelestialShard ? 'fx_celestial_spark_particle' : 'fx_spark');
+          p.sprite.setBlendMode(Phaser.BlendModes.ADD);
           p.sprite.setPosition(x, y);
           p.sprite.setVisible(true);
           p.sprite.setActive(true);
           p.baseAlpha = dropletAlpha;
           p.sprite.setAlpha(dropletAlpha);
-          p.sprite.setTint(spawned % 2 === 0 ? palette.secondary : palette.ring);
+          if (useCelestialShard) {
+            p.sprite.clearTint();
+            p.rotSpeed = (spawned % 2 === 0 ? 1 : -1) * Phaser.Math.FloatBetween(16, 24);
+          } else {
+            p.sprite.setTint(spawned % 2 === 0 ? palette.secondary : palette.ring);
+            p.rotSpeed = 0;
+          }
 
           const angle = hasDir
             ? baseAngle + Phaser.Math.FloatBetween(-1.25, 1.25)
@@ -3103,7 +3900,8 @@ export class MainScene extends Phaser.Scene {
 
           const sc =
             Phaser.Math.FloatBetween(HIT_VFX.dropletScaleMin, HIT_VFX.dropletScaleMax) *
-            (isCrit ? 1.15 : 1.0);
+            (isCrit ? 1.15 : 1.0) *
+            (useCelestialShard ? 1.85 : 1.0);
           p.sprite.setScale(sc);
           p.sprite.setRotation(angle);
 
@@ -3111,6 +3909,7 @@ export class MainScene extends Phaser.Scene {
           if (spawned >= dropletCount) break;
         }
       }
+      if (spawned > 0) this.hasActiveParticles = true;
     }
 
     if (isCrit && density <= 4) {
@@ -3330,7 +4129,8 @@ export class MainScene extends Phaser.Scene {
     }
   }
 
-  private stepGoreParticleList(list: GoreParticle[], delta: number, dt: number, mistDamp: number) {
+  private stepGoreParticleList(list: GoreParticle[], delta: number, dt: number, mistDamp: number): boolean {
+    let anyActive = false;
     for (let i = 0; i < list.length; i++) {
       const p = list[i];
       if (!p.active) continue;
@@ -3343,6 +4143,7 @@ export class MainScene extends Phaser.Scene {
         continue;
       }
 
+      anyActive = true;
       const progress = p.life / p.maxLife;
       if (p.kind === 'splash') {
         p.sprite.x += p.vx * dt;
@@ -3394,31 +4195,50 @@ export class MainScene extends Phaser.Scene {
         p.sprite.setAlpha(p.baseAlpha * (1 - progress));
       }
     }
+    return anyActive;
   }
 
   private updateGore(delta: number) {
+    if (
+      !this.hasActiveHitSplashes &&
+      !this.hasActiveGoreParticles &&
+      !this.hasActiveGoreDecals &&
+      this.bossVignetteTimerMs <= 0
+    ) {
+      return;
+    }
+
     const dt = delta * 0.001;
     const mistDamp = Math.pow(0.94, delta / 16.6667);
 
     // 1. Update pooled hit splashes & gore droplets/chips/mist (isolated pools prevent starvation)
-    this.stepGoreParticleList(this.hitSplashPool, delta, dt, mistDamp);
-    this.stepGoreParticleList(this.goreParticlePool, delta, dt, mistDamp);
+    if (this.hasActiveHitSplashes) {
+      this.hasActiveHitSplashes = this.stepGoreParticleList(this.hitSplashPool, delta, dt, mistDamp);
+    }
+    if (this.hasActiveGoreParticles) {
+      this.hasActiveGoreParticles = this.stepGoreParticleList(this.goreParticlePool, delta, dt, mistDamp);
+    }
 
     // 2. Update pooled floor stain decals (fade out over 8 seconds)
-    for (let i = 0; i < this.goreDecalPool.length; i++) {
-      const d = this.goreDecalPool[i];
-      if (!d.active) continue;
+    if (this.hasActiveGoreDecals) {
+      let anyDecal = false;
+      for (let i = 0; i < this.goreDecalPool.length; i++) {
+        const d = this.goreDecalPool[i];
+        if (!d.active) continue;
 
-      d.life += delta;
-      if (d.life >= d.maxLife) {
-        d.active = false;
-        d.sprite.setVisible(false);
-        d.sprite.setActive(false);
-        continue;
+        d.life += delta;
+        if (d.life >= d.maxLife) {
+          d.active = false;
+          d.sprite.setVisible(false);
+          d.sprite.setActive(false);
+          continue;
+        }
+
+        anyDecal = true;
+        const progress = d.life / d.maxLife;
+        d.sprite.setAlpha(d.baseAlpha * (1 - progress));
       }
-
-      const progress = d.life / d.maxLife;
-      d.sprite.setAlpha(d.baseAlpha * (1 - progress));
+      this.hasActiveGoreDecals = anyDecal;
     }
 
     // 3. Update brief boss death darkening vignette
@@ -3495,20 +4315,22 @@ export class MainScene extends Phaser.Scene {
     item.sprite.setActive(false);
     item.sprite.setAlpha(1);
     item.sprite.clearTint();
+    item.sprite.setBlendMode(Phaser.BlendModes.ADD);
     item.inUse = false;
     item.isHitSpark = false;
     item.x = undefined;
     item.y = undefined;
   }
 
-  // fx_spark_sheet: thinned & spatially deduplicated hit animation (ADD blend)
+  // fx_spark_sheet / fx_celestial_hit_sheet: thinned & spatially deduplicated hit animation (ADD blend)
   public spawnSparkHitEffect(
     x: number,
     y: number,
     tint?: number,
     scaleOverride?: number,
     alphaOverride: number = 0.72,
-    isHitSpark: boolean = false
+    isHitSpark: boolean = false,
+    animKey: 'fx_spark_anim' | 'fx_celestial_hit_anim' = 'fx_spark_anim'
   ) {
     const nowMs = this.time.now;
     let effectiveAlpha = alphaOverride;
@@ -3582,14 +4404,14 @@ export class MainScene extends Phaser.Scene {
     item.sprite.setActive(true);
     item.sprite.setVisible(true);
 
-    item.sprite.play('fx_spark_anim');
+    item.sprite.play(animKey);
     item.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
       this.releasePooledEffect(item);
     });
   }
 
-  // fx_death_sheet tinted magenta for cultist/spitter orb impact
-  private spawnOrbImpactDeathEffect(x: number, y: number) {
+  // fx_death_sheet tinted magenta/dark-purple for cultist or boss orb impact
+  private spawnOrbImpactDeathEffect(x: number, y: number, isBossAttack: boolean = false) {
     const item = this.getPooledEffect();
     if (!item) return;
 
@@ -3599,10 +4421,10 @@ export class MainScene extends Phaser.Scene {
     item.sprite.setPosition(x, y);
     item.sprite.setOrigin(0.5, 0.5);
     item.sprite.setRotation(Phaser.Math.FloatBetween(0, Math.PI * 2));
-    item.sprite.setScale(0.45);
+    item.sprite.setScale(isBossAttack ? 0.56 : 0.45);
     item.sprite.setBlendMode(Phaser.BlendModes.ADD);
     item.sprite.setDepth(27);
-    item.sprite.setTint(0xff44ee);
+    item.sprite.setTint(isBossAttack ? 0x9b26ff : 0xff44ee);
     item.sprite.setActive(true);
     item.sprite.setVisible(true);
 
@@ -3614,6 +4436,25 @@ export class MainScene extends Phaser.Scene {
 
   // fx_death_sheet: on enemy death, tinted with accent color, scaled to ~2x enemy size
   public spawnDeathEffect(x: number, y: number, enemyType: string, enemyScale: number) {
+    if (enemyType === 'boss') {
+      this.spawnVoidSplat(x, y, 2.1, 1800, 0.95);
+      this.spawnParticleBurst(
+        x,
+        y,
+        14,
+        'void_wisp_particle',
+        95,
+        280,
+        0.55,
+        1.15,
+        undefined,
+        620,
+        0.92,
+        Phaser.BlendModes.NORMAL
+      );
+      this.spawnParticleBurst(x, y, 18, 'fx_spark', 120, 320, 0.24, 0.52, 0xb838ff, 520, 0.9);
+    }
+
     const item = this.getPooledEffect();
     if (!item) return;
 
@@ -3635,7 +4476,7 @@ export class MainScene extends Phaser.Scene {
         accentColor = 0xf97316;
         break;
       case 'boss':
-        accentColor = 0xff1144;
+        accentColor = 0x9b26ff;
         break;
       default:
         accentColor = 0x38bdf8;
@@ -3685,7 +4526,7 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
-  // fx_slam_sheet: boss ground slam scaled to damage radius; area damage on frame 8
+  // fx_void_slam_sheet (dark purple & black fractures): boss ground slam scaled to damage radius; area damage on frame 8
   public spawnBossGroundSlam(x: number, y: number, damageRadius: number = 260, slamDamage: number = 35) {
     const item = this.getPooledEffect();
     if (!item) return;
@@ -3695,14 +4536,19 @@ export class MainScene extends Phaser.Scene {
 
     // Frame is 448 wide (half width 224). Scale to match damage radius
     const sc = (damageRadius * 2) / 448;
+    const useVoidSlam = this.anims.exists('fx_void_slam_anim');
 
     item.sprite.setPosition(x, y);
     item.sprite.setOrigin(0.5, 0.5);
     item.sprite.setRotation(0);
     item.sprite.setScale(sc);
-    item.sprite.setBlendMode(Phaser.BlendModes.ADD);
+    item.sprite.setBlendMode(useVoidSlam ? Phaser.BlendModes.NORMAL : Phaser.BlendModes.ADD);
     item.sprite.setDepth(25);
-    item.sprite.clearTint();
+    if (useVoidSlam) {
+      item.sprite.clearTint();
+    } else {
+      item.sprite.setTint(0xb838ff);
+    }
     item.sprite.setActive(true);
     item.sprite.setVisible(true);
 
@@ -3718,6 +4564,22 @@ export class MainScene extends Phaser.Scene {
         // Area damage on frame index 8
         if ((fIdx === 8 || frame.index === 9) && !areaDamageDone) {
           areaDamageDone = true;
+          this.spawnVoidSplat(x, y, Math.max(1.2, damageRadius / 88), 1450, 0.94);
+          this.spawnParticleBurst(
+            x,
+            y,
+            10,
+            'void_wisp_particle',
+            90,
+            245,
+            0.48,
+            0.95,
+            undefined,
+            480,
+            0.9,
+            Phaser.BlendModes.NORMAL
+          );
+          this.spawnParticleBurst(x, y, 12, 'fx_spark', 110, 275, 0.2, 0.44, 0xc855ff, 380, 0.85);
           this.cameraController.shakeFromBossProximity(
             x,
             y,
@@ -3740,7 +4602,7 @@ export class MainScene extends Phaser.Scene {
       }
     );
 
-    item.sprite.play('fx_slam_anim');
+    item.sprite.play(useVoidSlam ? 'fx_void_slam_anim' : 'fx_slam_anim');
     item.sprite.once(Phaser.Animations.Events.ANIMATION_COMPLETE, () => {
       this.releasePooledEffect(item);
     });
@@ -3819,7 +4681,8 @@ export class MainScene extends Phaser.Scene {
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (!e || !e.active || !e.scene || e === source) continue;
-      const edata = e.getData('data') as EnemyData | undefined;
+      const edata = ((e as unknown as { __enemyData?: EnemyData }).__enemyData ||
+        e.getData('data')) as EnemyData | undefined;
       if (!edata || edata.hp <= 0) continue;
 
       // Chain lightning cannot strike enemies outside the lantern's light radius
@@ -3902,7 +4765,8 @@ export class MainScene extends Phaser.Scene {
     startAlpha: number,
     durationMs: number,
     depth: number,
-    tint?: number
+    tint?: number,
+    blendMode: Phaser.BlendModes = Phaser.BlendModes.ADD
   ) {
     const len = this.expandingRingPool.length;
     if (len === 0) return;
@@ -3922,12 +4786,20 @@ export class MainScene extends Phaser.Scene {
     }
     if (!slot || !slot.sprite?.scene) return;
     slot.active = true;
+    this.hasActiveExpandingRings = true;
     slot.elapsedMs = 0;
     slot.durationMs = Math.max(16, durationMs);
     slot.startScale = startScale;
     slot.endScale = endScale;
     slot.startAlpha = startAlpha;
-    slot.sprite.setPosition(x, y).setDepth(depth).setScale(startScale).setAlpha(startAlpha).setActive(true).setVisible(true);
+    slot.sprite
+      .setPosition(x, y)
+      .setDepth(depth)
+      .setScale(startScale)
+      .setAlpha(startAlpha)
+      .setBlendMode(blendMode)
+      .setActive(true)
+      .setVisible(true);
     if (tint !== undefined) {
       slot.sprite.setTint(tint);
     } else {
@@ -3936,36 +4808,46 @@ export class MainScene extends Phaser.Scene {
   }
 
   private updatePooledRingsAndTrails(delta: number) {
-    for (let i = 0; i < this.expandingRingPool.length; i++) {
-      const r = this.expandingRingPool[i];
-      if (!r.active) continue;
-      r.elapsedMs += delta;
-      if (r.elapsedMs >= r.durationMs) {
-        r.active = false;
-        r.sprite.setVisible(false).setActive(false);
-      } else {
-        const p = r.elapsedMs / r.durationMs;
-        const inv = 1 - p;
-        const easeOut = 1 - inv * inv * inv;
-        r.sprite.setScale(r.startScale + (r.endScale - r.startScale) * easeOut);
-        r.sprite.setAlpha(r.startAlpha * (1 - p));
+    if (this.hasActiveExpandingRings) {
+      let anyRing = false;
+      for (let i = 0; i < this.expandingRingPool.length; i++) {
+        const r = this.expandingRingPool[i];
+        if (!r.active) continue;
+        r.elapsedMs += delta;
+        if (r.elapsedMs >= r.durationMs) {
+          r.active = false;
+          r.sprite.setVisible(false).setActive(false);
+        } else {
+          anyRing = true;
+          const p = r.elapsedMs / r.durationMs;
+          const inv = 1 - p;
+          const easeOut = 1 - inv * inv * inv;
+          r.sprite.setScale(r.startScale + (r.endScale - r.startScale) * easeOut);
+          r.sprite.setAlpha(r.startAlpha * (1 - p));
+        }
       }
+      this.hasActiveExpandingRings = anyRing;
     }
 
-    for (let i = 0; i < this.enemyTrailPool.length; i++) {
-      const t = this.enemyTrailPool[i];
-      if (!t.active) continue;
-      t.elapsedMs += delta;
-      if (t.elapsedMs >= t.durationMs) {
-        t.active = false;
-        t.sprite.setVisible(false).setActive(false);
-      } else {
-        const p = t.elapsedMs / t.durationMs;
-        const inv = 1 - p;
-        const quadOut = inv * inv;
-        t.sprite.setScale(t.startScale * quadOut);
-        t.sprite.setAlpha(0.5 * quadOut);
+    if (this.hasActiveEnemyTrails) {
+      let anyTrail = false;
+      for (let i = 0; i < this.enemyTrailPool.length; i++) {
+        const t = this.enemyTrailPool[i];
+        if (!t.active) continue;
+        t.elapsedMs += delta;
+        if (t.elapsedMs >= t.durationMs) {
+          t.active = false;
+          t.sprite.setVisible(false).setActive(false);
+        } else {
+          anyTrail = true;
+          const p = t.elapsedMs / t.durationMs;
+          const inv = 1 - p;
+          const quadOut = inv * inv;
+          t.sprite.setScale(t.startScale * quadOut);
+          t.sprite.setAlpha(0.5 * quadOut);
+        }
       }
+      this.hasActiveEnemyTrails = anyTrail;
     }
   }
 
@@ -4263,9 +5145,10 @@ export class MainScene extends Phaser.Scene {
     // 9. Update Pickups Magnet & 12s Gem Expiry
     this.updatePickups(delta);
 
-    // 10. Update Particles, Pooled Rings/Trails & Enemy Death Gore/Decals
+    // 10. Update Particles, Pooled Rings/Trails, Void Ink Splats & Enemy Death Gore/Decals
     this.updateParticles(delta);
     this.updatePooledRingsAndTrails(delta);
+    this.updateVoidSplats(delta);
     this.updateGore(delta);
 
     // 11. Update Floating Combat Text Pool
@@ -4880,7 +5763,7 @@ export class MainScene extends Phaser.Scene {
     return true;
   }
 
-  // Weapon: Spark Burst (travels strictly up to lantern light radius)
+  // Weapon: Spark Burst (Celestial Sparks: mint-emerald & aqua-cyan starbursts spinning rapidly)
   private fireSparkBurst(): boolean {
     const spark = this.weapons['spark'];
     if (!spark || !spark.unlocked) return false;
@@ -4895,22 +5778,25 @@ export class MainScene extends Phaser.Scene {
     const dmg = Math.round(spark.damage * this.playerStats.damageMultiplier);
     const speed = 360;
     const maxLife = Math.round((maxRange / speed) * 1000);
+    const sparkTex = this.textures.exists('fx_celestial_spark')
+      ? 'fx_celestial_spark'
+      : 'fx_spark';
 
     for (let i = 0; i < count; i++) {
       const angle = (i * Math.PI * 2) / count + Phaser.Math.FloatBetween(-0.15, 0.15);
       const vx = Math.cos(angle) * speed;
       const vy = Math.sin(angle) * speed;
 
-      const proj = this.acquirePlayerProjectile(this.player.x, this.player.y, 'fx_spark');
+      const proj = this.acquirePlayerProjectile(this.player.x, this.player.y, sparkTex);
       proj.setDepth(22);
       proj.setBlendMode(Phaser.BlendModes.ADD);
       proj.clearTint();
-      proj.setScale(0.48);
+      proj.setScale(sparkTex === 'fx_celestial_spark' ? 0.58 : 0.48);
       proj.setRotation(angle);
 
       const sparkBody = proj.body as Phaser.Physics.Arcade.Body;
       if (sparkBody) {
-        sparkBody.setSize(proj.width * 0.4, proj.height * 0.4);
+        sparkBody.setSize(proj.width * 0.48, proj.height * 0.48);
       }
 
       const data: ProjectileData = {
@@ -4926,10 +5812,33 @@ export class MainScene extends Phaser.Scene {
         originY: this.player.y,
         maxRangeSq: maxRange * maxRange,
         attackStyle: 'spark',
+        rotSpeed: (i % 2 === 0 ? 1 : -1) * Phaser.Math.FloatBetween(15, 21),
+        trailTimerMs: 0,
       };
       (proj as unknown as { __projData?: ProjectileData }).__projData = data;
       proj.setData('data', data);
       proj.setVelocity(vx, vy);
+    }
+
+    // Eruption burst of fast-spinning mint-emerald / cyan celestial particles
+    if (this.textures.exists('fx_celestial_spark_particle')) {
+      const burstCount = gameManager.getQualityTier() === 'low' ? 6 : 10;
+      this.spawnParticleBurst(
+        this.player.x,
+        this.player.y,
+        burstCount,
+        'fx_celestial_spark_particle',
+        36,
+        130,
+        0.38,
+        0.64,
+        undefined,
+        340,
+        0.92,
+        Phaser.BlendModes.ADD,
+        16,
+        24
+      );
     }
 
     return true;
@@ -4967,17 +5876,37 @@ export class MainScene extends Phaser.Scene {
       if (t.kind === 'line') {
         const endX = t.x + Math.cos(t.angle) * t.length;
         const endY = t.y + Math.sin(t.angle) * t.length;
-        this.telegraphGraphics.lineStyle(8, 0xe5484d, 0.22 * pulse);
-        this.telegraphGraphics.lineBetween(t.x, t.y, endX, endY);
-        this.telegraphGraphics.lineStyle(2.5, 0xff6b70, 0.45 + 0.5 * progress);
-        this.telegraphGraphics.lineBetween(t.x, t.y, endX, endY);
+        if (t.isDarkMagic) {
+          this.telegraphGraphics.lineStyle(12, 0x090211, 0.56 * pulse);
+          this.telegraphGraphics.lineBetween(t.x, t.y, endX, endY);
+          this.telegraphGraphics.lineStyle(6.5, 0x7b1fe8, 0.34 * pulse);
+          this.telegraphGraphics.lineBetween(t.x, t.y, endX, endY);
+          this.telegraphGraphics.lineStyle(2.5, 0xd46bff, 0.52 + 0.48 * progress);
+          this.telegraphGraphics.lineBetween(t.x, t.y, endX, endY);
+        } else {
+          this.telegraphGraphics.lineStyle(8, 0xe5484d, 0.22 * pulse);
+          this.telegraphGraphics.lineBetween(t.x, t.y, endX, endY);
+          this.telegraphGraphics.lineStyle(2.5, 0xff6b70, 0.45 + 0.5 * progress);
+          this.telegraphGraphics.lineBetween(t.x, t.y, endX, endY);
+        }
       } else {
-        this.telegraphGraphics.fillStyle(0xe5484d, 0.08 + 0.14 * progress);
-        this.telegraphGraphics.fillCircle(t.x, t.y, t.radius);
-        this.telegraphGraphics.fillStyle(0xe5484d, 0.14 * pulse);
-        this.telegraphGraphics.fillCircle(t.x, t.y, t.radius * progress);
-        this.telegraphGraphics.lineStyle(3, 0xff5e64, 0.5 + 0.45 * progress);
-        this.telegraphGraphics.strokeCircle(t.x, t.y, t.radius);
+        if (t.isDarkMagic) {
+          this.telegraphGraphics.fillStyle(0x120321, 0.24 + 0.16 * progress);
+          this.telegraphGraphics.fillCircle(t.x, t.y, t.radius);
+          this.telegraphGraphics.fillStyle(0x881eff, 0.2 * pulse);
+          this.telegraphGraphics.fillCircle(t.x, t.y, t.radius * progress);
+          this.telegraphGraphics.lineStyle(9, 0x07010d, 0.65);
+          this.telegraphGraphics.strokeCircle(t.x, t.y, t.radius);
+          this.telegraphGraphics.lineStyle(3, 0xc84eff, 0.62 + 0.38 * progress);
+          this.telegraphGraphics.strokeCircle(t.x, t.y, t.radius);
+        } else {
+          this.telegraphGraphics.fillStyle(0xe5484d, 0.08 + 0.14 * progress);
+          this.telegraphGraphics.fillCircle(t.x, t.y, t.radius);
+          this.telegraphGraphics.fillStyle(0xe5484d, 0.14 * pulse);
+          this.telegraphGraphics.fillCircle(t.x, t.y, t.radius * progress);
+          this.telegraphGraphics.lineStyle(3, 0xff5e64, 0.5 + 0.45 * progress);
+          this.telegraphGraphics.strokeCircle(t.x, t.y, t.radius);
+        }
       }
 
       if (t.elapsedMs >= t.durationMs) {
@@ -4989,7 +5918,8 @@ export class MainScene extends Phaser.Scene {
             t.damage,
             t.speed,
             t.tint,
-            t.sourceEnemy
+            t.sourceEnemy,
+            Boolean(t.isDarkMagic)
           );
         }
         this.telegraphs.splice(i, 1);
@@ -5004,8 +5934,12 @@ export class MainScene extends Phaser.Scene {
     if (!this.projectilesGroup) return;
     const projs = this.fillScratchFromGroup(this.projectilesGroup, this.projsScratch);
     let magentaParticlesThisFrame = 0;
+    let sparkParticlesThisFrame = 0;
     const dtSec = delta * 0.001;
-    const maxMagentaParticles = gameManager.getQualityTier() === 'low' ? 1 : 3;
+    const isLowQuality = gameManager.getQualityTier() === 'low';
+    const maxMagentaParticles = isLowQuality ? 1 : 3;
+    const maxSparkTrailParticles = isLowQuality ? 1 : 2;
+    const hasCelestialParticleTex = this.textures.exists('fx_celestial_spark_particle');
 
     for (let i = 0; i < projs.length; i++) {
       const proj = projs[i];
@@ -5041,23 +5975,80 @@ export class MainScene extends Phaser.Scene {
         continue;
       }
 
+      if (!data.isEnemy) {
+        if (data.rotSpeed) {
+          proj.rotation += data.rotSpeed * dtSec;
+        }
+        if (data.attackStyle === 'spark') {
+          proj.setScale(0.56 + 0.08 * Math.sin(data.life * 0.032));
+          data.trailTimerMs = (data.trailTimerMs ?? 0) + delta;
+          if (
+            hasCelestialParticleTex &&
+            data.trailTimerMs >= 85 &&
+            sparkParticlesThisFrame < maxSparkTrailParticles
+          ) {
+            data.trailTimerMs = 0;
+            sparkParticlesThisFrame++;
+            this.spawnParticleBurst(
+              proj.x + Phaser.Math.Between(-8, 8),
+              proj.y + Phaser.Math.Between(-8, 8),
+              1,
+              'fx_celestial_spark_particle',
+              6,
+              28,
+              0.28,
+              0.46,
+              undefined,
+              240,
+              0.88,
+              Phaser.BlendModes.ADD,
+              16,
+              24
+            );
+          }
+        }
+      }
+
       if (data.isEnemy) {
-        proj.rotation += dtSec * 4.5;
+        const isBossOrb = Boolean(data.isBossAttack);
+        proj.rotation += dtSec * (isBossOrb ? 5.2 : 4.5);
         // Analytical ~6Hz orb pulse (zero Tween overhead)
-        const pulseScale = 0.42 * (1.025 + 0.125 * Math.sin(data.life * 0.0378));
+        const baseScale = isBossOrb ? 0.48 : 0.42;
+        const pulseScale = baseScale * (1.025 + 0.125 * Math.sin(data.life * 0.0378));
         proj.setScale(pulseScale);
 
         let trailTimer = (projAny.__trailTimerMs || 0) + delta;
         while (trailTimer >= 40) {
           trailTimer -= 40;
-          this.spawnEnemyOrbTrailGhost(proj);
+          this.spawnEnemyOrbTrailGhost(proj, isBossOrb);
         }
         projAny.__trailTimerMs = trailTimer;
 
         if (magentaParticlesThisFrame < maxMagentaParticles) {
           const ox = proj.x + Phaser.Math.Between(-10, 10);
           const oy = proj.y + Phaser.Math.Between(-10, 10);
-          this.spawnParticleBurst(ox, oy, 1, 'fx_spark', 20, 65, 0.1, 0.2, 0xff44ee, 300);
+          if (isBossOrb) {
+            if (magentaParticlesThisFrame % 2 === 0) {
+              this.spawnParticleBurst(
+                ox,
+                oy,
+                1,
+                'void_wisp_particle',
+                18,
+                60,
+                0.28,
+                0.48,
+                undefined,
+                310,
+                0.86,
+                Phaser.BlendModes.NORMAL
+              );
+            } else {
+              this.spawnParticleBurst(ox, oy, 1, 'fx_spark', 20, 65, 0.11, 0.22, 0xb838ff, 300);
+            }
+          } else {
+            this.spawnParticleBurst(ox, oy, 1, 'fx_spark', 20, 65, 0.1, 0.2, 0xff44ee, 300);
+          }
           magentaParticlesThisFrame++;
         }
 
@@ -5068,10 +6059,36 @@ export class MainScene extends Phaser.Scene {
         const outerR = SPAWN_TIMELINE.pressure.nearMissOuterRadius;
         if (distSq < innerR * innerR) {
           this.damagePlayer(data.damage);
-          this.spawnSparkHitEffect(proj.x, proj.y, 0xff44ee, 0.56, 0.62, true);
-          this.spawnOrbImpactDeathEffect(proj.x, proj.y);
+          this.spawnSparkHitEffect(
+            proj.x,
+            proj.y,
+            isBossOrb ? 0xa82eff : 0xff44ee,
+            isBossOrb ? 0.65 : 0.56,
+            0.7,
+            true
+          );
+          this.spawnOrbImpactDeathEffect(proj.x, proj.y, isBossOrb);
           this.cameraController.shakeOnDamage(data.damage, this.playerStats.maxHp);
-          this.spawnParticleBurst(proj.x, proj.y, 4, 'fx_spark', 60, 145, 0.12, 0.22, 0xff44ee, 240, 0.56);
+          if (isBossOrb) {
+            this.spawnVoidSplat(proj.x, proj.y, 0.58, 560, 0.88);
+            this.spawnParticleBurst(
+              proj.x,
+              proj.y,
+              4,
+              'void_wisp_particle',
+              45,
+              135,
+              0.32,
+              0.6,
+              undefined,
+              320,
+              0.88,
+              Phaser.BlendModes.NORMAL
+            );
+            this.spawnParticleBurst(proj.x, proj.y, 5, 'fx_spark', 65, 165, 0.14, 0.26, 0xc44eff, 260, 0.72);
+          } else {
+            this.spawnParticleBurst(proj.x, proj.y, 4, 'fx_spark', 60, 145, 0.12, 0.22, 0xff44ee, 240, 0.56);
+          }
           this.releaseEnemyProjectile(proj);
         } else if (
           distSq <= outerR * outerR &&
@@ -5111,8 +6128,8 @@ export class MainScene extends Phaser.Scene {
       // Zero-allocation hit-flash tint restoration
       if (edata.tintResetAtMs && time >= edata.tintResetAtMs) {
         edata.tintResetAtMs = 0;
-        if (enemy.getData('enraged')) {
-          enemy.setTint(0xff7a7a);
+        if (edata.enraged) {
+          enemy.setTint(edata.type === 'boss' ? 0xff7e86 : 0xff7a7a);
         } else if (edata.isElite) {
           enemy.setTint((ELITE_AURA_STYLE[edata.type] ?? ELITE_AURA_STYLE.brute).spriteTint);
         } else {
@@ -5131,8 +6148,8 @@ export class MainScene extends Phaser.Scene {
           .setScale((auraRadius * 2.15) / 128)
           .setRotation(time * 0.0032)
           .setTint(auraStyle.outerColor)
-          .setAlpha(0.75 * auraPulse)
-          .setVisible(true);
+          .setAlpha(0.75 * auraPulse);
+        if (!auraSpr.visible) auraSpr.setVisible(true);
       }
 
       // Handle knockback decay (frame-rate-independent across 60/90/120fps)
@@ -5155,7 +6172,8 @@ export class MainScene extends Phaser.Scene {
         const cvx = (edata.chargeVx ?? Math.cos(angle) * effectiveSpeed) * globalEnemySpeedFactor;
         const cvy = (edata.chargeVy ?? Math.sin(angle) * effectiveSpeed) * globalEnemySpeedFactor;
         enemy.setVelocity(cvx, cvy);
-        enemy.setFlipX(cvx < 0);
+        const shouldFlipCharge = cvx < 0;
+        if (enemy.flipX !== shouldFlipCharge) enemy.setFlipX(shouldFlipCharge);
         if (edata.type === 'imp' && (!enemy.anims.isPlaying || enemy.anims.currentAnim?.key !== 'imp_run')) {
           enemy.play('imp_run', true);
         }
@@ -5163,7 +6181,8 @@ export class MainScene extends Phaser.Scene {
       }
 
       // All standard enemies flip toward the player
-      enemy.setFlipX(dxToPlayer < 0);
+      const shouldFlip = dxToPlayer < 0;
+      if (enemy.flipX !== shouldFlip) enemy.setFlipX(shouldFlip);
 
       // Enemy specific behaviors
       switch (edata.type) {
@@ -5176,12 +6195,14 @@ export class MainScene extends Phaser.Scene {
             cosA * effectiveSpeed - sinA * hoverOffset,
             sinA * effectiveSpeed + cosA * hoverOffset
           );
-          const baseScale = edata.baseScale ?? 0.36;
-          const wobble = Math.sin(time * 0.015 + phase);
-          enemy.setScale(
-            baseScale * (0.925 - wobble * 0.075),
-            baseScale * (1.03 + wobble * 0.03)
-          );
+          if (Math.abs(dxToPlayer) <= 360 && Math.abs(dyToPlayer) <= 600) {
+            const baseScale = edata.baseScale ?? 0.36;
+            const wobble = Math.sin(time * 0.015 + phase);
+            enemy.setScale(
+              baseScale * (0.925 - wobble * 0.075),
+              baseScale * (1.03 + wobble * 0.03)
+            );
+          }
           break;
         }
 
@@ -5256,15 +6277,15 @@ export class MainScene extends Phaser.Scene {
         }
 
         case 'boss': {
-          const bossTier = (enemy.getData('bossTier') as number) || 1;
+          const bossTier = edata.bossTier || 1;
           const hpRatio = edata.hp / Math.max(1, edata.maxHp);
           const isEnraged = hpRatio <= 0.5;
           const isCritical = hpRatio <= 0.25;
           let forceBossEmit = false;
 
-          if (isEnraged && !enemy.getData('enraged')) {
-            enemy.setData('enraged', true);
-            enemy.setTint(0xff7a7a);
+          if (isEnraged && !edata.enraged) {
+            edata.enraged = true;
+            enemy.setTint(0xff7e86);
             forceBossEmit = true;
             soundManager.playBossWarning();
             this.cameraController.shakeFromBossProximity(
@@ -5276,11 +6297,11 @@ export class MainScene extends Phaser.Scene {
               550,
               950
             );
-            this.showFloatingCallout(enemy.x, enemy.y - 90, 'THE TITAN ENRAGES!', '#e5303a');
+            this.showFloatingCallout(enemy.x, enemy.y - 90, 'THE TITAN ENRAGES!', '#c44eff');
           }
 
           const phaseSpeedBoost = isCritical ? 1.42 : isEnraged ? 1.24 : 1.0;
-          const isAttacking = (enemy.getData('isAttacking') as boolean) || false;
+          const isAttacking = Boolean(edata.isBossAttacking);
           if (!isAttacking) {
             const bossMoveSpeed = effectiveSpeed * phaseSpeedBoost;
             enemy.setVelocity(Math.cos(angle) * bossMoveSpeed, Math.sin(angle) * bossMoveSpeed);
@@ -5291,12 +6312,12 @@ export class MainScene extends Phaser.Scene {
             enemy.setVelocity(0, 0);
           }
 
-          // Faster periodic boss ground slam with larger 295px radius & >=0.5s red ground telegraph
+          // Faster periodic boss ground slam with larger 295px radius & >=0.5s dark-magic violet/black telegraph
           const slamCooldown = isCritical ? 1650 : isEnraged ? 1950 : 2600;
           if (!isAttacking && time - edata.lastAttack > slamCooldown) {
             edata.lastAttack = time;
-            enemy.setData('isAttacking', true);
-            enemy.setData('attackShockwaveDone', false);
+            edata.isBossAttacking = true;
+            edata.attackShockwaveDone = false;
             enemy.play('boss_attack');
             soundManager.playBossAttack();
 
@@ -5310,14 +6331,15 @@ export class MainScene extends Phaser.Scene {
               durationMs: Math.max(580, SPAWN_TIMELINE.pressure.telegraphDurationMs),
               damage: 0,
               speed: 0,
-              tint: 0xe5484d,
+              tint: 0x9b26ff,
+              isDarkMagic: true,
             });
           } else if (!isAttacking && distSq < 640 * 640) {
             // Escalating Void Volley: 5-way normally, 7-way critical burst below 25% HP
             const volleyCooldown = isCritical ? 1250 : isEnraged ? 1450 : 1950;
-            const lastVolley = (enemy.getData('lastBossVolley') as number) || 0;
+            const lastVolley = edata.lastBossVolley || 0;
             if (time - lastVolley > volleyCooldown) {
-              enemy.setData('lastBossVolley', time);
+              edata.lastBossVolley = time;
               const offsets = isCritical
                 ? [-0.66, -0.44, -0.22, 0, 0.22, 0.44, 0.66]
                 : [-0.44, -0.22, 0, 0.22, 0.44];
@@ -5333,8 +6355,9 @@ export class MainScene extends Phaser.Scene {
                   durationMs: SPAWN_TIMELINE.pressure.telegraphDurationMs,
                   damage: Math.round(edata.damage * (isEnraged ? 0.78 : 0.7)),
                   speed: orbSpeed,
-                  tint: 0xe5484d,
+                  tint: 0x9b26ff,
                   sourceEnemy: enemy,
+                  isDarkMagic: true,
                 });
               }
             }
@@ -5358,7 +6381,14 @@ export class MainScene extends Phaser.Scene {
         }
       }
 
-      if (this.shadowSystem && edata.type !== 'wisp' && edata.type !== 'boss') {
+      if (
+        this.shadowSystem &&
+        edata.type !== 'wisp' &&
+        edata.type !== 'boss' &&
+        this.shadowSystem.hasActivePillars() &&
+        Math.abs(dxToPlayer) < 520 &&
+        Math.abs(dyToPlayer) < 760
+      ) {
         this.shadowSystem.resolvePillarPushout(enemy, edata.type === 'brute' ? 28 : 16);
       }
     }
@@ -5593,10 +6623,19 @@ export class MainScene extends Phaser.Scene {
     const pAny = p as unknown as {
       __pickupType?: string;
       __pickupLife?: number;
+      __pickupValue?: number;
       __pickupBaseScale?: number;
     };
+    if (p.active) {
+      if (pAny.__pickupType === 'gem') {
+        this.activeXpGemCount = Math.max(0, this.activeXpGemCount - 1);
+      } else if (pAny.__pickupType === 'coin') {
+        this.activeCoinCount = Math.max(0, this.activeCoinCount - 1);
+      }
+    }
     pAny.__pickupType = undefined;
     pAny.__pickupLife = 0;
+    pAny.__pickupValue = 0;
     p.setAlpha(1);
     p.disableBody(true, true);
     p.setActive(false);
@@ -5615,6 +6654,8 @@ export class MainScene extends Phaser.Scene {
     proj.anims.stop();
     proj.setData('trailTimerMs', 0);
     proj.setData('nearMissAwarded', false);
+    proj.setBlendMode(Phaser.BlendModes.ADD);
+    proj.clearTint();
     proj.setScale(0.42);
     proj.setAlpha(1);
     proj.setRotation(0);
@@ -5623,7 +6664,10 @@ export class MainScene extends Phaser.Scene {
     proj.setVisible(false);
   }
 
-  private spawnEnemyOrbTrailGhost(sourceProj: Phaser.Physics.Arcade.Sprite) {
+  private spawnEnemyOrbTrailGhost(
+    sourceProj: Phaser.Physics.Arcade.Sprite,
+    isBossOrb: boolean = false
+  ) {
     const len = this.enemyTrailPool.length;
     if (len === 0) return;
     let slot: (typeof this.enemyTrailPool)[number] | undefined;
@@ -5640,19 +6684,26 @@ export class MainScene extends Phaser.Scene {
 
     const frameIndex = sourceProj.anims.currentFrame?.textureFrame ?? 0;
     const ghost = slot.sprite;
-    ghost.setTexture('fx_spitter_orb_sheet', frameIndex);
+    const useVoidSheet = isBossOrb && this.textures.exists('fx_void_orb_sheet');
+    ghost.setTexture(useVoidSheet ? 'fx_void_orb_sheet' : 'fx_spitter_orb_sheet', frameIndex);
     ghost.setPosition(sourceProj.x, sourceProj.y);
     ghost.setRotation(sourceProj.rotation);
     ghost.setScale(sourceProj.scaleX);
-    ghost.setAlpha(0.5);
-    ghost.setBlendMode(Phaser.BlendModes.ADD);
+    ghost.setAlpha(isBossOrb ? 0.58 : 0.5);
+    ghost.setBlendMode(useVoidSheet ? Phaser.BlendModes.NORMAL : Phaser.BlendModes.ADD);
+    if (isBossOrb) {
+      ghost.setTint(0x9b26ff);
+    } else {
+      ghost.clearTint();
+    }
     ghost.setDepth(22);
     ghost.setActive(true);
     ghost.setVisible(true);
 
     slot.active = true;
+    this.hasActiveEnemyTrails = true;
     slot.elapsedMs = 0;
-    slot.durationMs = 250;
+    slot.durationMs = isBossOrb ? 290 : 250;
     slot.startScale = sourceProj.scaleX;
   }
 
@@ -5664,7 +6715,8 @@ export class MainScene extends Phaser.Scene {
     damage: number,
     speed: number = 220,
     _tint: number = 0xcc44ff,
-    sourceEnemy?: Phaser.Physics.Arcade.Sprite
+    sourceEnemy?: Phaser.Physics.Arcade.Sprite,
+    isBossAttack: boolean = false
   ) {
     // Cast position near cultist/caster's hands
     const castX =
@@ -5672,22 +6724,48 @@ export class MainScene extends Phaser.Scene {
     const castY =
       sourceEnemy && sourceEnemy.active ? sourceEnemy.y - 6 + Math.sin(angle) * 14 : y;
 
-    // On cast: play fx_spark_sheet tinted magenta at the cultist's hands
-    this.spawnSparkHitEffect(castX, castY, 0xff44ee, 0.72);
+    if (isBossAttack) {
+      this.spawnParticleBurst(
+        castX,
+        castY,
+        4,
+        'void_wisp_particle',
+        35,
+        105,
+        0.3,
+        0.55,
+        undefined,
+        300,
+        0.85,
+        Phaser.BlendModes.NORMAL
+      );
+      this.spawnSparkHitEffect(castX, castY, 0xb838ff, 0.82);
+    } else {
+      // On cast: play fx_spark_sheet tinted magenta at the cultist's hands
+      this.spawnSparkHitEffect(castX, castY, 0xff44ee, 0.72);
+    }
 
     const proj = this.acquireEnemyProjectile(castX, castY);
-    const baseScale = 0.42;
+    const useVoidOrb = isBossAttack && this.textures.exists('fx_void_orb_sheet');
+    const baseScale = isBossAttack ? 0.48 : 0.42;
 
     // Reset all visual & trail state cleanly for pooled reuse (analytical pulse in updateProjectiles)
     proj.setDepth(23);
-    proj.setBlendMode(Phaser.BlendModes.ADD);
-    proj.clearTint();
+    proj.setBlendMode(useVoidOrb ? Phaser.BlendModes.NORMAL : Phaser.BlendModes.ADD);
+    if (isBossAttack && !useVoidOrb) {
+      proj.setTint(0x9b26ff);
+    } else {
+      proj.clearTint();
+    }
     proj.setAlpha(1);
     proj.setRotation(0);
     proj.setScale(baseScale);
 
     // Restart animated orb spritesheet from frame 0
-    proj.play({ key: 'fx_spitter_orb_anim', startFrame: 0 });
+    proj.play({
+      key: useVoidOrb && this.anims.exists('fx_void_orb_anim') ? 'fx_void_orb_anim' : 'fx_spitter_orb_anim',
+      startFrame: 0,
+    });
     proj.anims.restart();
 
     const epBody = proj.body as Phaser.Physics.Arcade.Body;
@@ -5708,6 +6786,7 @@ export class MainScene extends Phaser.Scene {
       isEnemy: true,
       life: 0,
       maxLife: 2800,
+      isBossAttack,
     };
     const projAny = proj as unknown as {
       __projData?: ProjectileData;
@@ -6125,9 +7204,11 @@ export class MainScene extends Phaser.Scene {
     if (!this.enemiesGroup) return 0;
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     let count = 0;
-    for (const enemy of enemies) {
+    for (let i = 0; i < enemies.length; i++) {
+      const enemy = enemies[i];
       if (!enemy.active) continue;
-      const edata = enemy.getData('data') as EnemyData | undefined;
+      const edata = ((enemy as unknown as { __enemyData?: EnemyData }).__enemyData ||
+        enemy.getData('data')) as EnemyData | undefined;
       if (edata?.isElite) {
         count++;
       }
@@ -6377,16 +7458,16 @@ export class MainScene extends Phaser.Scene {
       knockbackY: 0,
       dropsChest: true,
       coinDrops: 30 * tier,
+      bossTier: tier,
+      enraged: false,
+      isBossAttacking: false,
+      attackShockwaveDone: false,
+      lastBossVolley: 0,
     };
     const bossAny = boss as unknown as { __enemyData?: EnemyData; __lastBladeHit?: number };
     bossAny.__enemyData = edata;
     bossAny.__lastBladeHit = 0;
     boss.setData('data', edata);
-    boss.setData('bossTier', tier);
-    boss.setData('isAttacking', false);
-    boss.setData('attackShockwaveDone', false);
-    boss.setData('enraged', false);
-    boss.setData('lastBossSummon', this.time.now);
     this.activeBoss = boss;
 
     // Start with boss_idle and randomize start frame
@@ -6404,8 +7485,8 @@ export class MainScene extends Phaser.Scene {
               ? frame.textureFrame
               : parseInt(String(frame.textureFrame), 10);
           if (fIndex === 10 || frame.index === 11) {
-            if (!boss.getData('attackShockwaveDone')) {
-              boss.setData('attackShockwaveDone', true);
+            if (!edata.attackShockwaveDone) {
+              edata.attackShockwaveDone = true;
               this.triggerBossAreaAttack(boss);
             }
           }
@@ -6417,8 +7498,8 @@ export class MainScene extends Phaser.Scene {
     boss.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
       if (!boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
       if (anim.key === 'boss_attack') {
-        boss.setData('isAttacking', false);
-        boss.setData('attackShockwaveDone', false);
+        edata.isBossAttacking = false;
+        edata.attackShockwaveDone = false;
         boss.play('boss_idle', true);
       }
     });
@@ -6449,16 +7530,42 @@ export class MainScene extends Phaser.Scene {
   // Triggered on boss_attack frame index 10 (Boss ground slam)
   private triggerBossAreaAttack(boss: Phaser.Physics.Arcade.Sprite) {
     if (!boss || !boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
-    const edata = boss.getData('data') as EnemyData | undefined;
+    const edata = ((boss as unknown as { __enemyData?: EnemyData }).__enemyData ||
+      boss.getData('data')) as EnemyData | undefined;
 
-    // fx_slam_sheet: 448x252, 14 frames, 14 fps, scaled to 295px damage radius; area damage on frame 8
+    // Dark-magic void slam (black ink fractures + glowing purple cracks, area damage on frame 8)
     this.spawnBossGroundSlam(boss.x, boss.y, 295, edata?.damage ?? 48);
 
-    // Pooled expanding fx_ring shockwave with ADD blend mode
-    this.spawnExpandingRing(boss.x, boss.y, 0.2, 2.6, 0.95, 650, 23);
+    // Layered black void shadow ring + glowing electric purple shockwave ring
+    this.spawnExpandingRing(
+      boss.x,
+      boss.y,
+      0.24,
+      2.85,
+      0.86,
+      680,
+      22,
+      0x090211,
+      Phaser.BlendModes.NORMAL
+    );
+    this.spawnExpandingRing(boss.x, boss.y, 0.18, 2.55, 0.96, 620, 24, 0xa832ff, Phaser.BlendModes.ADD);
 
-    // Particle burst with ADD blend mode
-    this.spawnParticleBurst(boss.x, boss.y, 16, 'fx_spark', 100, 260, 0.2, 0.45, 0xff4466);
+    // Obsidian black void wisps + vivid arcane purple spark burst
+    this.spawnParticleBurst(
+      boss.x,
+      boss.y,
+      12,
+      'void_wisp_particle',
+      85,
+      240,
+      0.45,
+      0.95,
+      undefined,
+      520,
+      0.92,
+      Phaser.BlendModes.NORMAL
+    );
+    this.spawnParticleBurst(boss.x, boss.y, 16, 'fx_spark', 110, 290, 0.22, 0.48, 0xb838ff, 440, 0.88);
   }
 
   // -------------------------------------------------------------
@@ -6508,7 +7615,8 @@ export class MainScene extends Phaser.Scene {
     hitY?: number
   ) {
     if (!enemy || !enemy.active || !enemy.scene || this.isDead || this.isVictoryEnded || !this.sys?.isActive()) return;
-    const edata = enemy.getData('data') as EnemyData;
+    const edata = ((enemy as unknown as { __enemyData?: EnemyData }).__enemyData ||
+      enemy.getData('data')) as EnemyData;
     if (!edata || edata.hp <= 0) return;
 
     edata.hp -= damage;
@@ -6783,26 +7891,33 @@ export class MainScene extends Phaser.Scene {
     // Cap active XP gems and Coins to keep overlap physics & memory bounded in long runs
     if ((type === 'gem' || type === 'coin') && this.pickupsGroup) {
       const cap = type === 'gem' ? this.MAX_ACTIVE_XP_GEMS : this.MAX_ACTIVE_COINS;
-      const pickups = this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
-      let itemCount = 0;
-      let mergeTarget: Phaser.Physics.Arcade.Sprite | null = null;
-      let minDistSq = Infinity;
-      for (let i = 0; i < pickups.length; i++) {
-        const item = pickups[i];
-        if (!item || !item.active || !item.scene || item.getData('type') !== type) continue;
-        itemCount++;
-        const dx = item.x - x;
-        const dy = item.y - y;
-        const dSq = dx * dx + dy * dy;
-        if (dSq < minDistSq) {
-          minDistSq = dSq;
-          mergeTarget = item;
+      const activeTypeCount = type === 'gem' ? this.activeXpGemCount : this.activeCoinCount;
+      if (activeTypeCount >= cap) {
+        const pickups = this.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
+        let mergeTarget: Phaser.Physics.Arcade.Sprite | null = null;
+        let minDistSq = Infinity;
+        for (let i = 0; i < pickups.length; i++) {
+          const item = pickups[i];
+          const itemAny = item as unknown as { __pickupType?: string };
+          if (!item || !item.active || !item.scene || (itemAny.__pickupType || item.getData('type')) !== type) {
+            continue;
+          }
+          const dx = item.x - x;
+          const dy = item.y - y;
+          const dSq = dx * dx + dy * dy;
+          if (dSq < minDistSq) {
+            minDistSq = dSq;
+            mergeTarget = item;
+          }
         }
-      }
-      if (itemCount >= cap && mergeTarget) {
-        mergeTarget.setData('value', ((mergeTarget.getData('value') as number) || 1) + value);
-        mergeTarget.setData('life', 0);
-        return;
+        if (mergeTarget) {
+          const mAny = mergeTarget as unknown as { __pickupValue?: number; __pickupLife?: number };
+          const nextVal = (mAny.__pickupValue ?? ((mergeTarget.getData('value') as number) || 1)) + value;
+          mAny.__pickupValue = nextVal;
+          mAny.__pickupLife = 0;
+          mergeTarget.setData('value', nextVal);
+          return;
+        }
       }
     }
 
@@ -6832,15 +7947,19 @@ export class MainScene extends Phaser.Scene {
     const pAny = pickup as unknown as {
       __pickupType?: 'gem' | 'coin' | 'chest' | 'light_shard' | 'red_shard';
       __pickupLife?: number;
+      __pickupValue?: number;
       __pickupBaseScale?: number;
     };
     pAny.__pickupType = type;
     pAny.__pickupLife = 0;
+    pAny.__pickupValue = value;
     pAny.__pickupBaseScale = baseScale;
     pickup.setData('type', type);
     pickup.setData('value', value);
     pickup.setData('life', 0);
     pickup.setData('baseScale', baseScale);
+    if (type === 'gem') this.activeXpGemCount++;
+    else if (type === 'coin') this.activeCoinCount++;
   }
 
   private updatePickups(delta: number) {
@@ -6905,8 +8024,9 @@ export class MainScene extends Phaser.Scene {
   private handlePlayerPickupOverlap(_player: Phaser.Physics.Arcade.Sprite, pickup: Phaser.Physics.Arcade.Sprite) {
     if (this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) return;
     if (!pickup || !pickup.active || !pickup.scene) return;
-    const type = pickup.getData('type');
-    const value = pickup.getData('value') || 1;
+    const pAny = pickup as unknown as { __pickupType?: string; __pickupValue?: number };
+    const type = pAny.__pickupType || pickup.getData('type');
+    const value = pAny.__pickupValue ?? (pickup.getData('value') || 1);
 
     if (type === 'gem') {
       soundManager.playGemCollect();
@@ -7329,7 +8449,8 @@ export class MainScene extends Phaser.Scene {
   private handlePlayerEnemyOverlap(_player: Phaser.Physics.Arcade.Sprite, enemy: Phaser.Physics.Arcade.Sprite) {
     if (this.isInvulnerable || this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) return;
     if (!enemy || !enemy.active || !enemy.scene) return;
-    const edata = enemy.getData('data') as EnemyData;
+    const edata = ((enemy as unknown as { __enemyData?: EnemyData }).__enemyData ||
+      enemy.getData('data')) as EnemyData;
     if (!edata) return;
 
     this.damagePlayer(edata.damage);
@@ -7676,6 +8797,7 @@ export class MainScene extends Phaser.Scene {
 
   private acquireFloatingText(): FloatingText | null {
     if (this.floatingTexts.length === 0) return null;
+    this.hasActiveFloatingTexts = true;
 
     let oldest = this.floatingTexts[0];
     for (let i = 0; i < this.floatingTexts.length; i++) {
@@ -7693,6 +8815,7 @@ export class MainScene extends Phaser.Scene {
 
   private acquireDamageBitmap(): DamageBitmapItem | null {
     if (this.damageNumbers.length === 0) return null;
+    this.hasActiveDamageNumbers = true;
 
     let oldest = this.damageNumbers[0];
     for (let i = 0; i < this.damageNumbers.length; i++) {
@@ -7734,53 +8857,65 @@ export class MainScene extends Phaser.Scene {
   }
 
   private updateFloatingTexts(delta: number) {
+    if (!this.hasActiveDamageNumbers && !this.hasActiveFloatingTexts) return;
     const dtSec = delta * 0.001;
-    for (let i = 0; i < this.damageNumbers.length; i++) {
-      const item = this.damageNumbers[i];
-      if (!item.inUse) continue;
 
-      item.life += delta;
-      if (item.life >= item.maxLife) {
-        item.inUse = false;
-        item.text.setActive(false);
-        item.text.setVisible(false);
-        continue;
+    if (this.hasActiveDamageNumbers) {
+      let anyDmg = false;
+      for (let i = 0; i < this.damageNumbers.length; i++) {
+        const item = this.damageNumbers[i];
+        if (!item.inUse) continue;
+
+        item.life += delta;
+        if (item.life >= item.maxLife) {
+          item.inUse = false;
+          item.text.setActive(false);
+          item.text.setVisible(false);
+          continue;
+        }
+
+        anyDmg = true;
+        item.text.x += item.vx * dtSec;
+        item.text.y += item.vy * dtSec;
+        item.vy += item.gravity * dtSec;
+
+        const popProgress = Math.min(1, item.life / 110);
+        item.text.setScale(Phaser.Math.Linear(item.popScale, item.baseScale, popProgress));
+
+        const lifeProgress = item.life / item.maxLife;
+        const alpha = lifeProgress > 0.62 ? Math.max(0, 1 - (lifeProgress - 0.62) / 0.38) : 1;
+        item.text.setAlpha(alpha);
       }
-
-      item.text.x += item.vx * dtSec;
-      item.text.y += item.vy * dtSec;
-      item.vy += item.gravity * dtSec;
-
-      const popProgress = Math.min(1, item.life / 110);
-      item.text.setScale(Phaser.Math.Linear(item.popScale, item.baseScale, popProgress));
-
-      const lifeProgress = item.life / item.maxLife;
-      const alpha = lifeProgress > 0.62 ? Math.max(0, 1 - (lifeProgress - 0.62) / 0.38) : 1;
-      item.text.setAlpha(alpha);
+      this.hasActiveDamageNumbers = anyDmg;
     }
 
-    for (let i = 0; i < this.floatingTexts.length; i++) {
-      const item = this.floatingTexts[i];
-      if (!item.inUse) continue;
+    if (this.hasActiveFloatingTexts) {
+      let anyCallout = false;
+      for (let i = 0; i < this.floatingTexts.length; i++) {
+        const item = this.floatingTexts[i];
+        if (!item.inUse) continue;
 
-      item.life += delta;
-      if (item.life >= item.maxLife) {
-        item.inUse = false;
-        item.text.setActive(false);
-        item.text.setVisible(false);
-        continue;
+        item.life += delta;
+        if (item.life >= item.maxLife) {
+          item.inUse = false;
+          item.text.setActive(false);
+          item.text.setVisible(false);
+          continue;
+        }
+
+        anyCallout = true;
+        item.text.x += item.vx * dtSec;
+        item.text.y += item.vy * dtSec;
+        item.vy += item.gravity * dtSec;
+
+        const popProgress = Math.min(1, item.life / 110);
+        item.text.setScale(Phaser.Math.Linear(item.popScale, item.baseScale, popProgress));
+
+        const lifeProgress = item.life / item.maxLife;
+        const alpha = lifeProgress > 0.62 ? Math.max(0, 1 - (lifeProgress - 0.62) / 0.38) : 1;
+        item.text.setAlpha(alpha);
       }
-
-      item.text.x += item.vx * dtSec;
-      item.text.y += item.vy * dtSec;
-      item.vy += item.gravity * dtSec;
-
-      const popProgress = Math.min(1, item.life / 110);
-      item.text.setScale(Phaser.Math.Linear(item.popScale, item.baseScale, popProgress));
-
-      const lifeProgress = item.life / item.maxLife;
-      const alpha = lifeProgress > 0.62 ? Math.max(0, 1 - (lifeProgress - 0.62) / 0.38) : 1;
-      item.text.setAlpha(alpha);
+      this.hasActiveFloatingTexts = anyCallout;
     }
   }
 
@@ -7856,6 +8991,17 @@ export class MainScene extends Phaser.Scene {
       this.weaponsSnapshot = nextSnap;
     }
 
+    if (!this.activeChallenge) {
+      this.activeChallengeSnapshot = null;
+      this.lastChallengeSig = '';
+    } else {
+      const sig = `${this.activeChallenge.id}:${this.activeChallenge.status}:${this.activeChallenge.progress}:${this.activeChallenge.statusNote ?? ''}`;
+      if (sig !== this.lastChallengeSig || !this.activeChallengeSnapshot) {
+        this.lastChallengeSig = sig;
+        this.activeChallengeSnapshot = { ...this.activeChallenge };
+      }
+    }
+
     gameManager.emitStats({
       hp: this.playerStats.currentHp,
       maxHp: this.playerStats.maxHp,
@@ -7878,7 +9024,7 @@ export class MainScene extends Phaser.Scene {
         this.bloodFogTimerMs > 0 ? Math.ceil(this.bloodFogTimerMs / 1000) : 0,
       bloodFogTier: this.bloodFogTier,
       difficulty: this.difficultyPreset.id,
-      activeChallenge: this.activeChallenge ? { ...this.activeChallenge } : null,
+      activeChallenge: this.activeChallengeSnapshot,
       dashCharges: this.dashChargesRemaining,
       maxDashCharges: this.playerStats.dashCharges,
       dashCooldownProgress,

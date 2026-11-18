@@ -3,8 +3,9 @@ import { achievements } from '../game/achievements';
 import { soundManager } from '../game/audio';
 import { AchievementDefinition } from '../game/types';
 import { haptics } from '../mobile/haptics';
-import { ForgedIronFrame } from './ForgedIronFrame';
 import { Icon } from './Icon';
+import { NineSlice } from './ui/NineSlice';
+import { UI_SPRITES } from './ui/uiConfig';
 
 const TOAST_DURATION_MS = 3800;
 
@@ -58,25 +59,34 @@ export const AchievementToast: React.FC = () => {
     <div
       role="status"
       aria-live="polite"
-      className="fixed left-1/2 -translate-x-1/2 z-[59] w-[calc(100%-2rem)] max-w-sm pointer-events-none"
+      className="fixed left-1/2 -translate-x-1/2 z-[59] w-[calc(100%-2rem)] max-w-[540px] pointer-events-none"
       style={{
         top: 'calc(max(16px, env(safe-area-inset-top)) + 16px)',
       }}
     >
       <div key={active.id} className="mission-banner-enter">
-        <ForgedIronFrame
-          seed={`achievement-unlock-toast-${active.id}`}
-          dripCount={3}
-          maxDripLength={14}
-          borderColor="#f2a93b"
-          glowColor="#f2a93b"
-          glowStrength={14}
-          contentClassName="relative overflow-hidden px-4 py-3"
+        <NineSlice
+          variant="plateWideIron"
+          tileTexture="row"
+          highlight="gold"
+          padding="0px"
+          className="relative overflow-hidden shadow-[0_12px_28px_rgba(0,0,0,0.9)]"
+          contentClassName="relative overflow-hidden px-3 py-2"
         >
           <div className="flex items-center justify-between gap-3">
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-10 h-10 rounded-[9px] bg-[#121417] border border-[#f2a93b]/75 flex items-center justify-center shrink-0 shadow-[0_0_12px_rgba(242,169,59,0.28)]">
-                <Icon id="ui_trophy" size={24} />
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative w-10 h-10 aspect-square flex items-center justify-center shrink-0">
+                <img
+                  src={UI_SPRITES.roundSquareSocket}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  style={{ aspectRatio: '1 / 1', imageRendering: 'auto' }}
+                  className="absolute inset-0 w-full h-full object-contain select-none"
+                />
+                <div className="relative z-10 flex items-center justify-center">
+                  <Icon id="ui_trophy" size={22} />
+                </div>
               </div>
 
               <div className="flex flex-col min-w-0">
@@ -104,7 +114,7 @@ export const AchievementToast: React.FC = () => {
             className="mission-banner-progress absolute bottom-0 left-0 right-0 h-[2.5px] bg-gradient-to-r from-[#b3121a] via-[#f2a93b] to-[#ffe19c]"
             style={{ '--toast-duration': `${TOAST_DURATION_MS}ms` } as React.CSSProperties}
           />
-        </ForgedIronFrame>
+        </NineSlice>
       </div>
     </div>
   );

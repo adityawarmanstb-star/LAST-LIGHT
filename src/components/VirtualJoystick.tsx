@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect, useCallback } from 'react';
 import { gameManager } from '../game/GameManager';
 import { soundManager } from '../game/audio';
+import { UI_SPRITES } from './ui/uiConfig';
 
 function detectTouchSupport(): boolean {
   if (typeof window === 'undefined') return false;
@@ -22,7 +23,6 @@ export const VirtualJoystick: React.FC = () => {
   const originRef = useRef({ x: 0, y: 0 });
   const maxRadius = 48;
 
-  // Enable touch overlay automatically if any touch occurs even on hybrid devices
   useEffect(() => {
     if (isTouchDevice) return;
     const enableTouch = () => setIsTouchDevice(true);
@@ -92,7 +92,6 @@ export const VirtualJoystick: React.FC = () => {
     };
   }, [updateVector, handleEnd]);
 
-  // Reset joystick on unmount so player never stays stuck moving
   useEffect(() => {
     return () => {
       gameManager.setJoystick(0, 0);
@@ -125,14 +124,34 @@ export const VirtualJoystick: React.FC = () => {
     >
       {active && (
         <div
-          className="fixed w-28 h-28 -ml-14 -mt-14 rounded-full border-2 border-[#3a3f47] bg-[#14161a]/92 flex items-center justify-center pointer-events-none shadow-[0_6px_18px_rgba(0,0,0,0.65)]"
-          style={{ left: touchPos.x, top: touchPos.y }}
+          className="fixed -ml-14 -mt-14 flex items-center justify-center pointer-events-none"
+          style={{
+            left: touchPos.x,
+            top: touchPos.y,
+            width: 112,
+            aspectRatio: '1 / 1',
+          }}
         >
-          <div
-            className="w-12 h-12 rounded-full bg-gradient-to-b from-[#b3121a] to-[#3a0a0e] shadow-[0_0_14px_rgba(229,48,58,0.6)] border border-[#d8c9a8]/70 transition-transform duration-75"
+          <img
+            src={UI_SPRITES.roundSteel}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
+            style={{ imageRendering: 'auto' }}
+            className="pointer-events-none absolute inset-0 w-full h-full object-contain opacity-90 select-none"
+          />
+          <img
+            src={UI_SPRITES.knobCrimsonOrb}
+            alt=""
+            aria-hidden="true"
+            draggable={false}
             style={{
+              width: 48,
+              aspectRatio: '1 / 1',
               transform: `translate(${knobPos.x}px, ${knobPos.y}px)`,
+              imageRendering: 'auto',
             }}
+            className="relative z-10 object-contain transition-transform duration-75 select-none"
           />
         </div>
       )}

@@ -1,12 +1,13 @@
 import React from 'react';
-import { X } from 'lucide-react';
 import { DIFFICULTY_LIST, DifficultyPreset } from '../game/difficulty';
 import { GameDifficultyId } from '../game/types';
-import { UI_ASSETS, useChromaKeyImage } from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
-import { IronButton } from './ForgedIronFrame';
 import { Icon } from './Icon';
-import { IronCard } from './IronCard';
+import { SpriteCloseButton } from './SettingsSprites';
+import { NineSlice } from './ui/NineSlice';
+import { UiButton } from './ui/UiButton';
+import { UiCheckbox } from './ui/UiControls';
+import { UI_SPRITES, UiSliceKey } from './ui/uiConfig';
 
 interface DifficultyModalProps {
   isOpen: boolean;
@@ -22,6 +23,12 @@ const TIER_BADGE_STYLES: Record<GameDifficultyId, string> = {
   hacker: 'border-[#e5303a]/60 bg-[#2b090d]/90 text-[#ff8f95]',
 };
 
+const PRESET_CARD_VARIANT: Record<GameDifficultyId, UiSliceKey> = {
+  baby: 'cardOrnateCyan',
+  pro: 'cardOrnateGold',
+  hacker: 'cardOrnateCrimson',
+};
+
 export const DifficultyModal: React.FC<DifficultyModalProps> = ({
   isOpen,
   selectedDifficulty,
@@ -29,8 +36,6 @@ export const DifficultyModal: React.FC<DifficultyModalProps> = ({
   onConfirmPlay,
   onClose,
 }) => {
-  const { processedSrc: playBtnSrc, hasError: playBtnError } = useChromaKeyImage(UI_ASSETS.btnPlay);
-
   if (!isOpen) return null;
 
   const handleSelect = (preset: DifficultyPreset) => {
@@ -43,10 +48,10 @@ export const DifficultyModal: React.FC<DifficultyModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="difficulty-modal-title"
-      className="fixed inset-0 z-50 flex items-center justify-center safe-area-pad backdrop-blur-md select-none"
+      className="fixed inset-0 z-50 flex items-center justify-center safe-area-pad select-none overflow-x-hidden"
       style={{
         background:
-          'radial-gradient(circle at center, rgba(14, 13, 17, 0.86) 0%, rgba(30, 8, 12, 0.95) 100%)',
+          'radial-gradient(circle at center, rgba(10, 9, 13, 0.88) 0%, rgba(20, 5, 8, 0.96) 100%)',
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget) {
@@ -54,167 +59,161 @@ export const DifficultyModal: React.FC<DifficultyModalProps> = ({
         }
       }}
     >
-      <IronCard
+      <NineSlice
+        variant="panelIronDark"
+        tileTexture="stone"
         highlight="blood"
-        className="w-full max-w-[440px] max-h-[90dvh] flex flex-col"
-        contentClassName="flex flex-col max-h-[90dvh] overflow-hidden"
+        padding="0px"
+        className="w-full max-w-[540px] max-h-[90dvh] flex flex-col shadow-[0_18px_44px_rgba(0,0,0,0.95)]"
+        contentClassName="flex flex-col max-h-[90dvh] overflow-hidden p-3 sm:p-4"
       >
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 px-4 py-3.5 border-b border-[#3a3f47]/80 shrink-0">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="w-11 h-11 rounded-[10px] bg-[#121417] border border-[#4a4f59] flex items-center justify-center shrink-0">
-              <Icon id="ui_skull" size={24} />
+        <NineSlice
+          variant="plateWideIron"
+          tileTexture="row"
+          padding="0px"
+          className="shrink-0 mb-2.5"
+          contentClassName="px-2.5 py-2 flex items-center justify-between gap-2.5"
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="relative w-10 h-10 aspect-square flex items-center justify-center shrink-0">
+              <img
+                src={UI_SPRITES.roundSquareSocket}
+                alt=""
+                aria-hidden="true"
+                draggable={false}
+                style={{ aspectRatio: '1 / 1', imageRendering: 'auto' }}
+                className="absolute inset-0 w-full h-full object-contain select-none"
+              />
+              <div className="relative z-10 flex items-center justify-center">
+                <Icon id="ui_skull" size={22} />
+              </div>
             </div>
             <div className="min-w-0">
               <h2
                 id="difficulty-modal-title"
-                className="text-lg sm:text-xl font-display font-bold tracking-[0.1em] text-[#e8dcc2]"
+                className="text-[clamp(15px,3.6vw,20px)] font-display font-bold tracking-[0.1em] text-[#e8dcc2] truncate"
               >
                 SELECT DIFFICULTY
               </h2>
-              <p className="font-body text-xs text-[#b5a589]">
+              <p className="font-body text-[11px] sm:text-xs text-[#b5a589] truncate">
                 Choose your Ashfen torment before entering
               </p>
             </div>
           </div>
 
-          <IronButton
-            seed="difficulty-close-btn"
-            dripCount={0}
-            onClick={onClose}
-            className="w-12 h-12 min-h-[48px] min-w-[48px] shrink-0"
-            aria-label="Close Difficulty Selection"
-          >
-            <X className="w-4 h-4 text-[#d8c9a8]" />
-          </IronButton>
-        </div>
+          <SpriteCloseButton onClick={onClose} ariaLabel="Close Difficulty Selection" />
+        </NineSlice>
 
         {/* Difficulty Options */}
-        <div className="p-3.5 sm:p-4 overflow-y-auto flex-1 flex flex-col gap-2.5">
+        <div className="overflow-y-auto overflow-x-hidden no-scrollbar flex-1 flex flex-col gap-2 pr-0.5">
           {DIFFICULTY_LIST.map((preset) => {
             const isSelected = selectedDifficulty === preset.id;
             return (
-              <IronCard
+              <button
                 key={preset.id}
-                asButton
-                highlight={isSelected ? preset.ironHighlight : 'none'}
+                type="button"
                 onClick={() => handleSelect(preset)}
-                ariaLabel={`${preset.name} ${preset.tierLabel}: ${preset.statSummary}`}
-                className={`w-full transition-all duration-150 ${
-                  isSelected ? 'scale-[1.01]' : 'opacity-85 hover:opacity-100'
+                aria-label={`${preset.name} ${preset.tierLabel}: ${preset.statSummary}`}
+                className={`w-full text-left cursor-pointer transition-transform duration-150 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-[#f2a93b] ${
+                  isSelected ? 'opacity-100' : 'opacity-80 hover:opacity-95'
                 }`}
-                contentClassName="px-3.5 py-3 flex items-center gap-3"
               >
-                {/* Rarity-Framed Custom Dark-Fantasy Icon */}
-                <div className="relative shrink-0 flex items-center justify-center">
-                  <Icon
-                    id={preset.iconId}
-                    rarity={preset.rarityFrame}
-                    size={52}
-                    alt={preset.name}
-                  />
-                </div>
-
-                {/* Info Column */}
-                <div className="flex-1 min-w-0 flex flex-col gap-0.5 text-left">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      className="font-display font-black text-base tracking-[0.08em]"
-                      style={{
-                        color: isSelected ? preset.accentColor : '#efe3c8',
-                      }}
-                    >
-                      {preset.name}
-                    </span>
-                    <span
-                      className={`px-2 py-[2px] rounded-[4px] border font-display font-bold text-[10px] tracking-[0.12em] uppercase leading-none ${TIER_BADGE_STYLES[preset.id]}`}
-                    >
-                      {preset.tierLabel}
-                    </span>
+                <NineSlice
+                  variant={isSelected ? PRESET_CARD_VARIANT[preset.id] : 'plateWideIron'}
+                  tileTexture="row"
+                  highlight={isSelected ? preset.ironHighlight : 'none'}
+                  padding="0px"
+                  borderWidth="clamp(10px, 1.8vw, 15px)"
+                  className="w-full"
+                  contentClassName="px-2.5 py-2 flex items-center gap-3"
+                >
+                  {/* Fixed-aspect square socket + difficulty badge */}
+                  <div className="relative w-12 h-12 aspect-square shrink-0 flex items-center justify-center">
+                    <img
+                      src={UI_SPRITES.roundSquareSocket}
+                      alt=""
+                      aria-hidden="true"
+                      draggable={false}
+                      style={{ aspectRatio: '1 / 1', imageRendering: 'auto' }}
+                      className="absolute inset-0 w-full h-full object-contain select-none"
+                    />
+                    <div className="relative z-10 flex items-center justify-center">
+                      <Icon
+                        id={preset.iconId}
+                        rarity={preset.rarityFrame}
+                        size={36}
+                        alt={preset.name}
+                      />
+                    </div>
                   </div>
 
-                  <p className="font-body text-xs text-[#cbbba0] leading-snug">
-                    {preset.tagline}
-                  </p>
-                  <p className="font-mono-numbers text-[11px] font-semibold text-[#9c8e72] leading-snug mt-0.5">
-                    {preset.statSummary}
-                  </p>
-                </div>
+                  {/* Info Column */}
+                  <div className="flex-1 min-w-0 flex flex-col gap-0.5 text-left">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span
+                        className="font-display font-black text-sm sm:text-base tracking-[0.08em]"
+                        style={{
+                          color: isSelected ? preset.accentColor : '#efe3c8',
+                        }}
+                      >
+                        {preset.name}
+                      </span>
+                      <span
+                        className={`px-2 py-[2px] rounded-[4px] border font-display font-bold text-[10px] tracking-[0.12em] uppercase leading-none ${TIER_BADGE_STYLES[preset.id]}`}
+                      >
+                        {preset.tierLabel}
+                      </span>
+                    </div>
 
-                {/* Selected Rune Indicator */}
-                <div
-                  className={`w-7 h-7 rounded-[6px] border flex items-center justify-center shrink-0 transition-colors ${
-                    isSelected
-                      ? 'bg-[#1a1513] border-[#f2c464]'
-                      : 'bg-[#0b0d11]/80 border-[#3c434f]'
-                  }`}
-                  aria-hidden="true"
-                >
-                  {isSelected && <Icon id="ui_check" size={16} />}
-                </div>
-              </IronCard>
+                    <p className="font-body text-xs text-[#cbbba0] leading-snug">
+                      {preset.tagline}
+                    </p>
+                    <p className="font-mono-numbers text-[11px] font-semibold text-[#9c8e72] leading-snug mt-0.5">
+                      {preset.statSummary}
+                    </p>
+                  </div>
+
+                  {/* Fixed-aspect Sprite Checkbox */}
+                  <UiCheckbox checked={isSelected} interactive={false} size={24} />
+                </NineSlice>
+              </button>
             );
           })}
 
-          <div className="mt-0.5 px-2 py-2 rounded-[6px] border border-[#4a2226]/70 bg-[#14090b]/75 flex items-center justify-center gap-2 text-center">
+          <NineSlice
+            variant="miniPlate"
+            tileTexture="row"
+            highlight="blood"
+            padding="0px"
+            className="w-full mt-0.5"
+            contentClassName="px-2 py-1.5 flex items-center justify-center gap-2 text-center"
+          >
             <Icon id="ui_warning" size={15} />
             <span className="font-body text-[11.5px] text-[#d6b7b2]">
               Blood Fog rises every <strong className="text-[#ff8f95]">10 levels</strong> &amp; scales harder each wave
             </span>
-          </div>
+          </NineSlice>
         </div>
 
-        {/* Footer CTA using existing btn_play asset */}
-        <div className="px-4 pt-2 pb-3.5 border-t border-[#3a3f47]/80 bg-[#0d0e11]/80 flex flex-col items-center gap-2 shrink-0">
-          <button
-            type="button"
+        {/* Footer CTA */}
+        <div className="pt-3 flex flex-col items-center shrink-0">
+          <UiButton
+            tone="blood"
+            size="lg"
+            haptic="medium"
             data-sfx="play"
             onClick={() => {
               haptics.tap('heavy');
               onConfirmPlay();
             }}
-            className="group relative w-full max-w-[320px] h-[66px] flex items-center justify-center gap-2.5 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
+            className="w-full max-w-[340px]"
           >
-            {playBtnSrc ? (
-              <img
-                src={playBtnSrc}
-                alt=""
-                aria-hidden="true"
-                referrerPolicy="no-referrer"
-                style={{
-                  filter: 'drop-shadow(0 0 14px rgba(220, 38, 38, 0.5))',
-                }}
-                className="pointer-events-none absolute inset-0 w-full h-full object-fill select-none"
-              />
-            ) : playBtnError ? (
-              <div
-                aria-hidden="true"
-                style={{
-                  filter: 'drop-shadow(0 0 14px rgba(220, 38, 38, 0.5))',
-                }}
-                className="pointer-events-none absolute inset-0 rounded-[10px] rusted-play-bar border border-[#942027]"
-              />
-            ) : null}
-
-            <span className="relative z-10 inline-flex items-center justify-center transition-transform duration-150 group-hover:scale-110">
-              <Icon id="ui_play" size={22} />
-            </span>
-            <span
-              className="relative z-10 font-display font-black text-[22px] tracking-[0.18em] whitespace-nowrap"
-              style={{
-                backgroundImage:
-                  'linear-gradient(180deg, #fff0c2 0%, #e6aa45 50%, #9b5d14 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-                filter:
-                  'drop-shadow(0 0 10px rgba(242, 169, 59, 0.6)) drop-shadow(0 2px 0 #1b0705)',
-              }}
-            >
-              ENTER ARENA
-            </span>
-          </button>
+            <Icon id="ui_play" size={18} />
+            <span>ENTER ARENA</span>
+          </UiButton>
         </div>
-      </IronCard>
+      </NineSlice>
     </div>
   );
 };

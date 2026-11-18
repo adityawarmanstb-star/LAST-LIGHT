@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { IconRarity } from '../game/iconRegistry';
 import { DynamicChallengeOffer, UpgradeOption } from '../game/types';
 import { Icon } from './Icon';
-import { IronCard } from './IronCard';
-import { preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
 import { soundManager } from '../game/audio';
 import { haptics } from '../mobile/haptics';
+import { NineSlice } from './ui/NineSlice';
+import { UiButton } from './ui/UiButton';
+import { UiCheckbox } from './ui/UiControls';
+import { UI_SPRITES, UiSliceKey } from './ui/uiConfig';
 
 interface LevelUpModalProps {
   options: UpgradeOption[];
@@ -16,7 +18,8 @@ interface LevelUpModalProps {
 type RarityTheme = {
   label: string;
   frameRarity: IconRarity;
-  highlight: 'gold' | 'blood' | 'ember' | 'none';
+  highlight: 'gold' | 'blood' | 'ember' | 'cyan' | 'none';
+  sliceVariant: UiSliceKey;
   tagColor: string;
 };
 
@@ -26,10 +29,6 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
   onSelectUpgrade,
 }) => {
   const [acceptChallenge, setAcceptChallenge] = useState<boolean>(false);
-
-  useEffect(() => {
-    preloadAllChromaKeyUiAssets();
-  }, []);
 
   // Reset pact selection whenever a new level-up offer arrives
   useEffect(() => {
@@ -62,6 +61,7 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
         label: 'EPIC',
         frameRarity: 'epic',
         highlight: 'gold',
+        sliceVariant: 'cardOrnateGold',
         tagColor: 'text-[#f2c464]',
       };
     }
@@ -69,7 +69,8 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
       return {
         label: 'RELIC',
         frameRarity: 'rare',
-        highlight: 'ember',
+        highlight: 'cyan',
+        sliceVariant: 'cardOrnateCyan',
         tagColor: 'text-[#5de4ff]',
       };
     }
@@ -78,6 +79,7 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
         label: 'RARE',
         frameRarity: 'rare',
         highlight: 'blood',
+        sliceVariant: 'cardOrnateCrimson',
         tagColor: 'text-[#f2a93b]',
       };
     }
@@ -85,6 +87,7 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
       label: 'COMMON',
       frameRarity: 'common',
       highlight: 'none',
+      sliceVariant: 'plateWideIron',
       tagColor: 'text-[#5de4ff]',
     };
   };
@@ -92,17 +95,17 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
   const renderChallengeIcon = (icon: DynamicChallengeOffer['icon']) => {
     switch (icon) {
       case 'shard':
-        return <Icon id="crimson_gem" size={28} />;
+        return <Icon id="crimson_gem" size={26} />;
       case 'coins':
-        return <Icon id="soul_coin" size={28} />;
+        return <Icon id="soul_coin" size={26} />;
       case 'shield':
-        return <Icon id="ui_shield" size={28} />;
+        return <Icon id="ui_shield" size={26} />;
       case 'flame':
-        return <Icon id="ui_flame" size={28} />;
+        return <Icon id="ui_flame" size={26} />;
       case 'skull':
-        return <Icon id="ui_skull" size={28} />;
+        return <Icon id="ui_skull" size={26} />;
       case 'sun':
-        return <Icon id="ui_brightness" size={28} />;
+        return <Icon id="ui_brightness" size={26} />;
     }
   };
 
@@ -111,113 +114,93 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="level-up-modal-title"
-      className="fixed inset-0 h-[100dvh] z-40 flex flex-col items-center justify-center select-none overflow-hidden"
+      className="fixed inset-0 h-[100dvh] z-40 flex flex-col items-center justify-center select-none overflow-y-auto overflow-x-hidden no-scrollbar"
       style={{
-        backdropFilter: 'blur(6px)',
-        WebkitBackdropFilter: 'blur(6px)',
-        background: 'rgba(5, 8, 12, 0.85)',
+        background: 'rgba(4, 5, 8, 0.88)',
         paddingTop: 'max(10px, env(safe-area-inset-top))',
         paddingBottom: 'max(10px, env(safe-area-inset-bottom))',
         paddingLeft: 'max(12px, env(safe-area-inset-left))',
         paddingRight: 'max(12px, env(safe-area-inset-right))',
       }}
     >
-      <div className="w-full max-w-[440px] md:max-w-4xl flex flex-col items-center justify-center gap-2.5 sm:gap-3">
+      <div className="w-full max-w-[540px] my-auto flex flex-col items-center justify-center gap-2 sm:gap-2.5">
         {/* Header */}
         <div className="text-center shrink-0">
-          <div className="font-display text-[11px] font-extrabold tracking-[0.26em] uppercase text-[#e5303a] drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)]">
+          <div
+            className="font-display text-[11px] font-extrabold tracking-[0.26em] uppercase text-[#e5303a]"
+            style={{ textShadow: '0 2px 4px rgba(0,0,0,0.95)' }}
+          >
             LEVEL UP
           </div>
           <h2
             id="level-up-modal-title"
-            className="font-display font-black text-[22px] sm:text-3xl tracking-[0.12em] uppercase leading-tight mt-0.5"
-            style={{
-              backgroundImage:
-                'linear-gradient(180deg, #fff1c7 0%, #eab24e 52%, #a26318 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              filter:
-                'drop-shadow(0 2px 0 #170805) drop-shadow(0 0 12px rgba(242, 169, 59, 0.35))',
-            }}
+            className="font-display font-black text-[clamp(20px,4.6vw,28px)] tracking-[0.12em] uppercase leading-tight mt-0.5 text-[#f2c464]"
+            style={{ textShadow: '0 2px 3px #170805' }}
           >
             CHOOSE A BLESSING
           </h2>
         </div>
 
-        {/* Dynamic Challenge / Pact Card using panel_iron_card.png */}
+        {/* Dynamic Challenge / Pact Card */}
         {challengeOffer && (
-          <div className="w-full shrink-0">
-            <IronCard
-              highlight={acceptChallenge ? 'gold' : 'blood'}
-              className="w-full"
-              contentClassName="px-3.5 py-2.5 sm:px-4 sm:py-3 flex flex-col gap-2"
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                {/* Metallic Icon Frame */}
-                <div
-                  className="w-11 h-11 rounded-[9px] flex items-center justify-center shrink-0"
-                  style={{
-                    background: acceptChallenge
-                      ? 'linear-gradient(180deg, #2d2010 0%, #140e07 100%)'
-                      : 'linear-gradient(180deg, #29111a 0%, #13080d 100%)',
-                    border: acceptChallenge
-                      ? '2px solid #eab24e'
-                      : '2px solid #a8243b',
-                    boxShadow:
-                      'inset 0 1px 0 rgba(255,255,255,0.16), 0 4px 10px rgba(0,0,0,0.85)',
-                  }}
-                >
+          <NineSlice
+            variant="bannerCrimson"
+            tileTexture="row"
+            highlight={acceptChallenge ? 'gold' : 'blood'}
+            padding="0px"
+            borderWidth="clamp(10px, 1.8vw, 15px) clamp(16px, 3vw, 26px)"
+            className="w-full shrink-0"
+            contentClassName="px-2 py-2 flex flex-col gap-2"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative w-11 h-11 aspect-square flex items-center justify-center shrink-0">
+                <img
+                  src={UI_SPRITES.roundSquareSocket}
+                  alt=""
+                  aria-hidden="true"
+                  draggable={false}
+                  style={{ aspectRatio: '1 / 1', imageRendering: 'auto' }}
+                  className="absolute inset-0 w-full h-full object-contain select-none"
+                />
+                <div className="relative z-10 flex items-center justify-center">
                   {renderChallengeIcon(challengeOffer.icon)}
-                </div>
-
-                {/* Title, Reward Badge & Concise Description */}
-                <div className="flex-1 min-w-0 text-left">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <h3 className="font-display font-black text-sm tracking-[0.08em] uppercase text-[#f2c464] leading-none">
-                      {challengeOffer.title}
-                    </h3>
-                    <span className="font-display font-extrabold text-[10px] tracking-[0.06em] uppercase text-[#ffd98e] bg-[#2a1216]/90 border border-[#9e2833] px-1.5 py-0.5 rounded-[4px] whitespace-nowrap">
-                      +{challengeOffer.rewardCoins} COINS · {challengeOffer.rewardBuffLabel}
-                    </span>
-                  </div>
-                  <p className="font-body font-medium text-[12.5px] sm:text-[13px] text-[#cbbba0] leading-tight mt-1 line-clamp-2">
-                    {challengeOffer.description}
-                  </p>
                 </div>
               </div>
 
-              {/* Prominent Beveled Crimson-Gold ACCEPT PACT Button */}
-              <button
-                type="button"
-                onClick={() => {
-                  soundManager.playUiClick();
-                  haptics.tap('medium');
-                  setAcceptChallenge((prev) => !prev);
-                }}
-                className="w-full min-h-[56px] rounded-[7px] flex items-center justify-center gap-2 transition-transform duration-150 active:scale-95 cursor-pointer focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
-                style={{
-                  background: acceptChallenge
-                    ? 'linear-gradient(180deg, #8f2222 0%, #5c1014 55%, #36080a 100%)'
-                    : 'linear-gradient(180deg, #52141a 0%, #310b0f 55%, #1d0608 100%)',
-                  border: acceptChallenge
-                    ? '1.5px solid #f2c464'
-                    : '1.5px solid #b55d29',
-                  boxShadow: acceptChallenge
-                    ? 'inset 0 1px 0 rgba(255, 226, 156, 0.35), 0 0 12px rgba(242, 169, 59, 0.45)'
-                    : 'inset 0 1px 0 rgba(242, 169, 59, 0.22), 0 4px 10px rgba(0, 0, 0, 0.8)',
-                }}
-              >
-                {acceptChallenge && <Icon id="ui_check" size={16} />}
-                <span className="font-display font-black text-[11px] tracking-[0.14em] uppercase text-[#f6dfa0]">
-                  {acceptChallenge ? 'PACT ACCEPTED' : 'ACCEPT PACT'}
-                </span>
-              </button>
-            </IronCard>
-          </div>
+              <div className="flex-1 min-w-0 text-left">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                  <h3 className="font-display font-black text-xs sm:text-sm tracking-[0.08em] uppercase text-[#f2c464] leading-none">
+                    {challengeOffer.title}
+                  </h3>
+                  <span className="font-display font-extrabold text-[10px] tracking-[0.06em] uppercase text-[#ffd98e] bg-[#2a1216]/90 border border-[#9e2833] px-1.5 py-0.5 rounded-[4px] whitespace-nowrap">
+                    +{challengeOffer.rewardCoins} COINS · {challengeOffer.rewardBuffLabel}
+                  </span>
+                </div>
+                <p className="font-body font-medium text-[12px] sm:text-[13px] text-[#cbbba0] leading-tight mt-1 line-clamp-2">
+                  {challengeOffer.description}
+                </p>
+              </div>
+            </div>
+
+            <UiButton
+              tone={acceptChallenge ? 'blood' : 'iron'}
+              active={acceptChallenge}
+              size="sm"
+              haptic="medium"
+              onClick={() => {
+                soundManager.playUiClick();
+                setAcceptChallenge((prev) => !prev);
+              }}
+              className="w-full"
+            >
+              <UiCheckbox checked={acceptChallenge} interactive={false} size={18} />
+              <span>{acceptChallenge ? 'PACT ACCEPTED' : 'ACCEPT PACT'}</span>
+            </UiButton>
+          </NineSlice>
         )}
 
-        {/* 3 Compact Horizontal-Split Blessing Cards (Fit cleanly in 100dvh without scroll) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 sm:gap-3 w-full">
+        {/* 3 Blessing Cards cleanly centered within max 540px column */}
+        <div className="grid grid-cols-1 gap-2 sm:gap-2.5 w-full">
           {options.map((option, index) => {
             const theme = getRarityTheme(option);
 
@@ -226,60 +209,82 @@ export const LevelUpModal: React.FC<LevelUpModalProps> = ({
                 key={option.id}
                 className="animate-card-slide-up w-full"
                 style={{
-                  animationDelay: `${index * 70}ms`,
+                  animationDelay: `${index * 60}ms`,
                 }}
               >
-                <IronCard
-                  asButton
-                  highlight={theme.highlight}
+                <button
+                  type="button"
                   onClick={() => {
                     haptics.tap('medium');
                     onSelectUpgrade(option, acceptChallenge);
                   }}
-                  ariaLabel={`${option.title} (${theme.label})`}
-                  className="w-full active:scale-[0.97] hover:-translate-y-0.5 transition-transform duration-150"
-                  contentClassName="px-3.5 py-3 md:p-5 flex flex-row md:flex-col items-center gap-3.5 md:gap-3 text-left md:text-center min-h-[100px] md:min-h-[210px]"
+                  aria-label={`${option.title} (${theme.label})`}
+                  className="w-full text-left cursor-pointer active:scale-[0.98] transition-transform duration-150 focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
                 >
-                  {/* Left: Rarity-Framed Hand-Painted Skill Icon */}
-                  <div className="shrink-0 flex items-center justify-center">
-                    <Icon id={option.title} rarity={theme.frameRarity} size={58} />
-                  </div>
-
-                  {/* Right: Rarity Tag + Cinzel Title + 2-Line Rajdhani Description */}
-                  <div className="flex-1 min-w-0 flex flex-col justify-center md:items-center">
-                    <div className="flex items-center md:justify-center gap-1.5 text-[10px] mb-0.5">
-                      <span
-                        className={`font-display font-extrabold tracking-[0.12em] uppercase ${theme.tagColor}`}
-                      >
-                        {theme.label}
-                      </span>
-                      <span className="text-[#6b3a2a]" aria-hidden="true">
-                        ·
-                      </span>
-                      <span className="font-display font-bold text-[#9c8e72] uppercase">
-                        {option.levelText}
-                      </span>
-                      {acceptChallenge && (
-                        <>
-                          <span className="text-[#6b3a2a]" aria-hidden="true">
-                            ·
-                          </span>
-                          <span className="font-display font-bold text-[#f2c464] uppercase">
-                            +PACT
-                          </span>
-                        </>
-                      )}
+                  <NineSlice
+                    variant={theme.sliceVariant}
+                    tileTexture="row"
+                    highlight={theme.highlight}
+                    padding="0px"
+                    borderWidth={
+                      theme.sliceVariant === 'plateWideIron'
+                        ? 'clamp(9px, 1.6vw, 13px) clamp(14px, 2.4vw, 20px)'
+                        : 'clamp(12px, 2vw, 16px)'
+                    }
+                    className="w-full"
+                    contentClassName="px-2.5 py-2 flex flex-row items-center gap-3 text-left min-h-[76px]"
+                  >
+                    {/* Left: Fixed-aspect square socket + hand-painted skill icon */}
+                    <div className="relative w-12 h-12 sm:w-14 sm:h-14 aspect-square shrink-0 flex items-center justify-center">
+                      <img
+                        src={UI_SPRITES.roundSquareSocket}
+                        alt=""
+                        aria-hidden="true"
+                        draggable={false}
+                        style={{ aspectRatio: '1 / 1', imageRendering: 'auto' }}
+                        className="absolute inset-0 w-full h-full object-contain select-none"
+                      />
+                      <div className="relative z-10 flex items-center justify-center">
+                        <Icon id={option.title} rarity={theme.frameRarity} size={38} />
+                      </div>
                     </div>
 
-                    <h3 className="font-display font-black text-[15px] sm:text-base text-[#f2e4c7] leading-tight tracking-[0.04em]">
-                      {option.title}
-                    </h3>
+                    {/* Right: Rarity Tag + Display Title + Concise Description */}
+                    <div className="flex-1 min-w-0 flex flex-col justify-center">
+                      <div className="flex items-center gap-1.5 text-[10px] mb-0.5 flex-wrap">
+                        <span
+                          className={`font-display font-extrabold tracking-[0.12em] uppercase ${theme.tagColor}`}
+                        >
+                          {theme.label}
+                        </span>
+                        <span className="text-[#6b3a2a]" aria-hidden="true">
+                          ·
+                        </span>
+                        <span className="font-display font-bold text-[#9c8e72] uppercase">
+                          {option.levelText}
+                        </span>
+                        {acceptChallenge && (
+                          <>
+                            <span className="text-[#6b3a2a]" aria-hidden="true">
+                              ·
+                            </span>
+                            <span className="font-display font-bold text-[#f2c464] uppercase">
+                              +PACT
+                            </span>
+                          </>
+                        )}
+                      </div>
 
-                    <p className="font-body font-medium text-[13px] text-[#cbbba0] leading-snug mt-0.5 line-clamp-2">
-                      {option.description}
-                    </p>
-                  </div>
-                </IronCard>
+                      <h3 className="font-display font-black text-[14px] sm:text-base text-[#f2e4c7] leading-tight tracking-[0.04em]">
+                        {option.title}
+                      </h3>
+
+                      <p className="font-body font-medium text-[12.5px] sm:text-[13px] text-[#cbbba0] leading-snug mt-0.5 line-clamp-2">
+                        {option.description}
+                      </p>
+                    </div>
+                  </NineSlice>
+                </button>
               </div>
             );
           })}
