@@ -1,5 +1,10 @@
 import { MetaUpgrade, PlayerStats, RelicId, RelicSetId } from './types';
 import { saveDataStore } from './saveData';
+import {
+  UNLIMITED_CURRENCY,
+  isDeveloperMode,
+  subscribeDeveloperMode,
+} from './developerMode';
 
 const RELIC_SET_BY_ID: Record<RelicId, RelicSetId> = {
   lodestone_heart: 'tempest',
@@ -104,10 +109,15 @@ export function subscribeCoins(cb: CoinsListener): () => void {
 }
 
 export function getSavedCoins(): number {
+  if (isDeveloperMode()) return UNLIMITED_CURRENCY;
   return saveDataStore.read().coins;
 }
 
 export function saveCoins(coins: number): void {
+  if (isDeveloperMode()) {
+    coinsListeners.forEach((l) => l(UNLIMITED_CURRENCY));
+    return;
+  }
   const safe = Number.isFinite(coins) && coins >= 0 ? Math.floor(coins) : 0;
   const updated = saveDataStore.update((draft) => {
     draft.coins = safe;
@@ -116,11 +126,20 @@ export function saveCoins(coins: number): void {
 }
 
 export function addCoins(amount: number): number {
+  if (isDeveloperMode()) {
+    coinsListeners.forEach((l) => l(UNLIMITED_CURRENCY));
+    return UNLIMITED_CURRENCY;
+  }
   const safeDelta = Number.isFinite(amount) ? Math.floor(amount) : 0;
   const updated = Math.max(0, getSavedCoins() + safeDelta);
   saveCoins(updated);
   return updated;
 }
+
+subscribeDeveloperMode(() => {
+  const current = getSavedCoins();
+  coinsListeners.forEach((l) => l(current));
+});
 
 export function getSavedUpgrades(): MetaUpgrade[] {
   const saved = saveDataStore.read().upgrades;
@@ -151,13 +170,16 @@ export function purchaseUpgrade(upgradeId: string): { success: boolean; newCoins
   }
 
   const cost = target.cost[target.currentRank];
-  if (coins < cost) {
+  const devMode = isDeveloperMode();
+  if (!devMode && coins < cost) {
     return { success: false, newCoins: coins, upgrades };
   }
 
-  const newCoins = coins - cost;
+  const newCoins = devMode ? UNLIMITED_CURRENCY : coins - cost;
   target.currentRank += 1;
-  saveCoins(newCoins);
+  if (!devMode) {
+    saveCoins(newCoins);
+  }
   saveUpgrades(upgrades);
 
   return { success: true, newCoins, upgrades };

@@ -102,11 +102,21 @@ export const AchievementToast: React.FC = () => {
               </div>
             </div>
 
-            <div className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-[8px] bg-[#121417]/90 border border-[#f2a93b]/55">
-              <Icon id="soul_coin" size={16} />
-              <span className="font-mono-numbers text-xs font-bold text-[#f2a93b]">
-                +{active.rewardCoins}
-              </span>
+            <div className="shrink-0 flex flex-col items-end gap-1 px-2.5 py-1 rounded-[8px] bg-[#121417]/90 border border-[#f2a93b]/55">
+              <div className="flex items-center gap-1">
+                <Icon id="soul_coin" size={15} />
+                <span className="font-mono-numbers text-xs font-bold text-[#f2a93b]">
+                  +{active.rewardCoins.toLocaleString()}
+                </span>
+              </div>
+              {active.rewardSeals > 0 && (
+                <div className="flex items-center gap-1">
+                  <Icon id="crimson_gem" size={14} />
+                  <span className="font-mono-numbers text-[11px] font-bold text-[#d8b4fe]">
+                    +{active.rewardSeals}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 

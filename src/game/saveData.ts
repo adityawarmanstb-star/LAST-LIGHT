@@ -3,11 +3,15 @@ import {
   BestiaryKillsMap,
   DailyMissionsState,
   DailyStreakState,
+  DifficultyClearRecord,
   GameDifficultyId,
   GoreLevel,
   RelicId,
+  StageDifficultyClearsMap,
+  StageId,
 } from './types';
 import { sanitizeDifficultyId } from './difficulty';
+import { DEFAULT_STAGE_ID, sanitizeStageId } from './stages';
 
 const VALID_RELIC_IDS: RelicId[] = [
   'lodestone_heart',
@@ -56,6 +60,12 @@ export interface SaveDataV1 {
   dailyDealsClaimed: { dateKey: string; boughtIds: string[] } | null;
   achievements: AchievementsProgressState;
   difficulty: GameDifficultyId;
+  selectedStageId: StageId;
+  stage1BossDefeated: boolean;
+  stage2BossDefeated: boolean;
+  stageBestTimes: Record<StageId, number>;
+  difficultyClears: StageDifficultyClearsMap;
+  developerMode: boolean;
 }
 
 function isMobileBrowser(): boolean {
@@ -117,7 +127,81 @@ function createDefaultSaveData(): SaveDataV1 {
       claimedIds: [],
     },
     difficulty: 'hacker',
+    selectedStageId: DEFAULT_STAGE_ID,
+    stage1BossDefeated: false,
+    stage2BossDefeated: false,
+    stageBestTimes: {
+      stage_1: 0,
+      stage_2: 0,
+    },
+    difficultyClears: createDefaultDifficultyClears(),
+    developerMode: false,
   };
+}
+
+function createEmptyDifficultyClearRecord(): DifficultyClearRecord {
+  return {
+    cleared: false,
+    bestClearTimeSec: null,
+    clearCount: 0,
+  };
+}
+
+function createDefaultDifficultyClears(): StageDifficultyClearsMap {
+  return {
+    stage_1: {
+      baby: createEmptyDifficultyClearRecord(),
+      pro: createEmptyDifficultyClearRecord(),
+      hacker: createEmptyDifficultyClearRecord(),
+    },
+    stage_2: {
+      baby: createEmptyDifficultyClearRecord(),
+      pro: createEmptyDifficultyClearRecord(),
+      hacker: createEmptyDifficultyClearRecord(),
+    },
+  };
+}
+
+function sanitizeDifficultyClearRecord(raw: unknown): DifficultyClearRecord {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return createEmptyDifficultyClearRecord();
+  }
+  const obj = raw as Record<string, unknown>;
+  const rawBest = obj.bestClearTimeSec;
+  const parsedBest =
+    rawBest === null || rawBest === undefined
+      ? null
+      : typeof rawBest === 'number' && Number.isFinite(rawBest) && rawBest >= 0
+        ? Math.floor(rawBest)
+        : typeof rawBest === 'string' && rawBest.trim() !== '' && Number.isFinite(Number(rawBest)) && Number(rawBest) >= 0
+          ? Math.floor(Number(rawBest))
+          : null;
+  const clearCount = safeNonNegativeInt(obj.clearCount, 0);
+  const cleared = safeBoolean(obj.cleared, false) || clearCount > 0 || parsedBest !== null;
+  return {
+    cleared,
+    bestClearTimeSec: cleared ? parsedBest : null,
+    clearCount: cleared ? Math.max(1, clearCount) : 0,
+  };
+}
+
+function sanitizeDifficultyClears(raw: unknown): StageDifficultyClearsMap {
+  const defaults = createDefaultDifficultyClears();
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return defaults;
+  }
+  const obj = raw as Record<string, unknown>;
+  const stages: StageId[] = ['stage_1', 'stage_2'];
+  const diffs: GameDifficultyId[] = ['baby', 'pro', 'hacker'];
+  for (const sId of stages) {
+    const rawStage = obj[sId];
+    if (!rawStage || typeof rawStage !== 'object' || Array.isArray(rawStage)) continue;
+    const stageObj = rawStage as Record<string, unknown>;
+    for (const dId of diffs) {
+      defaults[sId][dId] = sanitizeDifficultyClearRecord(stageObj[dId]);
+    }
+  }
+  return defaults;
 }
 
 function clampFinite(value: unknown, min: number, max: number, fallback: number): number {
@@ -375,6 +459,24 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
   );
 
   const bestiaryKills = sanitizeBestiaryKills(obj.bestiaryKills);
+  const stage1BossDefeated = safeBoolean(obj.stage1BossDefeated, defaults.stage1BossDefeated);
+  const stage2BossDefeated = safeBoolean(obj.stage2BossDefeated, defaults.stage2BossDefeated);
+  const developerMode = safeBoolean(obj.developerMode, defaults.developerMode);
+  const rawStageId = sanitizeStageId(obj.selectedStageId);
+  const selectedStageId: StageId =
+    rawStageId === 'stage_2' && !stage1BossDefeated && !developerMode
+      ? DEFAULT_STAGE_ID
+      : rawStageId;
+  const rawBestTimes =
+    obj.stageBestTimes &&
+    typeof obj.stageBestTimes === 'object' &&
+    !Array.isArray(obj.stageBestTimes)
+      ? (obj.stageBestTimes as Record<string, unknown>)
+      : {};
+  const stageBestTimes: Record<StageId, number> = {
+    stage_1: safeNonNegativeInt(rawBestTimes.stage_1, 0),
+    stage_2: safeNonNegativeInt(rawBestTimes.stage_2, 0),
+  };
 
   return {
     version: CURRENT_SAVE_VERSION,
@@ -424,6 +526,12 @@ function sanitizeSaveData(raw: unknown): SaveDataV1 {
         : null,
     achievements: sanitizeAchievements(obj.achievements, bestiaryKills),
     difficulty: sanitizeDifficultyId(obj.difficulty),
+    selectedStageId,
+    stage1BossDefeated,
+    stage2BossDefeated,
+    stageBestTimes,
+    difficultyClears: sanitizeDifficultyClears(obj.difficultyClears),
+    developerMode,
   };
 }
 
@@ -574,6 +682,23 @@ class SaveDataStore {
         claimedIds: [...this.cache.achievements.claimedIds],
       },
       difficulty: this.cache.difficulty,
+      selectedStageId: this.cache.selectedStageId,
+      stage1BossDefeated: this.cache.stage1BossDefeated,
+      stage2BossDefeated: this.cache.stage2BossDefeated,
+      stageBestTimes: { ...this.cache.stageBestTimes },
+      difficultyClears: {
+        stage_1: {
+          baby: { ...this.cache.difficultyClears.stage_1.baby },
+          pro: { ...this.cache.difficultyClears.stage_1.pro },
+          hacker: { ...this.cache.difficultyClears.stage_1.hacker },
+        },
+        stage_2: {
+          baby: { ...this.cache.difficultyClears.stage_2.baby },
+          pro: { ...this.cache.difficultyClears.stage_2.pro },
+          hacker: { ...this.cache.difficultyClears.stage_2.hacker },
+        },
+      },
+      developerMode: this.cache.developerMode,
     };
   }
 

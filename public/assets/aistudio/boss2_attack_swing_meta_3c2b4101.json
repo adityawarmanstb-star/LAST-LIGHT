@@ -1,0 +1,37 @@
+{
+ "name": "boss_swing",
+ "mode": "green",
+ "frame_w": 256,
+ "frame_h": 256,
+ "frames": 12,
+ "cols": 12,
+ "rows": 1,
+ "fps": 20,
+ "loop": false,
+ "sheet": "boss_swing_sheet.png",
+ "sheet_size": [
+  3072,
+  256
+ ],
+ "source_frames": [
+  0,
+  6,
+  13,
+  19,
+  26,
+  32,
+  39,
+  45,
+  52,
+  58,
+  65,
+  71
+ ],
+ "source_fps": 24.0,
+ "crop_box": [
+  363,
+  14,
+  1468,
+  1119
+ ]
+}

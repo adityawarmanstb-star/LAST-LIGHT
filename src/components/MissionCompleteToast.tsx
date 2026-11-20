@@ -53,7 +53,7 @@ export const MissionCompleteToast: React.FC = () => {
   useEffect(() => {
     const unsub = dailyMissions.onMissionCompleted((mission) => {
       haptics.onMissionComplete();
-      soundManager.playCoinCollect();
+      soundManager.playCoinGain('small');
 
       if (!activeRef.current) {
         queueRef.current.push(mission);

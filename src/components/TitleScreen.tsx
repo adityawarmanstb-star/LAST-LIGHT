@@ -5,9 +5,12 @@ import { dailyMissions } from '../game/dailyMissions';
 import { dailyStreak } from '../game/dailyStreak';
 import { getSavedCoins, subscribeCoins } from '../game/metaProgression';
 import { getRelicSeals, subscribeRelics } from '../game/relics';
-import { DailyStreakState } from '../game/types';
+import { isDeveloperMode, subscribeDeveloperMode } from '../game/developerMode';
+import { STAGE_CARD_ARTWORKS } from '../game/stages';
+import { DailyStreakState, StageId } from '../game/types';
 import { UI_ASSETS, preloadAllChromaKeyUiAssets } from '../hooks/useChromaKeyImage';
 import { haptics } from '../mobile/haptics';
+import { CoinCounter } from './CoinCounter';
 import { Icon } from './Icon';
 import { AchievementsPage } from './lobby/AchievementsPage';
 import { BestiaryPage } from './lobby/BestiaryPage';
@@ -23,6 +26,7 @@ export type LobbyTabId = 'shop' | 'missions' | 'home' | 'bestiary' | 'achievemen
 
 interface TitleScreenProps {
   isMuted: boolean;
+  selectedStageId?: StageId;
   isModalOpen?: boolean;
   initialTab?: LobbyTabId;
   initialShopSubTab?: ShopSubTab;
@@ -55,8 +59,62 @@ const EMBER_PARTICLES = Array.from({ length: 10 }, (_, i) => {
   };
 });
 
+// Stage 2 (The Ashen Wood): blazing forest rising embers & sparks
+const ASHEN_EMBER_PARTICLES = Array.from({ length: 18 }, (_, i) => {
+  const seed = (i * 43 + 19) % 100;
+  const palettePick = i % 4;
+  const color =
+    palettePick === 0
+      ? '#ffd275'
+      : palettePick === 1
+        ? '#ff8c24'
+        : palettePick === 2
+          ? '#ff5a14'
+          : '#e63917';
+  const size = palettePick === 0 ? 3 + (i % 2) : 4 + (i % 3) * 1.5;
+  return {
+    id: i,
+    left: `${(i * 5.6 + (seed % 5)) % 98}%`,
+    size,
+    duration: `${5.6 + (i % 5) * 1.25}s`,
+    delay: `${-(i * 0.72)}s`,
+    drift: `${(i % 3 === 0 ? -1 : 1) * (16 + (seed % 34))}px`,
+    opacity: palettePick === 0 ? 0.92 : 0.78,
+    color,
+  };
+});
+
+// Stage 2 (The Ashen Wood): drifting charred ash flakes falling through smoky canopy
+const ASHEN_ASH_FLAKES = Array.from({ length: 22 }, (_, i) => {
+  const seed = (i * 59 + 29) % 100;
+  const tonePick = i % 4;
+  const color =
+    tonePick === 0
+      ? '#d6cac0'
+      : tonePick === 1
+        ? '#a3978e'
+        : tonePick === 2
+          ? '#756a62'
+          : '#c2b4a8';
+  const width = 3 + (i % 4);
+  const height = Math.max(2, width - (i % 2 === 0 ? 1 : 2));
+  return {
+    id: i,
+    left: `${(i * 4.7 + (seed % 7)) % 98}%`,
+    width,
+    height,
+    duration: `${9.2 + (i % 5) * 1.75}s`,
+    delay: `${-(i * 0.85)}s`,
+    drift: `${(i % 2 === 0 ? 1 : -1) * (20 + (seed % 32))}px`,
+    rot: `${(i % 2 === 0 ? 1 : -1) * (140 + (seed % 200))}deg`,
+    opacity: tonePick === 0 ? 0.48 : 0.36,
+    color,
+  };
+});
+
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   isMuted,
+  selectedStageId = 'stage_1',
   initialTab = 'home',
   initialShopSubTab = 'market',
   onTabChange,
@@ -64,12 +122,15 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onToggleMute,
   onOpenSettings,
 }) => {
+  const isAshenWood = selectedStageId === 'stage_2';
   const [activeTab, setActiveTab] = useState<LobbyTabId>(initialTab);
   const [pressedTabId, setPressedTabId] = useState<LobbyTabId | null>(null);
   const [shopSubTab, setShopSubTab] = useState<ShopSubTab>(initialShopSubTab);
   const [bgLoadError, setBgLoadError] = useState(false);
+  const [ashenBgLoadError, setAshenBgLoadError] = useState(false);
   const [bankCoins, setBankCoins] = useState<number>(() => getSavedCoins());
   const [relicSeals, setRelicSeals] = useState<number>(() => getRelicSeals());
+  const [devMode, setDevMode] = useState<boolean>(() => isDeveloperMode());
   const [unclaimedMissions, setUnclaimedMissions] = useState<number>(() =>
     dailyMissions.getUnclaimedCount()
   );
@@ -99,6 +160,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     const unsubRelics = subscribeRelics(({ relicSeals: nextSeals }) => {
       setRelicSeals(nextSeals);
     });
+    const unsubDevMode = subscribeDeveloperMode(setDevMode);
     const unsubMissions = dailyMissions.subscribe(() => {
       setUnclaimedMissions(dailyMissions.getUnclaimedCount());
     });
@@ -118,7 +180,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           streakContinued: result.streakContinued,
         });
         haptics.tap('medium');
-        soundManager.playCoinCollect();
+        soundManager.playCoinGain(result.rewardCoins >= 100 ? 'large' : 'medium');
 
         if (toastTimerRef.current !== null) {
           window.clearTimeout(toastTimerRef.current);
@@ -142,6 +204,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     return () => {
       unsubCoins();
       unsubRelics();
+      unsubDevMode();
       unsubMissions();
       unsubAchievements();
       document.removeEventListener('visibilitychange', handleVisibility);
@@ -187,13 +250,14 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
   return (
     <div className="relative w-full h-[100dvh] flex flex-col justify-between items-center overflow-hidden overflow-x-hidden select-none z-30 bg-[#07080a]">
-      {/* Menu Backdrop: cover-fit dungeon backdrop with dark vignette & zero CSS filters */}
+      {/* Menu Backdrop: cover-fit stage backdrop with smooth crossfade, atmospheric particles & zero CSS filters */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden" aria-hidden="true">
         <div
-          className="absolute inset-0"
+          className="absolute inset-0 transition-opacity duration-500"
           style={{
-            background:
-              'radial-gradient(circle at 50% 44%, #151b22 0%, #101116 44%, #060709 88%)',
+            background: isAshenWood
+              ? 'radial-gradient(circle at 50% 52%, #2a140c 0%, #140b08 48%, #070505 90%)'
+              : 'radial-gradient(circle at 50% 44%, #151b22 0%, #101116 44%, #060709 88%)',
           }}
         />
         {!bgLoadError && (
@@ -203,7 +267,21 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             referrerPolicy="no-referrer"
             onError={() => setBgLoadError(true)}
             style={{ imageRendering: 'auto' }}
-            className="w-full h-full object-cover object-center opacity-90"
+            className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-500 ease-out ${
+              isAshenWood ? 'opacity-0' : 'opacity-90'
+            }`}
+          />
+        )}
+        {!ashenBgLoadError && (
+          <img
+            src={STAGE_CARD_ARTWORKS.stage_2}
+            alt=""
+            referrerPolicy="no-referrer"
+            onError={() => setAshenBgLoadError(true)}
+            style={{ imageRendering: 'auto' }}
+            className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-500 ease-out ${
+              isAshenWood ? 'opacity-95' : 'opacity-0'
+            }`}
           />
         )}
 
@@ -211,38 +289,105 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         <div
           className="absolute inset-0"
           style={{
-            background:
-              activeTab === 'home'
+            background: isAshenWood
+              ? activeTab === 'home'
+                ? 'linear-gradient(180deg, rgba(8,5,4,0.74) 0%, rgba(18,9,6,0.18) 32%, rgba(22,9,5,0.24) 64%, rgba(6,4,4,0.92) 100%)'
+                : 'linear-gradient(180deg, rgba(8,5,4,0.86) 0%, rgba(16,9,6,0.64) 45%, rgba(6,4,4,0.95) 100%)'
+              : activeTab === 'home'
                 ? 'linear-gradient(180deg, rgba(5,6,8,0.78) 0%, rgba(10,11,14,0.24) 32%, rgba(12,8,9,0.3) 65%, rgba(5,5,7,0.94) 100%)'
                 : 'linear-gradient(180deg, rgba(5,6,8,0.88) 0%, rgba(10,11,14,0.68) 45%, rgba(5,5,7,0.96) 100%)',
           }}
         />
 
-        <div
-          className="absolute -inset-x-10 bottom-16 h-56 dungeon-mist-drift"
-          style={{
-            background:
-              'radial-gradient(ellipse at 50% 60%, rgba(64, 118, 136, 0.14) 0%, rgba(34, 14, 16, 0.16) 44%, rgba(16, 12, 14, 0.05) 66%, transparent 82%)',
-          }}
-        />
-        {EMBER_PARTICLES.map((p) => (
-          <span
-            key={p.id}
-            className="ember-particle absolute -bottom-4 rounded-full"
-            style={
-              {
-                left: p.left,
-                width: `${p.size}px`,
-                height: `${p.size}px`,
-                background: `radial-gradient(circle, ${p.color} 0%, ${p.color}88 45%, transparent 100%)`,
-                '--ember-duration': p.duration,
-                '--ember-delay': p.delay,
-                '--ember-drift': p.drift,
-                '--ember-opacity': p.opacity,
-              } as React.CSSProperties
-            }
-          />
-        ))}
+        {isAshenWood ? (
+          <>
+            {/* Smoldering wildfire underglow & warm soot mist */}
+            <div
+              className="absolute -inset-x-8 bottom-0 h-72 ashen-fire-glow"
+              style={{
+                background:
+                  'radial-gradient(ellipse at 50% 85%, rgba(255, 108, 28, 0.28) 0%, rgba(214, 58, 18, 0.16) 42%, rgba(92, 22, 10, 0.06) 68%, transparent 86%)',
+              }}
+            />
+            <div
+              className="absolute -inset-x-10 bottom-16 h-60 ashen-smoke-drift"
+              style={{
+                background:
+                  'radial-gradient(ellipse at 50% 58%, rgba(196, 82, 28, 0.15) 0%, rgba(56, 26, 18, 0.18) 46%, rgba(18, 10, 8, 0.06) 70%, transparent 84%)',
+              }}
+            />
+
+            {/* Falling charred ash flakes */}
+            {ASHEN_ASH_FLAKES.map((flake) => (
+              <span
+                key={`ash-${flake.id}`}
+                className="ashen-ash-flake absolute -top-4"
+                style={
+                  {
+                    left: flake.left,
+                    width: `${flake.width}px`,
+                    height: `${flake.height}px`,
+                    borderRadius: '42% 58% 52% 48%',
+                    backgroundColor: flake.color,
+                    '--ash-duration': flake.duration,
+                    '--ash-delay': flake.delay,
+                    '--ash-drift': flake.drift,
+                    '--ash-rot': flake.rot,
+                    '--ash-opacity': flake.opacity,
+                  } as React.CSSProperties
+                }
+              />
+            ))}
+
+            {/* Rising fiery embers & glowing sparks */}
+            {ASHEN_EMBER_PARTICLES.map((p) => (
+              <span
+                key={`ashen-ember-${p.id}`}
+                className="ashen-ember-particle absolute -bottom-4 rounded-full"
+                style={
+                  {
+                    left: p.left,
+                    width: `${p.size}px`,
+                    height: `${p.size}px`,
+                    background: `radial-gradient(circle, #fff3c4 0%, ${p.color} 42%, ${p.color}66 72%, transparent 100%)`,
+                    '--ember-duration': p.duration,
+                    '--ember-delay': p.delay,
+                    '--ember-drift': p.drift,
+                    '--ember-opacity': p.opacity,
+                  } as React.CSSProperties
+                }
+              />
+            ))}
+          </>
+        ) : (
+          <>
+            <div
+              className="absolute -inset-x-10 bottom-16 h-56 dungeon-mist-drift"
+              style={{
+                background:
+                  'radial-gradient(ellipse at 50% 60%, rgba(64, 118, 136, 0.14) 0%, rgba(34, 14, 16, 0.16) 44%, rgba(16, 12, 14, 0.05) 66%, transparent 82%)',
+              }}
+            />
+            {EMBER_PARTICLES.map((p) => (
+              <span
+                key={p.id}
+                className="ember-particle absolute -bottom-4 rounded-full"
+                style={
+                  {
+                    left: p.left,
+                    width: `${p.size}px`,
+                    height: `${p.size}px`,
+                    background: `radial-gradient(circle, ${p.color} 0%, ${p.color}88 45%, transparent 100%)`,
+                    '--ember-duration': p.duration,
+                    '--ember-delay': p.delay,
+                    '--ember-drift': p.drift,
+                    '--ember-opacity': p.opacity,
+                  } as React.CSSProperties
+                }
+              />
+            ))}
+          </>
+        )}
         <div
           className="absolute inset-0"
           style={{
@@ -257,7 +402,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         style={{
           paddingLeft: 'max(8px, env(safe-area-inset-left))',
           paddingRight: 'max(8px, env(safe-area-inset-right))',
-          paddingBottom: 'calc(clamp(82px, 11vh, 96px) + env(safe-area-inset-bottom, 0px))',
+          paddingBottom: 'calc(clamp(98px, 12.6vh, 114px) + env(safe-area-inset-bottom, 0px))',
         }}
       >
         {/* PERSISTENT TOP HEADER */}
@@ -270,7 +415,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             <button
               type="button"
               onClick={() => switchTab('shop', 'market')}
-              aria-label={`Coins ${bankCoins} and Gems ${relicSeals}. Open Shop`}
+              aria-label={`Coins ${devMode ? 'Unlimited' : bankCoins} and Gems ${devMode ? 'Unlimited' : relicSeals}. Open Shop`}
               className="cursor-pointer active:scale-95 transition-transform focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
             >
               <NineSlice
@@ -280,17 +425,17 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 className="min-h-[44px] flex items-center"
                 contentClassName="px-2 py-1 flex items-center gap-1.5 sm:gap-2"
               >
-                <div className="flex items-center gap-1">
-                  <Icon id="soul_coin" size={16} />
-                  <span className="font-mono-numbers text-[clamp(11px,2vw,13px)] font-bold text-[#edd18a] whitespace-nowrap">
-                    {bankCoins}
-                  </span>
-                </div>
+                <CoinCounter
+                  coins={bankCoins}
+                  isUnlimited={devMode}
+                  iconSize={16}
+                  textClassName="font-mono-numbers text-[clamp(11px,2vw,13px)] font-bold text-[#edd18a] whitespace-nowrap"
+                />
                 <span className="w-px h-3.5 bg-[#5e382c]" aria-hidden="true" />
                 <div className="flex items-center gap-1">
                   <Icon id="crimson_gem" size={16} />
                   <span className="font-mono-numbers text-[clamp(11px,2vw,13px)] font-bold text-[#f0cad9] whitespace-nowrap">
-                    {relicSeals}
+                    {devMode ? '∞' : relicSeals}
                   </span>
                 </div>
               </NineSlice>
@@ -406,7 +551,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           aria-label="Lobby Navigation"
           className="fixed bottom-0 left-1/2 -translate-x-1/2 z-30 w-full max-w-[540px]"
           style={{
-            height: 'calc(clamp(78px, 10.5vh, 92px) + env(safe-area-inset-bottom, 0px))',
+            height: 'calc(clamp(92px, 11.8vh, 108px) + env(safe-area-inset-bottom, 0px))',
             paddingBottom: 'env(safe-area-inset-bottom, 0px)',
             paddingLeft: 'max(4px, env(safe-area-inset-left))',
             paddingRight: 'max(4px, env(safe-area-inset-right))',
@@ -416,9 +561,9 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             variant="navPlateSpiked"
             tileTexture="stone"
             padding="0px"
-            borderWidth="clamp(10px, 1.8vw, 15px) clamp(14px, 2.8vw, 24px)"
+            borderWidth="clamp(7px, 1.3vw, 11px) clamp(10px, 2vw, 18px)"
             className="w-full h-full shadow-[0_-8px_22px_rgba(0,0,0,0.9)]"
-            contentClassName="w-full h-full grid grid-cols-5 items-center gap-1 px-1"
+            contentClassName="w-full h-full grid grid-cols-5 items-center gap-0.5 px-0.5"
           >
             {navTabs.map((tab) => {
               const isActive = activeTab === tab.id;
@@ -449,9 +594,13 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                 >
                   {/* Fixed-aspect 1:1 medallion badge housing the tab icon */}
                   <div
-                    className="relative flex items-center justify-center shrink-0"
+                    className={`relative flex items-center justify-center shrink-0 ${
+                      tab.isHome ? '-mt-2' : ''
+                    }`}
                     style={{
-                      width: tab.isHome ? 'clamp(36px, 5.2vh, 44px)' : 'clamp(30px, 4.4vh, 38px)',
+                      width: tab.isHome
+                        ? 'clamp(54px, 7.2vh, 64px)'
+                        : 'clamp(46px, 6.2vh, 56px)',
                       aspectRatio: '1 / 1',
                     }}
                   >
@@ -463,12 +612,16 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                       style={{ imageRendering: 'auto' }}
                       className="pointer-events-none absolute inset-0 w-full h-full object-contain select-none"
                     />
-                    <span className="relative z-10 flex items-center justify-center w-[62%] h-[62%]">
+                    <span
+                      className={`relative z-10 flex items-center justify-center ${
+                        tab.isHome ? 'w-[78%] h-[78%]' : 'w-[74%] h-[74%]'
+                      }`}
+                    >
                       <Icon
                         id={tab.iconId}
-                        size={tab.isHome ? 24 : 20}
+                        size="100%"
                         alt={tab.label}
-                        className={isActive || isPressed ? 'opacity-100' : 'opacity-85'}
+                        className={isActive || isPressed ? 'opacity-100' : 'opacity-95'}
                       />
                     </span>
 
@@ -476,7 +629,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                       <span
                         aria-label={`${tab.badge} unclaimed`}
                         style={{ aspectRatio: '1 / 1' }}
-                        className="absolute -top-1 -right-1.5 z-20 min-w-[18px] h-[18px] px-1 flex items-center justify-center"
+                        className="absolute -top-1 -right-1 z-20 min-w-[20px] h-[20px] px-1 flex items-center justify-center"
                       >
                         <img
                           src={UI_SPRITES.knobCrimsonOrb}
@@ -486,7 +639,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                           style={{ imageRendering: 'auto' }}
                           className="pointer-events-none absolute inset-0 w-full h-full object-contain"
                         />
-                        <span className="relative z-10 font-mono-numbers text-[9.5px] font-black text-[#fff3d6]">
+                        <span className="relative z-10 font-mono-numbers text-[10.5px] font-black text-[#fff3d6]">
                           {tab.badge}
                         </span>
                       </span>
@@ -494,18 +647,18 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   </div>
 
                   <span
-                    className={`relative z-10 mt-0.5 font-display font-bold uppercase whitespace-nowrap leading-none transition-colors duration-150 ${
+                    className={`relative z-10 mt-1 font-display font-bold uppercase whitespace-nowrap leading-none transition-colors duration-150 ${
                       tab.label.length > 7
-                        ? 'text-[clamp(8px,1.8vw,9.5px)] tracking-tight'
-                        : 'text-[clamp(9px,2vw,10.5px)] tracking-wider'
+                        ? 'text-[clamp(10px,2.5vw,12px)] tracking-[0.02em]'
+                        : 'text-[clamp(11px,2.7vw,12.5px)] tracking-[0.06em]'
                     } ${
                       isActive
                         ? 'text-[#fae8b8]'
                         : isPressed
                           ? 'text-[#f2c464]'
-                          : 'text-[#a6adb8]'
+                          : 'text-[#c8cfd9]'
                     }`}
-                    style={{ textShadow: '0 1px 2px rgba(0,0,0,0.98)' }}
+                    style={{ textShadow: '0 1px 3px rgba(0,0,0,0.98)' }}
                   >
                     {tab.label}
                   </span>

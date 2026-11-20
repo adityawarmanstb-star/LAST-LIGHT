@@ -60,6 +60,7 @@ export const AchievementsPage: React.FC = () => {
     (a) => unlockedSet.has(a.id) && !claimedSet.has(a.id)
   );
   const unclaimedTotal = claimableList.reduce((sum, a) => sum + a.rewardCoins, 0);
+  const unclaimedSeals = claimableList.reduce((sum, a) => sum + a.rewardSeals, 0);
 
   const visibleAchievements = ACHIEVEMENTS.filter((a) => {
     const isUnlocked = unlockedSet.has(a.id);
@@ -70,8 +71,8 @@ export const AchievementsPage: React.FC = () => {
 
   const handleClaim = (achievementId: string) => {
     const res = achievements.claimAchievement(achievementId);
-    if (res.claimedCoins > 0) {
-      soundManager.playCoinCollect();
+    if (res.claimedCoins > 0 || res.claimedSeals > 0) {
+      soundManager.playCoinGain(res.claimedCoins >= 1500 ? 'jackpot' : 'large');
       haptics.tap('heavy');
       setState(res.state);
     }
@@ -79,8 +80,8 @@ export const AchievementsPage: React.FC = () => {
 
   const handleClaimAll = () => {
     const res = achievements.claimAllAchievements();
-    if (res.claimedCoins > 0) {
-      soundManager.playCoinCollect();
+    if (res.claimedCoins > 0 || res.claimedSeals > 0) {
+      soundManager.playCoinGain(res.claimedCoins >= 1500 ? 'jackpot' : 'large');
       haptics.tap('heavy');
       setState(res.state);
     }
@@ -106,9 +107,19 @@ export const AchievementsPage: React.FC = () => {
           </p>
         </div>
 
-        {unclaimedTotal > 0 && (
+        {(unclaimedTotal > 0 || unclaimedSeals > 0) && (
           <UiButton tone="blood" size="sm" onClick={handleClaimAll}>
-            CLAIM ALL (+{unclaimedTotal})
+            <span className="inline-flex items-center gap-1.5">
+              <span>CLAIM ALL</span>
+              <span className="inline-flex items-center gap-0.5 font-mono-numbers text-[#f2a93b]">
+                <Icon id="soul_coin" size={13} />+{unclaimedTotal.toLocaleString()}
+              </span>
+              {unclaimedSeals > 0 && (
+                <span className="inline-flex items-center gap-0.5 font-mono-numbers text-[#d8b4fe]">
+                  <Icon id="crimson_gem" size={13} />+{unclaimedSeals}
+                </span>
+              )}
+            </span>
           </UiButton>
         )}
       </div>
@@ -217,8 +228,13 @@ export const AchievementsPage: React.FC = () => {
                       {ach.title}
                     </h2>
                     <span className="inline-flex items-center gap-1 font-mono-numbers text-xs font-bold text-[#f2a93b]">
-                      <Icon id="soul_coin" size={14} />+{ach.rewardCoins}
+                      <Icon id="soul_coin" size={14} />+{ach.rewardCoins.toLocaleString()}
                     </span>
+                    {ach.rewardSeals > 0 && (
+                      <span className="inline-flex items-center gap-1 font-mono-numbers text-xs font-bold text-[#d8b4fe]">
+                        <Icon id="crimson_gem" size={14} />+{ach.rewardSeals}
+                      </span>
+                    )}
                   </div>
 
                   <p className="font-body text-xs text-[#b5a589] leading-snug mt-0.5">

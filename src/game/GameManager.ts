@@ -1,8 +1,10 @@
 import {
   ActiveDynamicChallenge,
+  Boss2DebugStats,
   BossInfo,
   BossIntroInfo,
   DebugStats,
+  DifficultyClearRecord,
   DynamicChallengeOffer,
   EventWarningInfo,
   GameDifficultyId,
@@ -10,15 +12,20 @@ import {
   RelicId,
   RelicSetId,
   RunStats,
+  StageDifficultyClearsMap,
+  StageId,
+  TreeDebugStats,
   UpgradeOption,
   WeaponState,
 } from './types';
 import { DIFFICULTY_PRESETS, DifficultyPreset } from './difficulty';
+import { DEFAULT_STAGE_ID, STAGES, StageConfig } from './stages';
 import {
   ResolutionQualityMode,
   TargetFpsOption,
   saveDataStore,
 } from './saveData';
+import { isDeveloperMode, subscribeDeveloperMode } from './developerMode';
 import { soundManager } from './audio';
 
 export type QualityTier = 'high' | 'low';
@@ -42,6 +49,10 @@ export interface HudStatsPayload {
   coins: number;
   weapons: WeaponState[];
   combo: number;
+  comboKills: number;
+  comboTimeRemainingMs: number;
+  comboDecayMs: number;
+  comboNextThreshold: number | null;
   isUnderPressure: boolean;
   lightShardRemainingSec?: number;
   redShardRemainingSec?: number;
@@ -55,6 +66,10 @@ export interface HudStatsPayload {
   dashCooldownProgress?: number;
   equippedRelicIds?: RelicId[];
   activeRelicSynergies?: RelicSetId[];
+  isBurning?: boolean;
+  stageId?: StageId;
+  treeDebug?: TreeDebugStats | null;
+  bossDebug?: Boss2DebugStats | null;
   debug: DebugStats;
 }
 
@@ -100,6 +115,7 @@ type LoadProgressCallback = (payload: LoadProgressPayload) => void;
 type GameStateCallback = (state: GameScreenState) => void;
 type GoreCallback = (level: GoreLevel) => void;
 type ScreenShakeCallback = (enabled: boolean) => void;
+type StageCallback = (stageId: StageId) => void;
 
 class GameManager {
   private statsListeners: StatsCallback[] = [];
@@ -118,6 +134,7 @@ class GameManager {
   private gameStateListeners: GameStateCallback[] = [];
   private goreListeners: GoreCallback[] = [];
   private screenShakeListeners: ScreenShakeCallback[] = [];
+  private stageListeners: StageCallback[] = [];
   private lastCritImpactMs: number = 0;
   private critImpactSeq: number = 0;
   private bossIntroSeq: number = 0;
@@ -134,6 +151,7 @@ class GameManager {
   public joystickVector = { x: 0, y: 0 };
   private brightness: number = saveDataStore.read().settings.brightness;
   private selectedDifficulty: GameDifficultyId = saveDataStore.read().difficulty;
+  private selectedStageId: StageId = saveDataStore.read().selectedStageId;
   private goreLevel: GoreLevel = saveDataStore.read().settings.gore;
   private screenShakeEnabled: boolean = saveDataStore.read().settings.screenShakeEnabled;
   private qualityTier: QualityTier = 'high';
@@ -160,6 +178,112 @@ class GameManager {
 
   public getDifficultyConfig(): DifficultyPreset {
     return DIFFICULTY_PRESETS[this.selectedDifficulty];
+  }
+
+  public getSelectedStageId(): StageId {
+    if (this.selectedStageId === 'stage_2' && !this.isStageUnlocked('stage_2')) {
+      this.selectedStageId = DEFAULT_STAGE_ID;
+    }
+    return this.selectedStageId;
+  }
+
+  public getSelectedStage(): StageConfig {
+    return STAGES[this.getSelectedStageId()] ?? STAGES[DEFAULT_STAGE_ID];
+  }
+
+  public isStageUnlocked(stageId: StageId): boolean {
+    if (stageId === 'stage_1' || isDeveloperMode()) return true;
+    return Boolean(saveDataStore.readFastRef().stage1BossDefeated);
+  }
+
+  public setSelectedStageId(stageId: StageId): boolean {
+    if (!this.isStageUnlocked(stageId)) {
+      return false;
+    }
+    this.selectedStageId = stageId;
+    saveDataStore.update((draft) => {
+      draft.selectedStageId = stageId;
+    });
+    this.stageListeners.forEach((l) => l(stageId));
+    return true;
+  }
+
+  public onStageChange(cb: StageCallback) {
+    this.stageListeners.push(cb);
+    return () => {
+      this.stageListeners = this.stageListeners.filter((l) => l !== cb);
+    };
+  }
+
+  public getStageBestTime(stageId: StageId): number {
+    return saveDataStore.readFastRef().stageBestTimes[stageId] ?? 0;
+  }
+
+  public getAllStageBestTimes(): Record<StageId, number> {
+    return { ...saveDataStore.read().stageBestTimes };
+  }
+
+  public markStage1BossDefeated(): void {
+    if (saveDataStore.readFastRef().stage1BossDefeated) return;
+    saveDataStore.update((draft) => {
+      draft.stage1BossDefeated = true;
+    }, true);
+  }
+
+  public markStage2BossDefeated(): void {
+    if (saveDataStore.readFastRef().stage2BossDefeated) return;
+    saveDataStore.update((draft) => {
+      draft.stage2BossDefeated = true;
+    }, true);
+  }
+
+  public recordStageBestTime(
+    stageId: StageId,
+    timeSurvivedSec: number
+  ): { bestTime: number; isNewBest: boolean } {
+    const safeTime = Math.max(0, Math.floor(timeSurvivedSec));
+    const prevBest = this.getStageBestTime(stageId);
+    if (safeTime > prevBest) {
+      saveDataStore.update((draft) => {
+        draft.stageBestTimes[stageId] = safeTime;
+      }, true);
+      return { bestTime: safeTime, isNewBest: true };
+    }
+    return { bestTime: prevBest, isNewBest: false };
+  }
+
+  public getAllDifficultyClears(): StageDifficultyClearsMap {
+    return saveDataStore.read().difficultyClears;
+  }
+
+  public getDifficultyClearsForStage(
+    stageId: StageId
+  ): Record<GameDifficultyId, DifficultyClearRecord> {
+    return saveDataStore.read().difficultyClears[stageId];
+  }
+
+  public recordDifficultyClear(
+    stageId: StageId,
+    difficulty: GameDifficultyId,
+    clearTimeSec: number
+  ): { record: DifficultyClearRecord; isNewBest: boolean } {
+    const safeTime = Math.max(1, Math.floor(clearTimeSec));
+    const current = saveDataStore.readFastRef().difficultyClears[stageId][difficulty];
+    const prevBest = current.bestClearTimeSec;
+    const isNewBest = prevBest === null || safeTime < prevBest;
+    const nextBest = isNewBest ? safeTime : prevBest;
+
+    const updated = saveDataStore.update((draft) => {
+      const target = draft.difficultyClears[stageId][difficulty];
+      target.cleared = true;
+      target.clearCount = (target.clearCount ?? 0) + 1;
+      target.bestClearTimeSec = nextBest;
+    }, true);
+
+    return {
+      record: { ...updated.difficultyClears[stageId][difficulty] },
+      isNewBest,
+    };
   }
 
   public getGameState(): GameScreenState {
@@ -478,3 +602,10 @@ class GameManager {
 }
 
 export const gameManager = new GameManager();
+
+subscribeDeveloperMode((enabled) => {
+  if (!enabled) {
+    const validStage = gameManager.getSelectedStageId();
+    gameManager.setSelectedStageId(validStage);
+  }
+});

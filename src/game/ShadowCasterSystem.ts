@@ -186,16 +186,23 @@ export class ShadowCasterSystem {
 
   private emberAccumMs: number = 0;
   private readonly isMobileDevice: boolean;
+  private readonly disableWorldProps: boolean;
   private lastMinCx: number = Number.NaN;
   private lastMaxCx: number = Number.NaN;
   private lastMinCy: number = Number.NaN;
   private lastMaxCy: number = Number.NaN;
 
-  constructor(scene: Phaser.Scene, spawnX: number, spawnY: number) {
+  constructor(
+    scene: Phaser.Scene,
+    spawnX: number,
+    spawnY: number,
+    disableWorldProps: boolean = false
+  ) {
     this.scene = scene;
     this.spawnX = spawnX;
     this.spawnY = spawnY;
     this.isMobileDevice = isAndroidOrMobileDevice();
+    this.disableWorldProps = disableWorldProps;
 
     this.ensureTextures();
 
@@ -218,63 +225,65 @@ export class ShadowCasterSystem {
       this.overlayShadowPool.push(img);
     }
 
-    for (let i = 0; i < MAX_TORCH_SLOTS; i++) {
-      const groundGlow = scene.add
-        .image(0, 0, 'world_torch_ground_glow')
-        .setDepth(4)
-        .setBlendMode(Phaser.BlendModes.ADD)
-        .setVisible(false);
-      groundGlow.disableInteractive();
+    if (!this.disableWorldProps) {
+      for (let i = 0; i < MAX_TORCH_SLOTS; i++) {
+        const groundGlow = scene.add
+          .image(0, 0, 'world_torch_ground_glow')
+          .setDepth(4)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setVisible(false);
+        groundGlow.disableInteractive();
 
-      const brazier = scene.add
-        .image(0, 0, 'world_torch_brazier')
-        .setOrigin(0.5, 0.85)
-        .setDepth(19)
-        .setVisible(false);
-      brazier.disableInteractive();
+        const brazier = scene.add
+          .image(0, 0, 'world_torch_brazier')
+          .setOrigin(0.5, 0.85)
+          .setDepth(19)
+          .setVisible(false);
+        brazier.disableInteractive();
 
-      const flame = scene.add
-        .image(0, 0, 'world_torch_flame')
-        .setOrigin(0.5, 0.82)
-        .setDepth(20)
-        .setBlendMode(Phaser.BlendModes.ADD)
-        .setVisible(false);
-      flame.disableInteractive();
+        const flame = scene.add
+          .image(0, 0, 'world_torch_flame')
+          .setOrigin(0.5, 0.82)
+          .setDepth(20)
+          .setBlendMode(Phaser.BlendModes.ADD)
+          .setVisible(false);
+        flame.disableInteractive();
 
-      this.torchPool.push({
-        active: false,
-        worldX: 0,
-        worldY: 0,
-        phase: 0,
-        baseRadius: 165,
-        currentRadius: 165,
-        currentIntensity: 1,
-        brazier,
-        flame,
-        groundGlow,
-      });
+        this.torchPool.push({
+          active: false,
+          worldX: 0,
+          worldY: 0,
+          phase: 0,
+          baseRadius: 165,
+          currentRadius: 165,
+          currentIntensity: 1,
+          brazier,
+          flame,
+          groundGlow,
+        });
 
-      this.activeTorchData.push({ x: 0, y: 0, radius: 165, intensity: 1, phase: 0 });
-    }
+        this.activeTorchData.push({ x: 0, y: 0, radius: 165, intensity: 1, phase: 0 });
+      }
 
-    for (let i = 0; i < MAX_PILLAR_SLOTS; i++) {
-      const sprite = scene.add
-        .image(0, 0, 'world_pillar_stone')
-        .setOrigin(0.5, 0.78)
-        .setDepth(19)
-        .setVisible(false);
-      sprite.disableInteractive();
+      for (let i = 0; i < MAX_PILLAR_SLOTS; i++) {
+        const sprite = scene.add
+          .image(0, 0, 'world_pillar_stone')
+          .setOrigin(0.5, 0.78)
+          .setDepth(19)
+          .setVisible(false);
+        sprite.disableInteractive();
 
-      this.pillarPool.push({
-        active: false,
-        worldX: 0,
-        worldY: 0,
-        radius: 22,
-        heightScale: 1,
-        sprite,
-      });
+        this.pillarPool.push({
+          active: false,
+          worldX: 0,
+          worldY: 0,
+          radius: 22,
+          heightScale: 1,
+          sprite,
+        });
 
-      this.activePillarData.push({ x: 0, y: 0, radius: 22, heightScale: 1 });
+        this.activePillarData.push({ x: 0, y: 0, radius: 22, heightScale: 1 });
+      }
     }
 
     for (let i = 0; i < MAX_SHADOW_LIGHTS; i++) {
@@ -535,6 +544,11 @@ export class ShadowCasterSystem {
     isLowQuality: boolean,
     onTorchEmber?: (x: number, y: number) => void
   ) {
+    if (this.disableWorldProps) {
+      this.activeTorchCount = 0;
+      this.activePillarCount = 0;
+      return;
+    }
     const margin = 220;
     const minCx = Math.floor((camX - margin) / CELL_SIZE);
     const maxCx = Math.floor((camX + viewW + margin) / CELL_SIZE);

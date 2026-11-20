@@ -12,6 +12,13 @@ import {
   normalizeAssetUrl,
   registerPreloadedImage,
 } from './imageCache';
+import { StageId } from './types';
+import {
+  STAGE_2_ASSETS,
+  STAGE_CARD_ARTWORKS,
+  resolveStageAssetVariant,
+} from './stages';
+import { BOSS2, BOSS2_FX_SHEET_KEYS } from './CinderWardenBoss';
 
 export { getPreloadedImage, normalizeAssetUrl, registerPreloadedImage };
 
@@ -220,4 +227,54 @@ export function preloadAllGameAssets(
   });
 
   return bootPreloadPromise;
+}
+
+let stageCardPreloadPromise: Promise<void> | null = null;
+const stageAssetPreloadPromises = new Map<string, Promise<void>>();
+
+/**
+ * Lazily preloads Stage 1 & Stage 2 card artwork when the Stage Select screen opens.
+ */
+export function preloadStageCardArtworks(): Promise<void> {
+  if (typeof window === 'undefined') return Promise.resolve();
+  if (stageCardPreloadPromise) return stageCardPreloadPromise;
+
+  const urls = [STAGE_CARD_ARTWORKS.stage_1, STAGE_CARD_ARTWORKS.stage_2];
+  stageCardPreloadPromise = runImageBatch(urls, 2, () => {});
+  return stageCardPreloadPromise;
+}
+
+/**
+ * Per-stage asset preloader: Stage 2 assets (ash floor, scorch decals, burnt trees)
+ * load ONLY when Stage 2 starts or when the Stage Select card is shown.
+ * Uses low concurrency with animation-frame yields to keep the UI/game smooth at 60 fps.
+ */
+export function preloadStageAssets(
+  stageId: StageId,
+  isHighQuality: boolean = true
+): Promise<void> {
+  if (typeof window === 'undefined' || stageId !== 'stage_2') {
+    return Promise.resolve();
+  }
+
+  const cacheKey = `${stageId}:${isHighQuality ? 'high' : 'low'}`;
+  const existing = stageAssetPreloadPromises.get(cacheKey);
+  if (existing) return existing;
+
+  const urls: string[] = [
+    resolveStageAssetVariant(STAGE_2_ASSETS.floor, isHighQuality).url,
+    resolveStageAssetVariant(STAGE_2_ASSETS.fireTreeSheet, isHighQuality).url,
+    resolveStageAssetVariant(STAGE_2_ASSETS.ashOverlaySheet, isHighQuality).url,
+    ...STAGE_2_ASSETS.burntTrees.map(
+      (entry) => resolveStageAssetVariant(entry, isHighQuality).url
+    ),
+    ...STAGE_2_ASSETS.scorchDecals.map(
+      (entry) => resolveStageAssetVariant(entry, isHighQuality).url
+    ),
+    ...BOSS2_FX_SHEET_KEYS.map((key) => BOSS2.fxSheets[key].url),
+  ];
+
+  const promise = runImageBatch(urls, 2, () => {});
+  stageAssetPreloadPromises.set(cacheKey, promise);
+  return promise;
 }

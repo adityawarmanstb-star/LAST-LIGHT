@@ -54,7 +54,7 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
   const handleClaim = (missionId: string) => {
     const res = dailyMissions.claimMission(missionId);
     if (res.claimedCoins > 0 || res.claimedSeals > 0) {
-      soundManager.playCoinCollect();
+      soundManager.playCoinGain(res.claimedCoins >= 100 ? 'large' : 'medium');
       haptics.tap('heavy');
       setState(res.state);
     }
@@ -63,7 +63,7 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
   const handleClaimChest = () => {
     const res = dailyMissions.claimDailyChest();
     if (res.success) {
-      soundManager.playCoinCollect();
+      soundManager.playCoinGain('large');
       haptics.tap('heavy');
       setChestClaimed(true);
     }
@@ -72,7 +72,7 @@ export const MissionsPage: React.FC<MissionsPageProps> = ({ onStartGame }) => {
   const handleClaimAll = () => {
     const res = dailyMissions.claimAllMissions();
     if (res.claimedCoins > 0 || res.claimedSeals > 0) {
-      soundManager.playCoinCollect();
+      soundManager.playCoinGain(res.claimedCoins >= 150 ? 'jackpot' : 'large');
       haptics.tap('heavy');
       setState(res.state);
     }

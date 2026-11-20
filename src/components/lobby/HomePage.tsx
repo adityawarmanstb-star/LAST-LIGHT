@@ -9,7 +9,9 @@ import {
   subscribeRelics,
 } from '../../game/relics';
 import { soundManager } from '../../game/audio';
-import { RelicDefinition, RelicId } from '../../game/types';
+import { gameManager } from '../../game/GameManager';
+import { STAGES, formatStageTime } from '../../game/stages';
+import { RelicDefinition, RelicId, StageId } from '../../game/types';
 import { UI_ASSETS, useChromaKeyImage } from '../../hooks/useChromaKeyImage';
 import { haptics } from '../../mobile/haptics';
 import { Icon } from '../Icon';
@@ -29,6 +31,9 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
   );
   const [relicSeals, setRelicSeals] = useState<number>(() => getRelicSeals());
   const [maxRelicSlots, setMaxRelicSlots] = useState<number>(() => getMaxRelicSlots());
+  const [selectedStageId, setSelectedStageId] = useState<StageId>(() =>
+    gameManager.getSelectedStageId()
+  );
   const [equipPopSeq, setEquipPopSeq] = useState<number>(0);
   const prevEquippedIdsRef = useRef<RelicId[]>(getEquippedRelicIds());
   const { processedSrc: titleLogoSrc, hasError: titleLogoError } = useChromaKeyImage(
@@ -36,7 +41,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
   );
 
   useEffect(() => {
-    return subscribeRelics(
+    const unsubRelics = subscribeRelics(
       ({ equippedRelicIds, relicSeals: nextSeals, maxRelicSlots: nextSlots }) => {
         const addedRelic = equippedRelicIds.some(
           (id) => !prevEquippedIdsRef.current.includes(id)
@@ -50,7 +55,17 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
         setMaxRelicSlots(nextSlots);
       }
     );
+    const unsubStage = gameManager.onStageChange((stageId) => {
+      setSelectedStageId(stageId);
+    });
+    return () => {
+      unsubRelics();
+      unsubStage();
+    };
   }, []);
+
+  const currentStage = STAGES[selectedStageId] ?? STAGES.stage_1;
+  const currentStageBestTime = gameManager.getStageBestTime(currentStage.id);
 
   const activeSynergies = getActiveRelicSynergies(equippedRelics.map((r) => r.id));
   const nextSlotInfo = getNextRelicSlotUnlockInfo(maxRelicSlots);
@@ -292,8 +307,34 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
         </div>
       </div>
 
-      {/* Main Play CTA via 3-slice horizontal UiButton */}
-      <div className="w-full flex flex-col items-center shrink-0 mt-0.5">
+      {/* Active Stage Banner + Main Play CTA */}
+      <div className="w-full flex flex-col items-center gap-1.5 shrink-0 mt-0.5">
+        <button
+          type="button"
+          onClick={onStartGame}
+          aria-label={`Stage ${currentStage.stageNumber}: ${currentStage.name}. Tap to select stage`}
+          className="w-[86%] max-w-[340px] cursor-pointer active:scale-[0.98] transition-transform focus-visible:outline-2 focus-visible:outline-[#f2a93b]"
+        >
+          <NineSlice
+            variant="miniPlate"
+            tileTexture="row"
+            highlight="blood"
+            padding="0px"
+            className="w-full shadow-[0_6px_16px_rgba(0,0,0,0.85)]"
+            contentClassName="px-3 py-1.5 flex items-center justify-between gap-2"
+          >
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Icon id={currentStage.id === 'stage_1' ? 'ui_skull' : 'ui_flame'} size={15} />
+              <span className="font-display font-bold text-[11px] sm:text-xs tracking-[0.1em] text-[#f2dfba] uppercase truncate">
+                STAGE {currentStage.stageNumber} · {currentStage.name}
+              </span>
+            </div>
+            <span className="shrink-0 font-mono-numbers text-[10.5px] font-bold text-[#f2c464]">
+              {currentStageBestTime > 0 ? `BEST ${formatStageTime(currentStageBestTime)}` : 'SELECT >'}
+            </span>
+          </NineSlice>
+        </button>
+
         <UiButton
           tone="blood"
           size="lg"
@@ -305,7 +346,7 @@ export const HomePage: React.FC<HomePageProps> = ({ onStartGame, onOpenRelicsSho
           <span className="text-[#fae6b6]">PLAY</span>
         </UiButton>
 
-        <p className="mt-1 font-body text-xs font-medium tracking-wide text-[#a89a7e] text-center">
+        <p className="mt-0.5 font-body text-xs font-medium tracking-wide text-[#a89a7e] text-center">
           Drag anywhere to move · Tap Dash to evade
         </p>
       </div>

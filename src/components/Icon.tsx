@@ -9,7 +9,7 @@ import { UI_ASSETS, useChromaKeyImage } from '../hooks/useChromaKeyImage';
 
 export interface IconProps {
   id: string;
-  size?: number;
+  size?: number | string;
   rarity?: IconRarity;
   alt?: string;
   className?: string;

@@ -40,7 +40,7 @@ export const BESTIARY_ENTRIES: BestiaryEntry[] = [
     spriteSrc: './assets/aistudio/enemy_brute_01eebbc9.webp',
     lore: 'Fused into cracked siege-plate by the Warden-Eater cults, Brutes march relentlessly through gunfire before lowering their horned pauldrons for a crushing bull-charge.',
     tacticalNote: 'Watch for the crimson charge telegraph; bursts drop Soul Coins and Red Shards.',
-    accentColor: '#e5303a',
+    accentColor: '#b84dff',
   },
   {
     id: 'boss',

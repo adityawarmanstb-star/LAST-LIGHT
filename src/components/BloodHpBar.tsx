@@ -85,7 +85,7 @@ export const BloodHpBar: React.FC<BloodHpBarProps> = React.memo(
         <UiBar
           percent={hpPercent}
           trailPercent={trailPercent}
-          fill="crimson"
+          fill="green"
           heightClassName={compact ? 'h-[11px]' : 'h-[16px]'}
           frameBorderWidth={compact ? '2px 5px' : '3px 8px'}
           ariaLabel={`Health ${Math.round(hp)} of ${maxHp}`}

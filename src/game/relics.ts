@@ -1,6 +1,11 @@
 import { getSavedCoins, saveCoins } from './metaProgression';
 import { saveDataStore } from './saveData';
 import {
+  UNLIMITED_CURRENCY,
+  isDeveloperMode,
+  subscribeDeveloperMode,
+} from './developerMode';
+import {
   RelicDefinition,
   RelicId,
   RelicRarity,
@@ -230,10 +235,15 @@ export function getEquippedRelics(): RelicDefinition[] {
 }
 
 export function getRelicSeals(): number {
+  if (isDeveloperMode()) return UNLIMITED_CURRENCY;
   return saveDataStore.read().relicSeals;
 }
 
 export function addRelicSeals(amount: number): number {
+  if (isDeveloperMode()) {
+    notifyRelics();
+    return UNLIMITED_CURRENCY;
+  }
   const delta = Number.isFinite(amount) ? Math.floor(amount) : 0;
   if (delta === 0) return getRelicSeals();
   const updated = saveDataStore.update((draft) => {
@@ -263,24 +273,28 @@ export function unlockNextRelicSlot(): {
   maxRelicSlots: number;
 } {
   const current = saveDataStore.read();
+  const devMode = isDeveloperMode();
+  const effectiveSeals = devMode ? UNLIMITED_CURRENCY : current.relicSeals;
   const nextInfo = getNextRelicSlotUnlockInfo(current.maxRelicSlots);
-  if (!nextInfo || current.relicSeals < nextInfo.costSeals) {
+  if (!nextInfo || (!devMode && effectiveSeals < nextInfo.costSeals)) {
     return {
       success: false,
-      newSeals: current.relicSeals,
+      newSeals: effectiveSeals,
       maxRelicSlots: current.maxRelicSlots,
     };
   }
 
   const updated = saveDataStore.update((draft) => {
-    draft.relicSeals = Math.max(0, draft.relicSeals - nextInfo.costSeals);
+    if (!devMode) {
+      draft.relicSeals = Math.max(0, draft.relicSeals - nextInfo.costSeals);
+    }
     draft.maxRelicSlots = Math.min(MAX_RELIC_SLOTS, draft.maxRelicSlots + 1);
   });
   notifyRelics();
 
   return {
     success: true,
-    newSeals: updated.relicSeals,
+    newSeals: devMode ? UNLIMITED_CURRENCY : updated.relicSeals,
     maxRelicSlots: updated.maxRelicSlots,
   };
 }
@@ -322,7 +336,8 @@ export function unlockRelic(id: RelicId): {
   const currentUnlocked = getUnlockedRelicIds();
   const currentEquipped = getEquippedRelicIds();
 
-  if (!relic || currentUnlocked.includes(id) || currentCoins < relic.cost) {
+  const devMode = isDeveloperMode();
+  if (!relic || currentUnlocked.includes(id) || (!devMode && currentCoins < relic.cost)) {
     return {
       success: false,
       newCoins: currentCoins,
@@ -331,8 +346,10 @@ export function unlockRelic(id: RelicId): {
     };
   }
 
-  const newCoins = currentCoins - relic.cost;
-  saveCoins(newCoins);
+  const newCoins = devMode ? UNLIMITED_CURRENCY : currentCoins - relic.cost;
+  if (!devMode) {
+    saveCoins(newCoins);
+  }
 
   const updated = saveDataStore.update((draft) => {
     if (!draft.unlockedRelics.includes(id)) {
@@ -397,3 +414,7 @@ export function subscribeRelics(listener: RelicsListener): () => void {
     relicListeners.delete(listener);
   };
 }
+
+subscribeDeveloperMode(() => {
+  notifyRelics();
+});

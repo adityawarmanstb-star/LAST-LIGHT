@@ -3,6 +3,18 @@ import { gameManager } from '../GameManager';
 import { LIGHT, MainScene } from './MainScene';
 import { computePointShadowOcclusion, WorldPillarData } from '../ShadowCasterSystem';
 import {
+  Stage2AshLayer,
+  TREES,
+  ensureBurningTreeTextures,
+  resolveStage2VfxQuality,
+} from '../BurningTreeSystem';
+import {
+  BOSS2,
+  CinderWardenTelegraphRenderer,
+  ensureCinderWardenTextures,
+  getBoss2BodyCenterY,
+} from '../CinderWardenBoss';
+import {
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
   getAdaptiveFxBudget,
@@ -42,8 +54,11 @@ export class DarknessScene extends Phaser.Scene {
   private shadowMaskGraphics!: Phaser.GameObjects.Graphics;
   private bossGlowSprite!: Phaser.GameObjects.Image;
   private torchGlowPool: Phaser.GameObjects.Image[] = [];
+  private farTreeGlowPool: Phaser.GameObjects.Image[] = [];
   private fogLayer1!: Phaser.GameObjects.TileSprite;
   private fogLayer2!: Phaser.GameObjects.TileSprite;
+  private stage2AshLayer: Stage2AshLayer | null = null;
+  private cinderWardenTelegraphs: CinderWardenTelegraphRenderer | null = null;
   private auraSurgeSprite!: Phaser.GameObjects.Image;
   private alertMarkPool: Phaser.GameObjects.Image[] = [];
   private edgeArrowPool: Phaser.GameObjects.Image[] = [];
@@ -150,6 +165,7 @@ export class DarknessScene extends Phaser.Scene {
     this.ensureBossVoidGlowTexture();
     this.ensureProceduralFogTexture();
     this.ensureAlertAndIndicatorTextures();
+    ensureBurningTreeTextures(this);
     upgradeTextureFiltering(this);
 
     const w = LOGICAL_WIDTH;
@@ -190,7 +206,7 @@ export class DarknessScene extends Phaser.Scene {
     // Off-display Graphics buffer used to cast real-time shadow cones into darkRT
     this.shadowMaskGraphics = this.make.graphics({ x: 0, y: 0 }, false);
 
-    // Pooled warm amber glows for world torches in darkness
+    // Pooled warm amber glows for world torches (Stage 1) and nearest 4 burning trees (Stage 2)
     this.torchGlowPool = [];
     for (let i = 0; i < 8; i++) {
       const tg = this.add
@@ -202,6 +218,33 @@ export class DarknessScene extends Phaser.Scene {
         .setVisible(false);
       this.stripInteractivity(tg);
       this.torchGlowPool.push(tg);
+    }
+
+    // Cheap baked additive glow sprite pool for farther Stage 2 burning trees (uses zero real light slots)
+    this.farTreeGlowPool = [];
+    const farGlowTexKey = this.textures.exists(TREES.textures.glowKey)
+      ? TREES.textures.glowKey
+      : 'light_amber_glow';
+    for (let i = 0; i < 32; i++) {
+      const fg = this.add
+        .image(0, 0, farGlowTexKey)
+        .setOrigin(0.5, 0.5)
+        .setBlendMode(Phaser.BlendModes.ADD)
+        .setDepth(6)
+        .setAlpha(TREES.lighting.farGlowAlpha)
+        .setVisible(false);
+      this.stripInteractivity(fg);
+      this.farTreeGlowPool.push(fg);
+    }
+
+    // Screen-space Stage 2 Ash & Embers particle layer + cover-fit ash_overlay_sheet (Stage 2 ONLY)
+    if (gameManager.getSelectedStageId() === 'stage_2') {
+      ensureCinderWardenTextures(this);
+      this.stage2AshLayer = new Stage2AshLayer(this);
+      this.cinderWardenTelegraphs = new CinderWardenTelegraphRenderer(this);
+    } else {
+      this.stage2AshLayer = null;
+      this.cinderWardenTelegraphs = null;
     }
 
     // Dark-magic purple/violet void aura for the boss so it stands out in darkness
@@ -299,9 +342,16 @@ export class DarknessScene extends Phaser.Scene {
       }
       this.scale.off('resize', this.handleResize, this);
       this.auraSurgeSprite?.destroy();
+      this.stage2AshLayer?.destroy();
+      this.stage2AshLayer = null;
+      this.cinderWardenTelegraphs?.destroy();
+      this.cinderWardenTelegraphs = null;
       this.shadowMaskGraphics?.destroy();
       for (let i = 0; i < this.torchGlowPool.length; i++) {
         this.torchGlowPool[i].destroy();
+      }
+      for (let i = 0; i < this.farTreeGlowPool.length; i++) {
+        this.farTreeGlowPool[i].destroy();
       }
       for (let i = 0; i < this.alertMarkPool.length; i++) {
         this.alertMarkPool[i].destroy();
@@ -310,6 +360,7 @@ export class DarknessScene extends Phaser.Scene {
         this.edgeArrowPool[i].destroy();
       }
       this.torchGlowPool = [];
+      this.farTreeGlowPool = [];
       this.alertMarkPool = [];
       this.edgeArrowPool = [];
     });
@@ -599,6 +650,16 @@ export class DarknessScene extends Phaser.Scene {
         }
       }
 
+      // 1b. Update Stage 2 screen-space ash/ember flakes & cover-fit ash overlay (Stage 2 ONLY)
+      if (this.stage2AshLayer) {
+        this.stage2AshLayer.update(
+          delta,
+          this.effectTimeMs * 0.001,
+          snap.isGamePaused,
+          resolveStage2VfxQuality()
+        );
+      }
+
       // 2. Player light radius: smooth eased expansion/contraction + safe-zone aura surge
       const targetStand = snap.isStandingReady ? 1 + LIGHT.player.standingBonusRatio : 1.0;
       const targetExternalMult = snap.lightRadiusMultiplier ?? 1.0;
@@ -760,10 +821,15 @@ export class DarknessScene extends Phaser.Scene {
         flickerFactor *
         radiusBrightnessMult;
 
-      // 3. Gather up to 12 prioritized light sources
+      // 3. Gather prioritized light sources (Stage 2 caps total real lights strictly under 8)
+      const isStage2BurningTrees = Boolean(snap.burningTreeLights);
+      const maxLights = isStage2BurningTrees
+        ? Math.min(LIGHT.maxLightSources, TREES.lighting.maxTotalRealLights)
+        : LIGHT.maxLightSources;
+
       let lightCount = 0;
       const pushLight = (wx: number, wy: number, radius: number, alpha: number = 1) => {
-        if (lightCount >= LIGHT.maxLightSources) return;
+        if (lightCount >= maxLights) return;
         const slot = this.lightSources[lightCount++];
         slot.x = wx;
         slot.y = wy;
@@ -794,9 +860,61 @@ export class DarknessScene extends Phaser.Scene {
         );
       }
 
-      // Priority 2.5: World Torches (warm flickering pools cutting through darkness & shadows)
+      // Priority 2.5: World Torches (Stage 1) OR Top-4 Nearest Burning Trees + Far Baked Glows (Stage 2)
       let torchGlowIdx = 0;
-      if (snap.torches && snap.torches.count > 0) {
+      let farTreeGlowIdx = 0;
+      if (isStage2BurningTrees && snap.burningTreeLights) {
+        const treeLights = snap.burningTreeLights.items;
+        const tlCount = snap.burningTreeLights.count;
+        const nearGlowKey = this.textures.exists(TREES.textures.glowKey)
+          ? TREES.textures.glowKey
+          : 'light_amber_glow';
+        for (let i = 0; i < tlCount; i++) {
+          const t = treeLights[i];
+          const tsx = t.x - scrollX;
+          const tsy = t.y - scrollY;
+          if (tsx < -t.radius || tsx > w + t.radius || tsy < -t.radius || tsy > h + t.radius) {
+            continue;
+          }
+          pushLight(t.x, t.y, t.radius, 0.96 * t.intensity);
+          if (torchGlowIdx < this.torchGlowPool.length) {
+            const tg = this.torchGlowPool[torchGlowIdx++];
+            if (tg.texture.key !== nearGlowKey) {
+              tg.setTexture(nearGlowKey);
+            }
+            const diam = t.radius * 2.15;
+            tg.setPosition(tsx, tsy)
+              .setDisplaySize(diam, diam)
+              .setAlpha(TREES.lighting.nearGlowAlpha * t.intensity)
+              .setVisible(true);
+          }
+        }
+
+        if (snap.burningTreeFarGlows && snap.burningTreeFarGlows.count > 0) {
+          const farItems = snap.burningTreeFarGlows.items;
+          const farCount = snap.burningTreeFarGlows.count;
+          for (let i = 0; i < farCount && farTreeGlowIdx < this.farTreeGlowPool.length; i++) {
+            const fgData = farItems[i];
+            const fx = fgData.x - scrollX;
+            const fy = fgData.y - scrollY;
+            if (
+              fx < -fgData.radius ||
+              fx > w + fgData.radius ||
+              fy < -fgData.radius ||
+              fy > h + fgData.radius
+            ) {
+              continue;
+            }
+            const fgSpr = this.farTreeGlowPool[farTreeGlowIdx++];
+            const diam = fgData.radius * 2.0;
+            fgSpr
+              .setPosition(fx, fy)
+              .setDisplaySize(diam, diam)
+              .setAlpha(fgData.alpha)
+              .setVisible(true);
+          }
+        }
+      } else if (snap.torches && snap.torches.count > 0) {
         const torches = snap.torches.items;
         const tCount = snap.torches.count;
         for (let i = 0; i < tCount; i++) {
@@ -809,6 +927,9 @@ export class DarknessScene extends Phaser.Scene {
           pushLight(t.x, t.y, t.radius, 0.94 * t.intensity);
           if (torchGlowIdx < this.torchGlowPool.length) {
             const tg = this.torchGlowPool[torchGlowIdx++];
+            if (tg.texture.key !== 'light_amber_glow') {
+              tg.setTexture('light_amber_glow');
+            }
             const diam = t.radius * 2.05;
             tg.setPosition(tsx, tsy)
               .setDisplaySize(diam, diam)
@@ -820,29 +941,50 @@ export class DarknessScene extends Phaser.Scene {
       for (let i = torchGlowIdx; i < this.torchGlowPool.length; i++) {
         if (this.torchGlowPool[i].visible) this.torchGlowPool[i].setVisible(false);
       }
+      for (let i = farTreeGlowIdx; i < this.farTreeGlowPool.length; i++) {
+        if (this.farTreeGlowPool[i].visible) this.farTreeGlowPool[i].setVisible(false);
+      }
 
-      // Priority 3: Active Boss (240px amber, visible from afar)
+      // Priority 3: Active Boss (240px aura, visible from afar; Stage 2 uses steady warm orange aura at body center)
       if (snap.activeBoss && snap.activeBoss.active) {
-        pushLight(snap.activeBoss.x, snap.activeBoss.y, LIGHT.sources.bossRadius, 1);
+        const isStage2Boss = Boolean(snap.isStage2Boss);
+        const bossRadius = isStage2Boss ? BOSS2.visuals.lightRadius : LIGHT.sources.bossRadius;
+        const bossWorldY = isStage2Boss
+          ? getBoss2BodyCenterY(snap.activeBoss.y)
+          : snap.activeBoss.y;
+        pushLight(snap.activeBoss.x, bossWorldY, bossRadius, 1);
         const bsx = snap.activeBoss.x - scrollX;
-        const bsy = snap.activeBoss.y - scrollY;
+        const bsy = bossWorldY - scrollY;
+        const desiredTex = isStage2Boss ? 'light_amber_glow' : 'light_boss_void_glow';
+        if (this.bossGlowSprite.texture.key !== desiredTex) {
+          this.bossGlowSprite.setTexture(desiredTex);
+        }
         this.bossGlowSprite.x = bsx;
         this.bossGlowSprite.y = bsy;
-        const bossDiameter = LIGHT.sources.bossRadius * 2.1;
+        const p2Boost = isStage2Boss && snap.isStage2BossPhase2 ? 1.18 : 1.0;
+        const bossDiameter = bossRadius * 2.1 * p2Boost;
         this.bossGlowSprite.setDisplaySize(bossDiameter, bossDiameter);
-        this.bossGlowSprite.setAlpha(
-          LIGHT.sources.bossAmberAlpha * (0.9 + 0.1 * Math.sin(this.effectTimeMs * 0.005))
-        );
+        if (isStage2Boss) {
+          // Steady warm orange glow overlay (no flashing in Phase 2)
+          const steadyAlpha = snap.isStage2BossPhase2
+            ? BOSS2.visuals.glowAlpha * 1.35
+            : BOSS2.visuals.glowAlpha;
+          this.bossGlowSprite.setAlpha(steadyAlpha);
+        } else {
+          this.bossGlowSprite.setAlpha(
+            LIGHT.sources.bossAmberAlpha * (0.9 + 0.1 * Math.sin(this.effectTimeMs * 0.005))
+          );
+        }
         if (!this.bossGlowSprite.visible) this.bossGlowSprite.setVisible(true);
       } else if (this.bossGlowSprite.visible) {
         this.bossGlowSprite.setVisible(false);
       }
 
       // Priority 3.25: Active Elite variants radiate an unmistakable aura through darkness
-      if (snap.enemiesGroup && lightCount < LIGHT.maxLightSources) {
+      if (snap.enemiesGroup && lightCount < maxLights) {
         const enemies = snap.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
         let eliteLightsAdded = 0;
-        for (let i = 0; i < enemies.length && lightCount < LIGHT.maxLightSources && eliteLightsAdded < 3; i++) {
+        for (let i = 0; i < enemies.length && lightCount < maxLights && eliteLightsAdded < 3; i++) {
           const enemy = enemies[i];
           if (!enemy.active) continue;
           const edata = ((enemy as unknown as { __enemyData?: { isElite?: boolean } }).__enemyData ||
@@ -857,12 +999,12 @@ export class DarknessScene extends Phaser.Scene {
       }
 
       // Single scan over projectilesGroup: emit Enemy Projectiles immediately (Priority 3.5),
-      // and stash up to maxLightSources player projectiles for Priority 4 without re-iterating.
+      // and stash up to maxLights player projectiles for Priority 4 without re-iterating.
       this.playerProjScratch.length = 0;
-      if (snap.projectilesGroup && lightCount < LIGHT.maxLightSources) {
+      if (snap.projectilesGroup && lightCount < maxLights) {
         const projs = snap.projectilesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
-        const remainingSlots = LIGHT.maxLightSources - lightCount;
-        for (let i = 0; i < projs.length && lightCount < LIGHT.maxLightSources; i++) {
+        const remainingSlots = maxLights - lightCount;
+        for (let i = 0; i < projs.length && lightCount < maxLights; i++) {
           const proj = projs[i];
           if (!proj.active) continue;
           const sx = proj.x - scrollX;
@@ -879,15 +1021,15 @@ export class DarknessScene extends Phaser.Scene {
       }
 
       // Priority 4: Orbiting Blades & Active FX / Player Projectiles (80px for FX)
-      for (let i = 0; i < snap.orbitingBlades.length && lightCount < LIGHT.maxLightSources; i++) {
+      for (let i = 0; i < snap.orbitingBlades.length && lightCount < maxLights; i++) {
         const b = snap.orbitingBlades[i];
         if (b && b.active && b.visible) {
           pushLight(b.x, b.y, LIGHT.sources.fxRadius, 0.85);
         }
       }
 
-      if (snap.effectPool && lightCount < LIGHT.maxLightSources) {
-        for (let i = 0; i < snap.effectPool.length && lightCount < LIGHT.maxLightSources; i++) {
+      if (snap.effectPool && lightCount < maxLights) {
+        for (let i = 0; i < snap.effectPool.length && lightCount < maxLights; i++) {
           const fx = snap.effectPool[i];
           if (fx.inUse && fx.sprite.active && fx.sprite.visible) {
             const sx = fx.sprite.x - scrollX;
@@ -899,15 +1041,15 @@ export class DarknessScene extends Phaser.Scene {
         }
       }
 
-      for (let i = 0; i < this.playerProjScratch.length && lightCount < LIGHT.maxLightSources; i++) {
+      for (let i = 0; i < this.playerProjScratch.length && lightCount < maxLights; i++) {
         const proj = this.playerProjScratch[i];
         pushLight(proj.x, proj.y, LIGHT.sources.fxRadius, 0.85);
       }
 
     // Priority 5: XP Gems, Light Shards & Chests within screen bounds
-    if (snap.pickupsGroup && lightCount < LIGHT.maxLightSources) {
+    if (snap.pickupsGroup && lightCount < maxLights) {
       const pickups = snap.pickupsGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
-      for (let i = 0; i < pickups.length && lightCount < LIGHT.maxLightSources; i++) {
+      for (let i = 0; i < pickups.length && lightCount < maxLights; i++) {
         const p = pickups[i];
         if (!p.active) continue;
         const sx = p.x - scrollX;
@@ -1001,7 +1143,8 @@ export class DarknessScene extends Phaser.Scene {
               darkAlpha * 0.82,
               snap.pillars?.items ?? null,
               snap.pillars?.count ?? 0,
-              snap.activeBoss && snap.activeBoss.active ? snap.activeBoss : null
+              snap.activeBoss && snap.activeBoss.active ? snap.activeBoss : null,
+              Boolean(snap.isStage2Boss)
             );
           }
         }
@@ -1030,6 +1173,11 @@ export class DarknessScene extends Phaser.Scene {
       this.auraSurgeSprite.setVisible(false);
     }
 
+    // 4.6 Render Stage 2 Cinder Warden telegraphs strictly above darkRT (always readable in darkness)
+    if (this.cinderWardenTelegraphs) {
+      this.cinderWardenTelegraphs.update(snap.cinderWardenTelegraph ?? null, scrollX, scrollY);
+    }
+
     // 5. Update Enemies Alpha (0.12 outside light -> 1.0 in 0.2s), Glowing Eye Dots & Edge Arrows
     let usedAlertMarks = 0;
     let usedEdgeArrows = 0;
@@ -1055,8 +1203,10 @@ export class DarknessScene extends Phaser.Scene {
         if (!edata) continue;
 
         const isBossEnemy = edata.type === 'boss';
+        const isStage2BossEnemy = Boolean((edata as { isStage2Boss?: boolean }).isStage2Boss);
+        const enemyWorldY = isStage2BossEnemy ? getBoss2BodyCenterY(enemy.y) : enemy.y;
         const sx = enemy.x - scrollX;
-        const sy = enemy.y - scrollY;
+        const sy = enemyWorldY - scrollY;
         const nearView = sx >= -110 && sx <= w + 110 && sy >= -110 && sy <= h + 110;
 
         // Early frustum cull: skip light-source & shadow-cone occlusion loops for far off-screen enemies
@@ -1065,7 +1215,7 @@ export class DarknessScene extends Phaser.Scene {
           for (let j = 0; j < lightCount; j++) {
             const ls = this.lightSources[j];
             const dx = enemy.x - ls.x;
-            const dy = enemy.y - ls.y;
+            const dy = enemyWorldY - ls.y;
             const effR = ls.radius * 0.92;
             const distSq = dx * dx + dy * dy;
             if (distSq < effR * effR) {
@@ -1097,10 +1247,13 @@ export class DarknessScene extends Phaser.Scene {
             : Math.max(maxLit, prevVis - fadeStep);
         edata.lightVis = nextVis;
 
-        // Sprite alpha 0.12 outside light, fading smoothly to 1.0 over 0.2s
-        const targetAlpha = Phaser.Math.Linear(LIGHT.enemies.darkAlpha, 1.0, nextVis);
-        if (Math.abs(enemy.alpha - targetAlpha) > 0.004) {
-          enemy.setAlpha(targetAlpha);
+        const isDyingBoss = Boolean((edata as { isDying?: boolean }).isDying);
+        if (!isDyingBoss) {
+          // Sprite alpha 0.12 outside light, fading smoothly to 1.0 over 0.2s
+          const targetAlpha = Phaser.Math.Linear(LIGHT.enemies.darkAlpha, 1.0, nextVis);
+          if (Math.abs(enemy.alpha - targetAlpha) > 0.004) {
+            enemy.setAlpha(targetAlpha);
+          }
         }
 
         const onScreen = nearView && sx >= 16 && sx <= w - 16 && sy >= 16 && sy <= h - 16;
@@ -1137,7 +1290,7 @@ export class DarknessScene extends Phaser.Scene {
                 offsetY = 30;
                 markScale = 1.08;
               } else if (edata.type === 'boss') {
-                offsetY = 56;
+                offsetY = isStage2BossEnemy ? BOSS2.displayHeight * 0.5 : 56;
                 markScale = 1.55;
               } else if (edata.type === 'wisp') {
                 offsetY = 18;
@@ -1256,7 +1409,8 @@ export class DarknessScene extends Phaser.Scene {
     shadowAlpha: number,
     pillars: readonly WorldPillarData[] | null,
     pillarCount: number,
-    boss: Phaser.Physics.Arcade.Sprite | null
+    boss: Phaser.Physics.Arcade.Sprite | null,
+    isStage2Boss: boolean = false
   ) {
     let hasShadows = false;
     this.shadowMaskGraphics.clear();
@@ -1272,7 +1426,9 @@ export class DarknessScene extends Phaser.Scene {
     }
 
     if (boss && boss.active) {
-      if (this.appendOccluderShadowQuad(lightWorldX, lightWorldY, lightRadius, boss.x, boss.y + 12, 46, scrollX, scrollY, rtScale)) {
+      const occY = isStage2Boss ? boss.y - 18 : boss.y + 12;
+      const occR = isStage2Boss ? 52 : 46;
+      if (this.appendOccluderShadowQuad(lightWorldX, lightWorldY, lightRadius, boss.x, occY, occR, scrollX, scrollY, rtScale)) {
         hasShadows = true;
       }
     }

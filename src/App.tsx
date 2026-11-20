@@ -15,17 +15,21 @@ import { MissionCompleteToast } from './components/MissionCompleteToast';
 import { AchievementToast } from './components/AchievementToast';
 import { PauseModal } from './components/PauseModal';
 import { DifficultyModal } from './components/DifficultyModal';
+import { StageSelectModal } from './components/StageSelectModal';
 import { BossIntroModal } from './components/BossIntroModal';
 import { LoadingScreen } from './components/LoadingScreen';
 import { DarkFantasyTouchFx } from './components/DarkFantasyTouchFx';
 import { gameManager } from './game/GameManager';
 import { createPhaserGame } from './game/phaserConfig';
 import { soundManager } from './game/audio';
+import { dynamicMusicManager } from './game/DynamicMusicManager';
 import { saveDataStore } from './game/saveData';
+import { subscribeDeveloperMode } from './game/developerMode';
 import { getActiveRelicSynergies } from './game/relics';
 import { preloadAllGameAssets } from './game/assetPreloader';
 import {
   ActiveDynamicChallenge,
+  Boss2DebugStats,
   BossInfo,
   BossIntroInfo,
   DynamicChallengeOffer,
@@ -35,9 +39,13 @@ import {
   RelicId,
   RelicSetId,
   RunStats,
+  StageDifficultyClearsMap,
+  StageId,
+  TreeDebugStats,
   UpgradeOption,
   WeaponState,
 } from './game/types';
+import { STAGES } from './game/stages';
 import { MainScene } from './game/scenes/MainScene';
 import { initCapacitorMobile } from './mobile/capacitorBridge';
 import { haptics } from './mobile/haptics';
@@ -49,7 +57,21 @@ export default function App() {
   const [lobbyTab, setLobbyTab] = useState<LobbyTabId>('home');
   const [lobbyShopSubTab, setLobbyShopSubTab] = useState<ShopSubTab>('market');
   const [showSettings, setShowSettings] = useState(false);
+  const [showStageSelectModal, setShowStageSelectModal] = useState(false);
   const [showDifficultyModal, setShowDifficultyModal] = useState(false);
+  const [selectedStageId, setSelectedStageId] = useState<StageId>(() =>
+    gameManager.getSelectedStageId()
+  );
+  const [stageBestTimes, setStageBestTimes] = useState<Record<StageId, number>>(() =>
+    gameManager.getAllStageBestTimes()
+  );
+  const [unlockedStageIds, setUnlockedStageIds] = useState<Record<StageId, boolean>>(() => ({
+    stage_1: true,
+    stage_2: gameManager.isStageUnlocked('stage_2'),
+  }));
+  const [difficultyClears, setDifficultyClears] = useState<StageDifficultyClearsMap>(() =>
+    gameManager.getAllDifficultyClears()
+  );
   const [selectedDifficulty, setSelectedDifficulty] = useState<GameDifficultyId>(() =>
     gameManager.getDifficulty()
   );
@@ -81,6 +103,10 @@ export default function App() {
   const [weapons, setWeapons] = useState<WeaponState[]>([]);
   const [boss, setBoss] = useState<BossInfo | null>(null);
   const [combo, setCombo] = useState<number>(1);
+  const [comboKills, setComboKills] = useState<number>(0);
+  const [comboTimeRemainingMs, setComboTimeRemainingMs] = useState<number>(0);
+  const [comboDecayMs, setComboDecayMs] = useState<number>(3000);
+  const [comboNextThreshold, setComboNextThreshold] = useState<number | null>(5);
   const [isUnderPressure, setIsUnderPressure] = useState<boolean>(false);
   const [lightShardRemainingSec, setLightShardRemainingSec] = useState<number>(0);
   const [redShardRemainingSec, setRedShardRemainingSec] = useState<number>(0);
@@ -93,6 +119,10 @@ export default function App() {
   const [dashCooldownProgress, setDashCooldownProgress] = useState<number>(1);
   const [equippedRelicIds, setEquippedRelicIds] = useState<RelicId[]>([]);
   const [activeRelicSynergies, setActiveRelicSynergies] = useState<RelicSetId[]>([]);
+  const [isBurning, setIsBurning] = useState<boolean>(false);
+  const [activeStageId, setActiveStageId] = useState<StageId>(() => gameManager.getSelectedStageId());
+  const [treeDebug, setTreeDebug] = useState<TreeDebugStats | null>(null);
+  const [bossDebug, setBossDebug] = useState<Boss2DebugStats | null>(null);
   const [eventWarning, setEventWarning] = useState<EventWarningInfo | null>(null);
 
   // Modals
@@ -127,6 +157,8 @@ export default function App() {
   lobbyTabRef.current = lobbyTab;
   const showSettingsRef = useRef(showSettings);
   showSettingsRef.current = showSettings;
+  const showStageSelectModalRef = useRef(showStageSelectModal);
+  showStageSelectModalRef.current = showStageSelectModal;
   const showDifficultyModalRef = useRef(showDifficultyModal);
   showDifficultyModalRef.current = showDifficultyModal;
   const showHowToPlayRef = useRef(showHowToPlay);
@@ -145,6 +177,10 @@ export default function App() {
       setCoins(data.coins);
       setWeapons(data.weapons);
       setCombo(data.combo);
+      setComboKills(data.comboKills ?? 0);
+      setComboTimeRemainingMs(data.comboTimeRemainingMs ?? 0);
+      setComboDecayMs(data.comboDecayMs ?? 3000);
+      setComboNextThreshold(data.comboNextThreshold ?? null);
       setIsUnderPressure(data.isUnderPressure);
       setLightShardRemainingSec(data.lightShardRemainingSec ?? 0);
       setRedShardRemainingSec(data.redShardRemainingSec ?? 0);
@@ -157,6 +193,12 @@ export default function App() {
       setDashCooldownProgress(data.dashCooldownProgress ?? 1);
       setEquippedRelicIds(data.equippedRelicIds ?? []);
       setActiveRelicSynergies(data.activeRelicSynergies ?? []);
+      setIsBurning(Boolean(data.isBurning));
+      if (data.stageId) {
+        setActiveStageId(data.stageId);
+      }
+      setTreeDebug(data.treeDebug ?? null);
+      setBossDebug(data.bossDebug ?? null);
     });
 
     const unsubLevelUp = gameManager.onLevelUp((options, challengeOffer) => {
@@ -168,6 +210,12 @@ export default function App() {
       setEventWarning(null);
       setBossIntro(null);
       setRunSummary(stats);
+      setDifficultyClears(gameManager.getAllDifficultyClears());
+      setStageBestTimes(gameManager.getAllStageBestTimes());
+      setUnlockedStageIds({
+        stage_1: true,
+        stage_2: gameManager.isStageUnlocked('stage_2'),
+      });
       gameManager.setGameState('GAME_OVER');
       setGameState('GAME_OVER');
     });
@@ -224,6 +272,14 @@ export default function App() {
       });
     });
 
+    const unsubDevMode = subscribeDeveloperMode(() => {
+      setUnlockedStageIds({
+        stage_1: true,
+        stage_2: gameManager.isStageUnlocked('stage_2'),
+      });
+      setSelectedStageId(gameManager.getSelectedStageId());
+    });
+
     return () => {
       unsubStats();
       unsubLevelUp();
@@ -233,6 +289,7 @@ export default function App() {
       unsubEventWarning();
       unsubTogglePause();
       unsubLoadProgress();
+      unsubDevMode();
       if (loadingFailsafeTimerRef.current !== null) {
         window.clearTimeout(loadingFailsafeTimerRef.current);
         loadingFailsafeTimerRef.current = null;
@@ -270,19 +327,32 @@ export default function App() {
     };
   }, []);
 
+  // Attach dynamic music manager to boss encounter & game lifecycle events
+  useEffect(() => {
+    return dynamicMusicManager.attach();
+  }, []);
+
   // Play menu music on title screen once boot assets are ready
   useEffect(() => {
     if (bootReady && gameState === 'TITLE') {
-      soundManager.playMenu();
+      dynamicMusicManager.enterMenu();
     }
   }, [bootReady, gameState]);
 
-  // Handle keyboard (P / Esc) for Pause (works even when level-up card modal is open)
+  // Handle keyboard (P / Esc for Pause; F3 for Stage 2 Burning Tree Debug Overlay)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' || e.key === 'p' || e.key === 'P') {
         if (gameStateRef.current === 'PLAYING' || gameStateRef.current === 'PAUSED') {
           handleTogglePauseRef.current();
+        }
+      } else if (e.key === 'F3') {
+        if (gameStateRef.current === 'PLAYING' || gameStateRef.current === 'PAUSED') {
+          e.preventDefault();
+          const scene = gameManager.activeScene as MainScene | null;
+          if (scene && scene.sys?.isActive()) {
+            scene.toggleTreeDebug();
+          }
         }
       }
     };
@@ -382,6 +452,10 @@ export default function App() {
           setShowDifficultyModal(false);
           return true;
         }
+        if (showStageSelectModalRef.current) {
+          setShowStageSelectModal(false);
+          return true;
+        }
         if (gameStateRef.current === 'TITLE' && lobbyTabRef.current !== 'home') {
           setLobbyTab('home');
           return true;
@@ -415,6 +489,7 @@ export default function App() {
   const handleStartGame = () => {
     setShowSettings(false);
     setShowHowToPlay(false);
+    setShowStageSelectModal(false);
     setShowDifficultyModal(false);
 
     if (loadingFailsafeTimerRef.current !== null) {
@@ -447,6 +522,10 @@ export default function App() {
     setBoss(null);
     setEventWarning(null);
     setCombo(1);
+    setComboKills(0);
+    setComboTimeRemainingMs(0);
+    setComboDecayMs(3000);
+    setComboNextThreshold(5);
     setIsUnderPressure(false);
     setLightShardRemainingSec(0);
     setRedShardRemainingSec(0);
@@ -457,20 +536,43 @@ export default function App() {
     setDashCharges(1);
     setMaxDashCharges(1);
     setDashCooldownProgress(1);
+    setIsBurning(false);
+    setActiveStageId(gameManager.getSelectedStageId());
+    setTreeDebug(null);
     const savedRelicIds = saveDataStore.read().equippedRelicIds;
     setEquippedRelicIds(savedRelicIds);
     setActiveRelicSynergies(getActiveRelicSynergies(savedRelicIds).map((s) => s.id));
 
-    // Unlock audio on user gesture & play gameplay track
+    // Unlock audio on user gesture & start Exploration track via DynamicMusicManager
     soundManager.onUserGesture();
     soundManager.resumeAudio();
-    soundManager.playGameplay();
+    dynamicMusicManager.startRunExploration(true);
 
     // Initialize or restart Phaser Game
     createPhaserGame('phaser-container');
   };
 
-  const handleOpenDifficultyModal = () => {
+  const handleOpenStageSelectModal = () => {
+    setSelectedStageId(gameManager.getSelectedStageId());
+    setStageBestTimes(gameManager.getAllStageBestTimes());
+    setUnlockedStageIds({
+      stage_1: true,
+      stage_2: gameManager.isStageUnlocked('stage_2'),
+    });
+    setDifficultyClears(gameManager.getAllDifficultyClears());
+    setShowStageSelectModal(true);
+  };
+
+  const handleSelectStage = (stageId: StageId) => {
+    if (gameManager.setSelectedStageId(stageId)) {
+      setSelectedStageId(stageId);
+    }
+  };
+
+  const handleConfirmStageSelect = () => {
+    gameManager.setSelectedStageId(selectedStageId);
+    setDifficultyClears(gameManager.getAllDifficultyClears());
+    setShowStageSelectModal(false);
     setSelectedDifficulty(gameManager.getDifficulty());
     setShowDifficultyModal(true);
   };
@@ -603,7 +705,7 @@ export default function App() {
       gameManager.activeUiScene = null;
     }
     soundManager.resumeAudio();
-    soundManager.playMenu();
+    dynamicMusicManager.enterMenu();
   };
 
   const handleQuitToTitle = () => {
@@ -647,6 +749,13 @@ export default function App() {
     }
   }, []);
 
+  const handleToggleTreeDebug = useCallback(() => {
+    const scene = gameManager.activeScene as MainScene | null;
+    if (scene && scene.sys?.isActive()) {
+      scene.toggleTreeDebug();
+    }
+  }, []);
+
   return (
     <main className="relative w-screen h-[100dvh] overflow-hidden bg-[#08090d]">
       {/* Phaser Canvas Container */}
@@ -656,14 +765,20 @@ export default function App() {
       {bootReady && gameState === 'TITLE' && (
         <TitleScreen
           isMuted={isMuted}
-          isModalOpen={showSettings || (bootOverlayDone && showHowToPlay) || showDifficultyModal}
+          selectedStageId={selectedStageId}
+          isModalOpen={
+            showSettings ||
+            (bootOverlayDone && showHowToPlay) ||
+            showStageSelectModal ||
+            showDifficultyModal
+          }
           initialTab={lobbyTab}
           initialShopSubTab={lobbyShopSubTab}
           onTabChange={(tab, sub) => {
             setLobbyTab(tab);
             if (sub) setLobbyShopSubTab(sub);
           }}
-          onStartGame={handleOpenDifficultyModal}
+          onStartGame={handleOpenStageSelectModal}
           onToggleMute={handleToggleMute}
           onOpenSettings={() => setShowSettings(true)}
         />
@@ -683,6 +798,10 @@ export default function App() {
           weapons={weapons}
           boss={boss}
           combo={combo}
+          comboKills={comboKills}
+          comboTimeRemainingMs={comboTimeRemainingMs}
+          comboDecayMs={comboDecayMs}
+          comboNextThreshold={comboNextThreshold}
           isUnderPressure={isUnderPressure}
           lightShardRemainingSec={lightShardRemainingSec}
           redShardRemainingSec={redShardRemainingSec}
@@ -695,14 +814,19 @@ export default function App() {
           dashCooldownProgress={dashCooldownProgress}
           equippedRelicIds={equippedRelicIds}
           activeRelicSynergies={activeRelicSynergies}
+          isBurning={isBurning}
+          stageId={activeStageId}
+          treeDebug={treeDebug}
+          bossDebug={bossDebug}
           eventWarning={eventWarning}
           isMuted={isMuted}
-          isPaused={gameState === 'PAUSED'}
+          isPaused={gameState === 'PAUSED' || Boolean(levelUpOptions) || Boolean(bossIntro)}
           onToggleMute={handleToggleMute}
           onOpenSettings={handleOpenSettings}
           onTogglePause={handleStableTogglePause}
           onSpawnBossNow={handleSpawnBossNow}
           onTriggerDash={handleTriggerDash}
+          onToggleTreeDebug={handleToggleTreeDebug}
         />
       )}
 
@@ -739,10 +863,25 @@ export default function App() {
         onToggleScreenShake={handleToggleScreenShake}
       />
 
+      {/* Modal: Stage Selection from Play */}
+      <StageSelectModal
+        isOpen={gameState === 'TITLE' && showStageSelectModal}
+        selectedStageId={selectedStageId}
+        unlockedStageIds={unlockedStageIds}
+        bestTimes={stageBestTimes}
+        difficultyClears={difficultyClears}
+        onSelectStage={handleSelectStage}
+        onConfirmStage={handleConfirmStageSelect}
+        onClose={() => setShowStageSelectModal(false)}
+      />
+
       {/* Modal: Difficulty Selection before entering arena */}
       <DifficultyModal
         isOpen={gameState === 'TITLE' && showDifficultyModal}
         selectedDifficulty={selectedDifficulty}
+        stageNumber={(STAGES[selectedStageId] ?? STAGES.stage_1).stageNumber}
+        stageName={(STAGES[selectedStageId] ?? STAGES.stage_1).name}
+        difficultyClears={difficultyClears[selectedStageId]}
         onSelectDifficulty={handleSelectDifficulty}
         onConfirmPlay={handleConfirmDifficultyPlay}
         onClose={() => setShowDifficultyModal(false)}

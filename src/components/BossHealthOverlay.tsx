@@ -91,11 +91,11 @@ const BossHealthOverlayComponent: React.FC<BossHealthOverlayProps> = ({
             </div>
           </div>
 
-          {/* Boss Bar: clip-path crimson fill drawn BEHIND NineSlice barFrame */}
+          {/* Boss Bar: clip-path dark purple fill drawn BEHIND NineSlice barFrame */}
           <UiBar
             percent={hpPercent}
             trailPercent={hpPercent}
-            fill="crimson"
+            fill="darkPurple"
             heightClassName="h-[18px]"
             frameBorderWidth="clamp(3px, 0.7vw, 5px) clamp(8px, 1.5vw, 14px)"
           >

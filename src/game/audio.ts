@@ -23,6 +23,7 @@ import { saveDataStore } from './saveData';
 export type MusicTrackKey =
   | 'menu'
   | 'gameplay'
+  | 'stage2'
   | 'intense'
   | 'boss'
   | 'stinger_gameover'
@@ -38,11 +39,25 @@ export type SfxKey =
   | 'blade'
   | 'player_attack'
   | 'brute_stomp'
-  | 'boss_attack';
+  | 'boss_attack'
+  | 'coin_drop'
+  | 'fire_loop'
+  | 'tree_hit';
+
+export type CoinShowerIntensity = 'small' | 'medium' | 'large' | 'jackpot';
+
+export interface PlayTrackOptions {
+  force?: boolean;
+  crossfadeSec?: number;
+  resumeSavedOffset?: boolean;
+  rememberOutgoingOffset?: boolean;
+  equalPower?: boolean;
+}
 
 const MUSIC_ASSETS: Record<MusicTrackKey, { url: string; loop: boolean }> = {
   menu: { url: './assets/aistudio/music_menu_4ebf239b.ogg', loop: true },
   gameplay: { url: './assets/aistudio/music_gameplay_32515426.ogg', loop: true },
+  stage2: { url: './assets/aistudio/music_stage2.ogg_00a2bf89.mp3', loop: true },
   intense: { url: './assets/aistudio/music_intense_7e7a5d7c.ogg', loop: true },
   boss: { url: './assets/aistudio/music_boss_45df2c32.ogg', loop: true },
   stinger_gameover: { url: './assets/aistudio/stinger_gameover_ea455e6e.ogg', loop: false },
@@ -90,6 +105,9 @@ const SFX_ASSETS: Record<SfxKey, string[]> = {
     './assets/aistudio/sfx_boss_attack_5241beeb.ogg',
     './assets/aistudio/sfx_boss_attack_cf06081d.mp3',
   ],
+  coin_drop: ['./assets/aistudio/coin_drop_af8a9ec4.mp3'],
+  fire_loop: ['./assets/aistudio/sfx_fire_loop.ogg__sfx_tree_hit.ogg_b075e8a3.mp3'],
+  tree_hit: ['./assets/aistudio/sfx_tree_hit.ogg', './assets/aistudio/sfx_tree_hit.mp3'],
 };
 
 class AudioManager {
@@ -119,24 +137,47 @@ class AudioManager {
   private readonly MAX_SIMULTANEOUS_SFX = 16;
   private lastSfxTimes: Partial<Record<SfxKey, number>> = {};
   private readonly THROTTLE_MS = 60;
+  // Stage 2 tree hit SFX (80ms throttle, max 4 simultaneous voices) & proximity fire loop
+  private activeTreeHitVoices: Array<{ source: AudioBufferSourceNode; gain: GainNode }> = [];
+  private readonly MAX_SIMULTANEOUS_TREE_HIT = 4;
+  private readonly TREE_HIT_THROTTLE_MS = 80;
+  private lastTreeHitMs: number = 0;
+  private fireLoopWanted: boolean = false;
+  private fireLoopSource: AudioBufferSourceNode | null = null;
+  private fireLoopGain: GainNode | null = null;
+  private fireLoopDistancePx: number = Number.POSITIVE_INFINITY;
+  private readonly FIRE_LOOP_FULL_DIST_PX = 150;
+  private readonly FIRE_LOOP_SILENT_DIST_PX = 600;
   private lastDeathKnellMs: number = 0;
   private lastBossSirenMs: number = 0;
   private lastBossWarningMs: number = 0;
   private lastUiClickMs: number = 0;
   private lastBloodSplashMs: number = 0;
+  private lastCoinCollectMs: number = 0;
+  private coinCollectStreak: number = 0;
+  private lastCoinScatterMs: number = 0;
+  private lastCoinTransactionMs: number = 0;
+  private coinDropLoadingPromise: Promise<AudioBuffer | null> | null = null;
   private uiNoiseBuffer: AudioBuffer | null = null;
   private bloodSplashNoiseBuffer: AudioBuffer | null = null;
   private bossTensionNoiseBuffer: AudioBuffer | null = null;
   private brassDriveCurve: Float32Array | null = null;
 
-  // Music Track State (1s crossfade between tracks, loop-ready .ogg)
+  // Music Track State (equal-power crossfade between tracks, loop-ready .ogg)
   private currentTrackKey: MusicTrackKey | null = null;
   private queuedTrackKey: MusicTrackKey | null = null;
+  private queuedTrackOptions: PlayTrackOptions | null = null;
   private activeMusicNodes: Array<{
     source: AudioBufferSourceNode;
     gain: GainNode;
     trackKey: MusicTrackKey;
+    startedAtCtxTime: number;
+    startOffsetSec: number;
+    durationSec: number;
+    fadingOut: boolean;
   }> = [];
+  private savedTrackOffsets: Partial<Record<MusicTrackKey, number>> = {};
+  private equalPowerFadeInCurve: Float32Array | null = null;
   private stingerFollowupTimer: number | null = null;
   private readonly TRACK_CROSSFADE_SEC = 1.0;
   private musicDuckFactor: number = 1.0;
@@ -409,14 +450,18 @@ class AudioManager {
 
     if (this.queuedTrackKey && this.musicBuffers[this.queuedTrackKey]) {
       const track = this.queuedTrackKey;
+      const opts = this.queuedTrackOptions;
       this.queuedTrackKey = null;
-      this.playTrack(track, true);
+      this.queuedTrackOptions = null;
+      this.playTrack(track, { ...(opts ?? {}), force: true });
     } else if (this.currentTrackKey && this.activeMusicNodes.length === 0) {
       const track = this.currentTrackKey;
       if (this.musicBuffers[track]) {
-        this.playTrack(track, true);
+        this.playTrack(track, { force: true });
       }
     }
+
+    this.syncFireLoopPlayback();
   }
 
   public initCtx(fromUserGesture: boolean = false) {
@@ -426,7 +471,10 @@ class AudioManager {
       this.sfxGain = null;
       this.musicGain = null;
       this.activeSfxVoices = [];
+      this.activeTreeHitVoices = [];
       this.activeMusicNodes = [];
+      this.fireLoopSource = null;
+      this.fireLoopGain = null;
     }
 
     if (!this.ctx) {
@@ -458,6 +506,10 @@ class AudioManager {
     try {
       const resp = await fetch(url);
       if (!resp.ok) return null;
+      const contentType = resp.headers.get('content-type') ?? '';
+      if (contentType.toLowerCase().includes('text/html')) {
+        return null;
+      }
       const arr = await resp.arrayBuffer();
       if (!this.ctx) return null;
       return await this.ctx.decodeAudioData(arr);
@@ -474,12 +526,13 @@ class AudioManager {
     }
     this.getBrassDriveCurve();
 
-    // Load Music (.ogg)
+    // Load Music
     const musicKeys = Object.keys(MUSIC_ASSETS) as MusicTrackKey[];
     const musicPromises = musicKeys.map(async (key) => {
       try {
         if (!this.musicBuffers[key]) {
-          const buffer = await this.decodeUrl(MUSIC_ASSETS[key].url);
+          const url = MUSIC_ASSETS[key].url;
+          const buffer = await this.decodeUrl(url);
           if (buffer) {
             this.musicBuffers[key] = buffer;
             if (
@@ -488,9 +541,13 @@ class AudioManager {
               this.ctx.state === 'running' &&
               !this.isPaused
             ) {
+              const opts = this.queuedTrackOptions;
               this.queuedTrackKey = null;
-              this.playTrack(key, true);
+              this.queuedTrackOptions = null;
+              this.playTrack(key, { ...(opts ?? {}), force: true });
             }
+          } else {
+            console.warn(`[Audio] Missing or unreadable music file: ${key} (${url})`);
           }
         }
       } finally {
@@ -507,8 +564,16 @@ class AudioManager {
             const buffer = await this.decodeUrl(url);
             if (buffer) {
               this.sfxBuffers[key] = buffer;
+              if (key === 'fire_loop') {
+                this.syncFireLoopPlayback();
+              }
               break;
             }
+          }
+          if (!this.sfxBuffers[key]) {
+            console.warn(
+              `[Audio] Missing or unreadable SFX file: ${key} (${SFX_ASSETS[key].join(', ')})`
+            );
           }
         }
       } finally {
@@ -611,6 +676,223 @@ class AudioManager {
     }
   }
 
+  // -------------------------------------------------------------
+  // Stage 2 Tree Hit SFX (+-6% detune, 80ms throttle, max 4 at once)
+  // -------------------------------------------------------------
+  public playTreeHit(volumeScale: number = 0.85) {
+    if (this.isMuted || this.isPaused) return;
+    this.initCtx(false);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.resumeContext();
+      return;
+    }
+
+    const buffer = this.sfxBuffers.tree_hit;
+    if (!buffer) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastTreeHitMs < this.TREE_HIT_THROTTLE_MS) return;
+    this.lastTreeHitMs = nowMs;
+
+    // Enforce max 4 simultaneous tree-hit voices at once
+    while (this.activeTreeHitVoices.length >= this.MAX_SIMULTANEOUS_TREE_HIT) {
+      const oldest = this.activeTreeHitVoices.shift();
+      if (oldest) {
+        const gIdx = this.activeSfxVoices.indexOf(oldest);
+        if (gIdx !== -1) this.activeSfxVoices.splice(gIdx, 1);
+        try {
+          oldest.source.stop();
+          oldest.source.disconnect();
+          oldest.gain.disconnect();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    // Also respect overall SFX voice ceiling
+    while (this.activeSfxVoices.length >= this.MAX_SIMULTANEOUS_SFX) {
+      const oldest = this.activeSfxVoices.shift();
+      if (oldest) {
+        const tIdx = this.activeTreeHitVoices.indexOf(oldest);
+        if (tIdx !== -1) this.activeTreeHitVoices.splice(tIdx, 1);
+        try {
+          oldest.source.stop();
+          oldest.source.disconnect();
+          oldest.gain.disconnect();
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    try {
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      // Random detune +-6% (playbackRate in [0.94, 1.06])
+      source.playbackRate.value = 1 + (Math.random() * 0.12 - 0.06);
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(volumeScale, this.ctx.currentTime);
+
+      source.connect(gain);
+      gain.connect(this.sfxGain);
+
+      const voice = { source, gain };
+      this.activeTreeHitVoices.push(voice);
+      this.activeSfxVoices.push(voice);
+
+      source.onended = () => {
+        const tIdx = this.activeTreeHitVoices.indexOf(voice);
+        if (tIdx !== -1) {
+          this.activeTreeHitVoices.splice(tIdx, 1);
+        }
+        const gIdx = this.activeSfxVoices.indexOf(voice);
+        if (gIdx !== -1) {
+          this.activeSfxVoices.splice(gIdx, 1);
+        }
+        try {
+          source.disconnect();
+          gain.disconnect();
+        } catch {
+          // ignore
+        }
+      };
+
+      source.start(this.ctx.currentTime);
+    } catch {
+      // fail silently
+    }
+  }
+
+  // -------------------------------------------------------------
+  // Stage 2 Ambient Fire Loop (150px full -> 600px silent, SFX bus)
+  // -------------------------------------------------------------
+  private computeFireLoopGain(distancePx: number): number {
+    if (!Number.isFinite(distancePx) || distancePx >= this.FIRE_LOOP_SILENT_DIST_PX) {
+      return 0;
+    }
+    if (distancePx <= this.FIRE_LOOP_FULL_DIST_PX) {
+      return 1;
+    }
+    return (
+      (this.FIRE_LOOP_SILENT_DIST_PX - distancePx) /
+      (this.FIRE_LOOP_SILENT_DIST_PX - this.FIRE_LOOP_FULL_DIST_PX)
+    );
+  }
+
+  private syncFireLoopPlayback() {
+    if (!this.fireLoopWanted) {
+      this.teardownFireLoopNodes();
+      return;
+    }
+
+    if (this.isPaused || !this.ctx || !this.sfxGain || this.ctx.state !== 'running') {
+      return;
+    }
+
+    const targetGain = this.computeFireLoopGain(this.fireLoopDistancePx);
+
+    if (this.fireLoopSource && this.fireLoopGain) {
+      try {
+        this.fireLoopGain.gain.setTargetAtTime(targetGain, this.ctx.currentTime, 0.04);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    const buffer = this.sfxBuffers.fire_loop;
+    if (!buffer) return;
+
+    try {
+      const source = this.ctx.createBufferSource();
+      source.buffer = buffer;
+      source.loop = true;
+
+      const gain = this.ctx.createGain();
+      gain.gain.setValueAtTime(targetGain, this.ctx.currentTime);
+
+      source.connect(gain);
+      gain.connect(this.sfxGain);
+
+      this.fireLoopSource = source;
+      this.fireLoopGain = gain;
+
+      source.onended = () => {
+        if (this.fireLoopSource === source) {
+          this.fireLoopSource = null;
+          this.fireLoopGain = null;
+        }
+        try {
+          source.disconnect();
+          gain.disconnect();
+        } catch {
+          // ignore
+        }
+      };
+
+      source.start(this.ctx.currentTime);
+    } catch {
+      // fail silently
+    }
+  }
+
+  private teardownFireLoopNodes() {
+    const src = this.fireLoopSource;
+    const gain = this.fireLoopGain;
+    this.fireLoopSource = null;
+    this.fireLoopGain = null;
+    if (src) {
+      try {
+        src.onended = null;
+        src.stop();
+        src.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+    if (gain) {
+      try {
+        gain.disconnect();
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  public startFireLoop(initialDistancePx: number = Number.POSITIVE_INFINITY) {
+    this.fireLoopWanted = true;
+    this.fireLoopDistancePx = initialDistancePx;
+    this.initCtx(false);
+    this.syncFireLoopPlayback();
+  }
+
+  public setFireLoopProximity(distancePx: number) {
+    this.fireLoopDistancePx = distancePx;
+    if (!this.fireLoopWanted) return;
+    if (!this.fireLoopSource) {
+      this.syncFireLoopPlayback();
+      return;
+    }
+    if (this.fireLoopGain && this.ctx && this.ctx.state === 'running') {
+      const target = this.computeFireLoopGain(distancePx);
+      try {
+        this.fireLoopGain.gain.setTargetAtTime(target, this.ctx.currentTime, 0.04);
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  public stopFireLoop() {
+    this.fireLoopWanted = false;
+    this.fireLoopDistancePx = Number.POSITIVE_INFINITY;
+    this.teardownFireLoopNodes();
+  }
+
   // Mapped SFX Event Methods (attached files only)
   public playHitSpark() {
     this.playSfx('hit_spark', 0.85);
@@ -643,8 +925,221 @@ class AudioManager {
   public playGemCollect() {
     this.playGemPickup();
   }
+  private ensureCoinDropBuffer(): Promise<AudioBuffer | null> {
+    if (this.sfxBuffers.coin_drop) {
+      return Promise.resolve(this.sfxBuffers.coin_drop);
+    }
+    if (this.coinDropLoadingPromise) {
+      return this.coinDropLoadingPromise;
+    }
+    const urls = SFX_ASSETS.coin_drop;
+    this.coinDropLoadingPromise = (async () => {
+      for (const url of urls) {
+        const buffer = await this.decodeUrl(url);
+        if (buffer) {
+          this.sfxBuffers.coin_drop = buffer;
+          return buffer;
+        }
+      }
+      return null;
+    })().finally(() => {
+      this.coinDropLoadingPromise = null;
+    });
+    return this.coinDropLoadingPromise;
+  }
+
+  private playCoinDropBuffer(
+    volumeScale: number,
+    playbackRate: number = 1.0,
+    delaySec: number = 0
+  ) {
+    if (!this.ctx || !this.sfxGain || this.isMuted) return;
+
+    const startWithBuffer = (buffer: AudioBuffer) => {
+      if (!this.ctx || !this.sfxGain || this.isMuted) return;
+      if (this.ctx.state !== 'running') return;
+
+      // Respect global SFX voice limiter
+      while (this.activeSfxVoices.length >= this.MAX_SIMULTANEOUS_SFX) {
+        const oldest = this.activeSfxVoices.shift();
+        if (oldest) {
+          try {
+            oldest.source.stop();
+            oldest.source.disconnect();
+            oldest.gain.disconnect();
+          } catch {
+            // ignore
+          }
+        }
+      }
+
+      try {
+        const source = this.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.playbackRate.value = Math.max(0.75, Math.min(1.4, playbackRate));
+
+        const gain = this.ctx.createGain();
+        const startAt = this.ctx.currentTime + Math.max(0, delaySec);
+        gain.gain.setValueAtTime(volumeScale, startAt);
+
+        source.connect(gain);
+        gain.connect(this.sfxGain);
+
+        const voice = { source, gain };
+        this.activeSfxVoices.push(voice);
+
+        source.onended = () => {
+          const idx = this.activeSfxVoices.indexOf(voice);
+          if (idx !== -1) {
+            this.activeSfxVoices.splice(idx, 1);
+          }
+          try {
+            source.disconnect();
+            gain.disconnect();
+          } catch {
+            // ignore
+          }
+        };
+
+        source.start(startAt);
+      } catch {
+        // fail silently
+      }
+    };
+
+    const cached = this.sfxBuffers.coin_drop;
+    if (cached) {
+      startWithBuffer(cached);
+    } else {
+      void this.ensureCoinDropBuffer().then((buf) => {
+        if (buf) startWithBuffer(buf);
+      });
+    }
+  }
+
   public playCoinCollect() {
-    this.playSfx('gem_pickup', 0.75);
+    if (this.isMuted || this.isPaused) return;
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastCoinCollectMs < 120) return;
+
+    // Gentle pitch lift when vacuuming up multiple coins in a row
+    if (nowMs - this.lastCoinCollectMs < 550) {
+      this.coinCollectStreak = Math.min(8, this.coinCollectStreak + 1);
+    } else {
+      this.coinCollectStreak = 0;
+    }
+    this.lastCoinCollectMs = nowMs;
+
+    this.initCtx(false);
+    if (!this.ctx || !this.sfxGain) return;
+    if (this.ctx.state === 'suspended') {
+      this.resumeContext();
+      return;
+    }
+
+    const rate = 1.02 + this.coinCollectStreak * 0.018 + (Math.random() * 0.05 - 0.025);
+    this.playCoinDropBuffer(0.85, rate);
+  }
+
+  /**
+   * Coin drop sound when enemies/elites/bosses spill multiple coins onto the floor.
+   */
+  public playCoinDropScatter(coinCount: number = 3) {
+    if (this.isMuted || this.isPaused) return;
+    if (coinCount < 2) return;
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastCoinScatterMs < 180) return;
+    this.lastCoinScatterMs = nowMs;
+
+    this.initCtx(false);
+    if (!this.ctx || !this.sfxGain) return;
+    if (this.ctx.state === 'suspended') {
+      this.resumeContext();
+      return;
+    }
+
+    const volume = coinCount >= 8 ? 0.8 : 0.62;
+    const rate = 0.96 + Math.random() * 0.08;
+    this.playCoinDropBuffer(volume, rate);
+  }
+
+  /**
+   * Plays coin_drop_af8a9ec4.mp3 when receiving/claiming coins
+   * (missions, achievements, daily streak, chests, pacts, stage clear gold rewards).
+   */
+  public playCoinGain(intensity: CoinShowerIntensity = 'medium') {
+    if (this.isMuted) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastCoinTransactionMs < 90) return;
+    this.lastCoinTransactionMs = nowMs;
+
+    const trigger = () => {
+      const volumeByIntensity: Record<CoinShowerIntensity, number> = {
+        small: 0.78,
+        medium: 0.94,
+        large: 1.0,
+        jackpot: 1.0,
+      };
+      const baseRate = 0.98 + Math.random() * 0.05;
+      this.playCoinDropBuffer(volumeByIntensity[intensity], baseRate);
+
+      // Extra staggered pour on jackpot rewards (Stage Clear Gold / big Claim All)
+      if (intensity === 'jackpot') {
+        this.playCoinDropBuffer(0.62, baseRate * 1.06, 0.22);
+      }
+    };
+
+    this.initCtx(true);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx && this.ctx.state === 'running' && !this.isMuted) {
+            trigger();
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+
+    trigger();
+  }
+
+  /**
+   * Plays coin_drop_af8a9ec4.mp3 when spending coins in Shop / Relics / Deals.
+   */
+  public playCoinSpend(costAmount: number = 100) {
+    if (this.isMuted) return;
+
+    const nowMs = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (nowMs - this.lastCoinTransactionMs < 90) return;
+    this.lastCoinTransactionMs = nowMs;
+
+    const trigger = () => {
+      const volume = costAmount >= 400 ? 1.0 : 0.92;
+      const rate = 0.95 + Math.random() * 0.06;
+      this.playCoinDropBuffer(volume, rate);
+    };
+
+    this.initCtx(true);
+    if (!this.ctx || !this.sfxGain) return;
+
+    if (this.ctx.state === 'suspended') {
+      this.ctx
+        .resume()
+        .then(() => {
+          if (this.ctx && this.ctx.state === 'running' && !this.isMuted) {
+            trigger();
+          }
+        })
+        .catch(() => {});
+      return;
+    }
+
+    trigger();
   }
 
   public playLightning() {
@@ -1618,6 +2113,98 @@ class AudioManager {
     }
   }
 
+  private getEqualPowerFadeInCurve(): Float32Array<ArrayBuffer> {
+    if (this.equalPowerFadeInCurve) {
+      return this.equalPowerFadeInCurve as Float32Array<ArrayBuffer>;
+    }
+    const steps = 64;
+    const curve = new Float32Array(new ArrayBuffer(steps * 4));
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      curve[i] = Math.max(0.0001, Math.sin(t * Math.PI * 0.5));
+    }
+    this.equalPowerFadeInCurve = curve;
+    return curve;
+  }
+
+  private buildEqualPowerFadeOutCurve(startGain: number): Float32Array<ArrayBuffer> {
+    const steps = 64;
+    const clampedStart = Math.max(0.0001, Math.min(1.0, startGain));
+    const curve = new Float32Array(new ArrayBuffer(steps * 4));
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      curve[i] = Math.max(0.0001, clampedStart * Math.cos(t * Math.PI * 0.5));
+    }
+    return curve;
+  }
+
+  private scheduleGainCrossfade(
+    gainParam: AudioParam,
+    now: number,
+    durationSec: number,
+    direction: 'in' | 'out',
+    equalPower: boolean
+  ) {
+    const safeDur = Math.max(0.02, durationSec);
+    try {
+      const cancellable = gainParam as AudioParam & { cancelAndHoldAtTime?: (t: number) => AudioParam };
+      if (typeof cancellable.cancelAndHoldAtTime === 'function') {
+        cancellable.cancelAndHoldAtTime(now);
+      } else {
+        gainParam.cancelScheduledValues(now);
+      }
+    } catch {
+      try {
+        gainParam.cancelScheduledValues(now);
+      } catch {
+        // ignore
+      }
+    }
+
+    if (direction === 'in') {
+      if (equalPower) {
+        try {
+          gainParam.setValueAtTime(0.0001, now);
+          gainParam.setValueCurveAtTime(this.getEqualPowerFadeInCurve(), now + 0.002, safeDur);
+          return;
+        } catch {
+          // fallback below
+        }
+      }
+      gainParam.setValueAtTime(0.0001, now);
+      gainParam.linearRampToValueAtTime(1.0, now + safeDur);
+    } else {
+      const liveVal = Math.max(0.0001, Math.min(1.0, gainParam.value || 1.0));
+      if (equalPower) {
+        try {
+          gainParam.setValueAtTime(liveVal, now);
+          gainParam.setValueCurveAtTime(
+            this.buildEqualPowerFadeOutCurve(liveVal),
+            now + 0.002,
+            safeDur
+          );
+          return;
+        } catch {
+          // fallback below
+        }
+      }
+      gainParam.setValueAtTime(liveVal, now);
+      gainParam.linearRampToValueAtTime(0.0001, now + safeDur);
+    }
+  }
+
+  public getCurrentTrackKey(): MusicTrackKey | null {
+    return this.currentTrackKey;
+  }
+
+  public clearSavedTrackOffset(trackKey?: MusicTrackKey) {
+    if (trackKey) {
+      delete this.savedTrackOffsets[trackKey];
+    } else {
+      this.savedTrackOffsets = {};
+    }
+  }
+
   public ensureMusicPlaying() {
     if (this.isPaused) return;
     this.initCtx(false);
@@ -1630,21 +2217,34 @@ class AudioManager {
 
     if (this.queuedTrackKey && this.musicBuffers[this.queuedTrackKey]) {
       const next = this.queuedTrackKey;
+      const opts = this.queuedTrackOptions;
       this.queuedTrackKey = null;
-      this.playTrack(next, true);
+      this.queuedTrackOptions = null;
+      this.playTrack(next, { ...(opts ?? {}), force: true });
       return;
     }
 
     if (this.currentTrackKey && this.activeMusicNodes.length === 0 && this.musicBuffers[this.currentTrackKey]) {
-      this.playTrack(this.currentTrackKey, true);
+      this.playTrack(this.currentTrackKey, { force: true });
     }
   }
 
-  public playTrack(trackKey: MusicTrackKey, force: boolean = false) {
+  public playTrack(trackKey: MusicTrackKey, forceOrOptions: boolean | PlayTrackOptions = false) {
+    const options: PlayTrackOptions =
+      typeof forceOrOptions === 'boolean' ? { force: forceOrOptions } : forceOrOptions;
+    const force = options.force ?? false;
+    const crossfade = Math.max(0.05, options.crossfadeSec ?? this.TRACK_CROSSFADE_SEC);
+    const resumeSavedOffset = options.resumeSavedOffset ?? false;
+    const rememberOutgoingOffset = options.rememberOutgoingOffset ?? true;
+    const equalPower = options.equalPower ?? true;
+
+    const hasLiveMatchingNode = this.activeMusicNodes.some(
+      (n) => n.trackKey === trackKey && !n.fadingOut
+    );
     if (
       this.currentTrackKey === trackKey &&
       !force &&
-      (this.activeMusicNodes.length > 0 || this.queuedTrackKey === trackKey)
+      (hasLiveMatchingNode || this.queuedTrackKey === trackKey)
     ) {
       return;
     }
@@ -1654,12 +2254,14 @@ class AudioManager {
 
     if (!this.ctx || !this.musicGain) {
       this.queuedTrackKey = trackKey;
+      this.queuedTrackOptions = options;
       return;
     }
 
     // Do NOT call source.start() while AudioContext is suspended; queue it so resumeContext() starts it cleanly
     if (this.ctx.state !== 'running') {
       this.queuedTrackKey = trackKey;
+      this.queuedTrackOptions = options;
       this.currentTrackKey = trackKey;
       if (!this.isPaused) {
         this.resumeContext();
@@ -1671,26 +2273,36 @@ class AudioManager {
     if (!buffer) {
       // Queue until buffer finishes loading (fails silently if file is missing)
       this.queuedTrackKey = trackKey;
+      this.queuedTrackOptions = options;
       this.currentTrackKey = trackKey;
       return;
     }
 
     this.queuedTrackKey = null;
+    this.queuedTrackOptions = null;
     this.currentTrackKey = trackKey;
 
     const now = this.ctx.currentTime;
-    const crossfade = this.TRACK_CROSSFADE_SEC;
 
-    // Fade out existing active music tracks over 1s
+    // Equal-power fade out all existing active music tracks & save outgoing loop position
     const oldNodes = [...this.activeMusicNodes];
     this.activeMusicNodes = [];
 
     for (const node of oldNodes) {
+      if (
+        rememberOutgoingOffset &&
+        !node.fadingOut &&
+        MUSIC_ASSETS[node.trackKey].loop &&
+        node.durationSec > 0
+      ) {
+        const elapsed = Math.max(0, now - node.startedAtCtxTime);
+        this.savedTrackOffsets[node.trackKey] =
+          (node.startOffsetSec + elapsed) % node.durationSec;
+      }
+      node.fadingOut = true;
       try {
-        node.gain.gain.cancelScheduledValues(now);
-        node.gain.gain.setValueAtTime(node.gain.gain.value, now);
-        node.gain.gain.linearRampToValueAtTime(0.0001, now + crossfade);
-        node.source.stop(now + crossfade + 0.05);
+        this.scheduleGainCrossfade(node.gain.gain, now, crossfade, 'out', equalPower);
+        node.source.stop(now + crossfade + 0.06);
       } catch {
         // ignore
       }
@@ -1701,14 +2313,26 @@ class AudioManager {
       source.buffer = buffer;
       source.loop = MUSIC_ASSETS[trackKey].loop;
 
+      const startOffsetSec =
+        resumeSavedOffset && source.loop && buffer.duration > 0
+          ? (this.savedTrackOffsets[trackKey] ?? 0) % buffer.duration
+          : 0;
+
       const gain = this.ctx.createGain();
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.linearRampToValueAtTime(1.0, now + crossfade);
+      this.scheduleGainCrossfade(gain.gain, now, crossfade, 'in', equalPower);
 
       source.connect(gain);
       gain.connect(this.musicGain);
 
-      const entry = { source, gain, trackKey };
+      const entry = {
+        source,
+        gain,
+        trackKey,
+        startedAtCtxTime: now,
+        startOffsetSec,
+        durationSec: buffer.duration,
+        fadingOut: false,
+      };
       this.activeMusicNodes.push(entry);
 
       source.onended = () => {
@@ -1724,7 +2348,7 @@ class AudioManager {
         }
       };
 
-      source.start(now);
+      source.start(now, startOffsetSec);
       console.log(`music started: ${trackKey}`);
 
       // If this is the one-shot stinger_gameover, transition to music_gameover_full when done
@@ -1741,31 +2365,31 @@ class AudioManager {
     }
   }
 
-  public playMenu() {
+  public playMenu(crossfadeSec?: number) {
     this.unduckMusic(150);
-    this.playTrack('menu');
+    this.playTrack('menu', { crossfadeSec });
   }
 
-  public playGameplay() {
-    this.playTrack('gameplay');
+  public playGameplay(options?: PlayTrackOptions) {
+    this.playTrack('gameplay', options);
   }
 
-  public playIntense() {
-    this.playTrack('intense');
+  public playIntense(options?: PlayTrackOptions) {
+    this.playTrack('intense', options);
   }
 
-  public playBoss() {
+  public playBoss(crossfadeSec?: number) {
     this.unduckMusic(150);
-    this.playTrack('boss');
+    this.playTrack('boss', { crossfadeSec, resumeSavedOffset: false });
   }
 
-  public playGameOverStinger() {
+  public playGameOverStinger(crossfadeSec?: number) {
     this.unduckMusic(100);
-    this.playTrack('stinger_gameover', true);
+    this.playTrack('stinger_gameover', { force: true, crossfadeSec, rememberOutgoingOffset: false });
   }
 
   public playGameOverFull() {
-    this.playTrack('gameover_full');
+    this.playTrack('gameover_full', { rememberOutgoingOffset: false });
   }
 
   // Backward-compatible aliases
@@ -1781,6 +2405,7 @@ class AudioManager {
     this.clearStingerTimer();
     this.musicDuckFactor = 1.0;
     this.queuedTrackKey = null;
+    this.queuedTrackOptions = null;
     this.currentTrackKey = null;
     if (!this.ctx || this.ctx.state === 'closed') return;
 
@@ -1788,11 +2413,10 @@ class AudioManager {
     const nodes = [...this.activeMusicNodes];
     this.activeMusicNodes = [];
     for (const node of nodes) {
+      node.fadingOut = true;
       try {
-        node.gain.gain.cancelScheduledValues(now);
-        node.gain.gain.setValueAtTime(node.gain.gain.value, now);
-        node.gain.gain.linearRampToValueAtTime(0.0001, now + 0.5);
-        node.source.stop(now + 0.55);
+        this.scheduleGainCrossfade(node.gain.gain, now, 0.5, 'out', true);
+        node.source.stop(now + 0.56);
       } catch {
         // ignore
       }

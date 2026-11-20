@@ -16,7 +16,13 @@ import {
   KeyRound,
   Lock,
 } from 'lucide-react';
-import { getSavedCoins, getSavedUpgrades, purchaseUpgrade } from '../game/metaProgression';
+import {
+  getSavedCoins,
+  getSavedUpgrades,
+  purchaseUpgrade,
+  subscribeCoins,
+} from '../game/metaProgression';
+import { isDeveloperMode, subscribeDeveloperMode } from '../game/developerMode';
 import {
   MAX_RELIC_SLOTS,
   RELICS,
@@ -58,6 +64,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
   const [equippedRelicIds, setEquippedRelicIds] = useState<RelicId[]>(getEquippedRelicIds());
   const [relicSeals, setRelicSeals] = useState<number>(getRelicSeals());
   const [maxRelicSlots, setMaxRelicSlots] = useState<number>(getMaxRelicSlots());
+  const [devMode, setDevMode] = useState<boolean>(() => isDeveloperMode());
   const [inspectedRelicId, setInspectedRelicId] = useState<RelicId | null>(null);
   const [justEquippedRelic, setJustEquippedRelic] = useState<{ id: RelicId; seq: number } | null>(
     null
@@ -83,7 +90,9 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
   }, [initialTab]);
 
   useEffect(() => {
-    return subscribeRelics(
+    const unsubCoins = subscribeCoins(setCoins);
+    const unsubDev = subscribeDeveloperMode(setDevMode);
+    const unsubRelics = subscribeRelics(
       ({ unlockedRelics: u, equippedRelicIds: eq, relicSeals: seals, maxRelicSlots: slots }) => {
         setUnlockedRelics(u);
         setEquippedRelicIds(eq);
@@ -91,6 +100,11 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
         setMaxRelicSlots(slots);
       }
     );
+    return () => {
+      unsubCoins();
+      unsubDev();
+      unsubRelics();
+    };
   }, []);
 
   useEffect(() => {
@@ -117,7 +131,8 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
   const handlePurchase = (upgradeId: string) => {
     const result = purchaseUpgrade(upgradeId);
     if (result.success) {
-      soundManager.playCoinCollect();
+      const spent = Math.max(50, coins - result.newCoins);
+      soundManager.playCoinSpend(spent);
       haptics.tap('medium');
       setCoins(result.newCoins);
       setUpgrades(result.upgrades);
@@ -127,7 +142,8 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
   const handleUnlockRelic = (relicId: RelicId) => {
     const result = unlockRelic(relicId);
     if (result.success) {
-      soundManager.playCoinCollect();
+      const spent = Math.max(100, coins - result.newCoins);
+      soundManager.playCoinSpend(spent);
       haptics.tap('heavy');
       setCoins(result.newCoins);
       setUnlockedRelics(result.unlockedRelics);
@@ -158,7 +174,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
   const handleUnlockRelicSlot = () => {
     const res = unlockNextRelicSlot();
     if (res.success) {
-      soundManager.playCoinCollect();
+      soundManager.playCoinSpend(500);
       haptics.tap('heavy');
       setRelicSeals(res.newSeals);
       setMaxRelicSlots(res.maxRelicSlots);
@@ -309,7 +325,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
               title="Relic Seals from Daily Missions"
             >
               <KeyRound className="w-4 h-4 text-[#c7566b]" />
-              <span>{relicSeals}</span>
+              <span>{devMode ? '∞' : relicSeals}</span>
               <span className="text-[11px] font-body font-normal text-[#8e8168] hidden sm:inline">
                 Seals
               </span>
@@ -320,7 +336,7 @@ export const CampShopModal: React.FC<CampShopModalProps> = ({
               title="Soul Coins"
             >
               <Coins className="w-4 h-4 text-[#f2a93b]" />
-              <span>{coins}</span>
+              <span>{devMode ? '∞' : coins}</span>
             </div>
           </div>
         </div>

@@ -1,0 +1,37 @@
+{
+ "name": "boss_idle",
+ "mode": "green",
+ "frame_w": 256,
+ "frame_h": 256,
+ "frames": 12,
+ "cols": 12,
+ "rows": 1,
+ "fps": 20,
+ "loop": false,
+ "sheet": "boss_idle_sheet.png",
+ "sheet_size": [
+  3072,
+  256
+ ],
+ "source_frames": [
+  0,
+  7,
+  13,
+  20,
+  26,
+  33,
+  39,
+  46,
+  52,
+  59,
+  65,
+  72
+ ],
+ "source_fps": 24.0,
+ "crop_box": [
+  370,
+  33,
+  1417,
+  1080
+ ]
+}

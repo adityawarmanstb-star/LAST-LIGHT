@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { soundManager } from '../game/audio';
 import { dailyMissions } from '../game/dailyMissions';
+import { STAGES, formatStageTime } from '../game/stages';
 import { RunStats } from '../game/types';
 import { haptics } from '../mobile/haptics';
 import { Icon } from './Icon';
@@ -36,9 +37,22 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
     return unsub;
   }, []);
 
-  const minutes = Math.floor(stats.timeSurvived / 60);
-  const seconds = stats.timeSurvived % 60;
-  const timeFormatted = `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  useEffect(() => {
+    if (stats.victory && stats.coinsEarned > 0) {
+      soundManager.playCoinGain('jackpot');
+    }
+  }, [stats.victory, stats.coinsEarned]);
+
+  const timeFormatted = formatStageTime(stats.timeSurvived);
+  const stageConfig = stats.stageId ? STAGES[stats.stageId] : STAGES.stage_1;
+  const stageNumber = stats.stageCleared ?? stageConfig.stageNumber;
+  const stageName = stats.stageName ?? stageConfig.name;
+  const stageBestTime = stats.stageBestTime ?? stats.timeSurvived;
+  const bestTimeFormatted = formatStageTime(stageBestTime);
+  const difficultyBestClearFormatted =
+    stats.difficultyBestClearTime !== undefined
+      ? formatStageTime(stats.difficultyBestClearTime)
+      : timeFormatted;
   const difficultyLabel =
     stats.difficulty === 'baby'
       ? 'BABY MODE'
@@ -91,7 +105,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           className="w-full max-h-[92dvh] flex flex-col shadow-[0_18px_44px_rgba(0,0,0,0.95)]"
           contentClassName="p-3.5 sm:p-4 flex flex-col items-center text-center max-h-[92dvh] overflow-y-auto overflow-x-hidden no-scrollbar"
         >
-          {/* Stage 1 Completion Notification Banner */}
+          {/* Stage Completion Notification Banner */}
           {stats.victory && (
             <NineSlice
               variant="bannerCrimson"
@@ -106,16 +120,17 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                 <Icon id="ui_crown" size={20} className="shrink-0" />
                 <div className="flex flex-col min-w-0">
                   <span className="font-display text-[11px] font-black tracking-[0.14em] text-[#f2c464] uppercase leading-tight">
-                    STAGE {stats.stageCleared ?? 1} COMPLETE!
+                    STAGE {stageNumber} COMPLETE!
                   </span>
                   <span className="font-body text-[11px] text-[#e6d5b2] truncate">
-                    Boss defeated · Stage cleared
+                    {stageName} · Boss defeated
                   </span>
                 </div>
               </div>
               {difficultyLabel && (
-                <span className="shrink-0 px-2 py-0.5 rounded bg-[#140e06] border border-[#f2a93b]/55 font-display text-[9px] font-bold tracking-[0.12em] text-[#f7d88a] uppercase">
-                  {difficultyLabel}
+                <span className="shrink-0 inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#0d261b] border border-[#6ee7b7]/60 font-display text-[9px] font-bold tracking-[0.12em] text-[#86efac] uppercase">
+                  <span aria-hidden="true">✓</span>
+                  <span>{difficultyLabel} CLEARED</span>
                 </span>
               )}
             </NineSlice>
@@ -124,12 +139,14 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
           {/* Header Typography */}
           <div className="w-full flex flex-col items-center mb-3">
             <span
-              className={`font-display text-[11px] font-bold uppercase tracking-[0.24em] mb-1 ${
+              className={`font-display text-[11px] font-bold uppercase tracking-[0.22em] mb-1 ${
                 stats.victory ? 'text-[#f2a93b]' : 'text-[#e5303a]'
               }`}
               style={{ textShadow: '0 1px 4px rgba(0, 0, 0, 0.95)' }}
             >
-              {stats.victory ? 'VICTORY · STAGE 1 CLEAR' : 'FALLEN IN THE DARK'}
+              {stats.victory
+                ? `VICTORY · STAGE ${stageNumber} · ${stageName}`
+                : `STAGE ${stageNumber} · ${stageName}`}
             </span>
 
             <h2
@@ -139,15 +156,15 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               }`}
               style={{ textShadow: '0 2px 3px #140806' }}
             >
-              {stats.victory ? 'STAGE 1 COMPLETE' : 'THE LIGHT FADES'}
+              {stats.victory ? `STAGE ${stageNumber} COMPLETE` : 'THE LIGHT FADES'}
             </h2>
 
             <UiChainDivider className="my-2" />
 
             <p className="font-body text-sm font-medium text-[#cbbba0] leading-snug">
               {stats.victory
-                ? 'You vanquished the Void Titan and reclaimed the Ashfen.'
-                : `Reached Lv. ${stats.levelReached} before the shadows closed in.`}
+                ? `You vanquished the Void Titan and reclaimed ${stageName}.`
+                : `Reached Lv. ${stats.levelReached} in ${stageName} before the shadows closed in.`}
               {(stats.challengesCompleted ?? 0) > 0 && (
                 <span className="block mt-1 text-[#f2a93b] font-semibold">
                   {stats.challengesCompleted} Dynamic{' '}
@@ -157,7 +174,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
             </p>
           </div>
 
-          {/* Dedicated Stage 1 Gold Reward Callout */}
+          {/* Dedicated Stage Clear Gold Reward Callout */}
           {stats.victory && stageRewardGold > 0 && (
             <NineSlice
               variant="plateWideIron"
@@ -172,7 +189,7 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
                 <Icon id="soul_coin" size={24} className="shrink-0" />
                 <div className="flex flex-col min-w-0">
                   <span className="font-display text-[11px] font-bold tracking-[0.12em] text-[#f2c464] uppercase">
-                    Stage 1 Clear Reward
+                    Stage {stageNumber} Clear Reward
                   </span>
                   <span className="font-body text-[11px] text-[#cbbba0]">
                     {difficultyLabel || 'Difficulty Bonus'}
@@ -208,6 +225,25 @@ export const GameOverModal: React.FC<GameOverModalProps> = ({
               </div>
               <div className="font-display text-[10px] font-bold uppercase tracking-[0.14em] text-[#a89a7e] mt-1">
                 TIME
+              </div>
+              <div
+                className={`font-mono-numbers text-[10px] font-bold tracking-wider mt-0.5 ${
+                  stats.victory
+                    ? stats.isNewDifficultyBestClearTime
+                      ? 'text-[#ffd978]'
+                      : 'text-[#86efac]'
+                    : stats.isNewStageBestTime
+                      ? 'text-[#ffd978]'
+                      : 'text-[#8e826b]'
+                }`}
+              >
+                {stats.victory
+                  ? stats.isNewDifficultyBestClearTime
+                    ? 'NEW CLEAR BEST!'
+                    : `BEST CLEAR ${difficultyBestClearFormatted}`
+                  : stats.isNewStageBestTime
+                    ? 'NEW BEST!'
+                    : `BEST ${bestTimeFormatted}`}
               </div>
             </NineSlice>
 

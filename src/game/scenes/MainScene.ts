@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { soundManager } from '../audio';
+import { dynamicMusicManager } from '../DynamicMusicManager';
 import { gameManager } from '../GameManager';
 import { calculateBasePlayerStats, saveCoins, getSavedCoins } from '../metaProgression';
 import { dailyMissions } from '../dailyMissions';
@@ -9,6 +10,24 @@ import { haptics } from '../../mobile/haptics';
 import { CameraController } from '../CameraController';
 import { AtmosphereOverlay } from '../AtmosphereOverlay';
 import { ShadowCasterSystem } from '../ShadowCasterSystem';
+import {
+  BurningTreeSystem,
+  TREES,
+  ensureBurningTreeTextures,
+  resolveStage2VfxQuality,
+} from '../BurningTreeSystem';
+import {
+  BOSS2,
+  CinderWardenCallbacks,
+  CinderWardenController,
+  applyBoss2SpriteLayout,
+  ensureCinderWardenTextures,
+  getBoss2BodyCenterY,
+  hasBoss2Sheet,
+  preloadStage2BossAssets,
+  registerCinderWardenAnimations,
+  unloadStage2BossAssets,
+} from '../CinderWardenBoss';
 import {
   LOGICAL_HEIGHT,
   LOGICAL_WIDTH,
@@ -35,6 +54,12 @@ import {
   WeaponState,
 } from '../types';
 import { DIFFICULTY_PRESETS, DifficultyPreset } from '../difficulty';
+import {
+  STAGES,
+  STAGE_2_ASSETS,
+  StageConfig,
+  resolveStageAssetVariant,
+} from '../stages';
 import {
   createActiveDynamicChallenge,
   formatChallengeProgressText,
@@ -179,7 +204,7 @@ const ELITE_AURA_STYLE: Record<
   wisp: { outerColor: 0x5de4ff, innerColor: 0xc44cff, spriteTint: 0xbbeeff },
   imp: { outerColor: 0xe5303a, innerColor: 0xff6b73, spriteTint: 0xff9a9e },
   spitter: { outerColor: 0x90df63, innerColor: 0xd9ff7a, spriteTint: 0xc9ffad },
-  brute: { outerColor: 0xf2a93b, innerColor: 0xff4d54, spriteTint: 0xffcca3 },
+  brute: { outerColor: 0x9b30ff, innerColor: 0xe299ff, spriteTint: 0xebd4ff },
   boss: { outerColor: 0x7b1fe8, innerColor: 0xc94eff, spriteTint: 0xe8ccff },
 };
 
@@ -228,7 +253,7 @@ export const LIGHT = {
     nightEyesSizeBoost: 1.25,      // Larger eye glow dots with Night Eyes
     eyeColors: {
       imp: 0xc44cff,               // Magenta
-      brute: 0xf2a93b,             // Amber
+      brute: 0xc855ff,             // Violet-Purple
       spitter: 0xc44cff,           // Magenta
       wisp: 0x5de4ff,              // Cyan
       boss: 0xc44eff,              // Void Purple
@@ -357,7 +382,7 @@ export const GORE = {
       chipScaleMax: 1.15,
       emberMin: 6,
       emberMax: 8,
-      emberColors: [0xf2a93b, 0xff8c2a] as readonly number[],
+      emberColors: [0xc855ff, 0x9638f0, 0xf2b5ff] as readonly number[],
       emberSpeedMin: 120,
       emberSpeedMax: 270,
       emberScaleMin: 0.14,
@@ -712,6 +737,9 @@ interface EnemyData {
   isBossAttacking?: boolean;
   attackShockwaveDone?: boolean;
   lastBossVolley?: number;
+  burnTimerMs?: number;
+  isStage2Boss?: boolean;
+  isDying?: boolean;
 }
 
 type AttackSplashStyle = 'bolt' | 'shotgun' | 'spark' | 'ring' | 'blades' | 'lightning' | 'light_burst';
@@ -877,10 +905,20 @@ export class MainScene extends Phaser.Scene {
   private projectilesGroup!: Phaser.Physics.Arcade.Group;
   private pickupsGroup!: Phaser.Physics.Arcade.Group;
 
-  // Camera, Atmosphere & Dynamic Shadow-Casting controllers
+  // Camera, Atmosphere, Dynamic Shadow-Casting & Stage 2 Burning Trees controllers
   private cameraController!: CameraController;
   private atmosphereOverlay: AtmosphereOverlay | null = null;
   private shadowSystem: ShadowCasterSystem | null = null;
+  private burningTrees: BurningTreeSystem | null = null;
+  private cinderWarden: CinderWardenController | null = null;
+  private cinderWardenCallbacks: CinderWardenCallbacks | null = null;
+  private lastBoss2SlowMoScale: number = 1.0;
+  private playerKnockbackVx: number = 0;
+  private playerKnockbackVy: number = 0;
+  private playerKnockbackTimerMs: number = 0;
+  private isPlayerBurning: boolean = false;
+  private playerBurnTimerMs: number = 0;
+  private lastTreePhysicsCollisionMs: number = 0;
 
   // Floating text & batched damage number pools
   private floatingTexts: FloatingText[] = [];
@@ -964,6 +1002,7 @@ export class MainScene extends Phaser.Scene {
 
   // Horde Frenzy / Blood Fog State (triggers every 10 levels & escalates each wave)
   private difficultyPreset: DifficultyPreset = DIFFICULTY_PRESETS.hacker;
+  private currentStage: StageConfig = STAGES.stage_1;
   private bloodFogTimerMs: number = 0;
   private bloodFogBannerTimerMs: number = 0;
   private bloodFogTier: number = 0;
@@ -1053,6 +1092,16 @@ export class MainScene extends Phaser.Scene {
     this.lowHpVignetteAlpha = 0;
     this.screenEdgeFlashAlpha = 0;
     this.stanceRingAlpha = 0.78;
+    this.burningTrees = null;
+    this.cinderWarden = null;
+    this.cinderWardenCallbacks = null;
+    this.lastBoss2SlowMoScale = 1.0;
+    this.playerKnockbackVx = 0;
+    this.playerKnockbackVy = 0;
+    this.playerKnockbackTimerMs = 0;
+    this.isPlayerBurning = false;
+    this.playerBurnTimerMs = 0;
+    this.lastTreePhysicsCollisionMs = 0;
     this.runTime = 0;
     this.enemiesKilled = 0;
     this.coinsEarned = 0;
@@ -1092,6 +1141,7 @@ export class MainScene extends Phaser.Scene {
     this.prevTargetLightMult = 1;
     this.lanternSurgeBoost = 0;
     this.difficultyPreset = gameManager.getDifficultyConfig();
+    this.currentStage = gameManager.getSelectedStage();
     this.bloodFogTimerMs = 0;
     this.bloodFogBannerTimerMs = 0;
     this.bloodFogTier = 0;
@@ -1279,6 +1329,38 @@ export class MainScene extends Phaser.Scene {
       frameHeight: GORE.bloodPack.frameSize,
     });
 
+    // Per-stage preload: Stage 2 assets (ash floor, scorch decals, burnt trees) load ONLY when Stage 2 starts
+    if (this.currentStage.id === 'stage_2') {
+      const isHighQuality = gameManager.getQualityTier() === 'high';
+      const floorAsset = resolveStageAssetVariant(STAGE_2_ASSETS.floor, isHighQuality);
+      preloadImageOrCached(floorAsset.key, floorAsset.url);
+
+      for (let i = 0; i < STAGE_2_ASSETS.burntTrees.length; i++) {
+        const treeAsset = resolveStageAssetVariant(STAGE_2_ASSETS.burntTrees[i], isHighQuality);
+        preloadImageOrCached(treeAsset.key, treeAsset.url);
+      }
+
+      for (let i = 0; i < STAGE_2_ASSETS.scorchDecals.length; i++) {
+        const decalAsset = resolveStageAssetVariant(STAGE_2_ASSETS.scorchDecals[i], isHighQuality);
+        preloadImageOrCached(decalAsset.key, decalAsset.url);
+      }
+
+      const fireSheet = resolveStageAssetVariant(STAGE_2_ASSETS.fireTreeSheet, isHighQuality);
+      preloadSpritesheetOrCached(fireSheet.key, fireSheet.url, {
+        frameWidth: STAGE_2_ASSETS.fireTreeSheet.frameWidth,
+        frameHeight: STAGE_2_ASSETS.fireTreeSheet.frameHeight,
+      });
+
+      const ashSheet = resolveStageAssetVariant(STAGE_2_ASSETS.ashOverlaySheet, isHighQuality);
+      preloadSpritesheetOrCached(ashSheet.key, ashSheet.url, {
+        frameWidth: STAGE_2_ASSETS.ashOverlaySheet.frameWidth,
+        frameHeight: STAGE_2_ASSETS.ashOverlaySheet.frameHeight,
+      });
+
+      // Stage 2 boss ("Cinder Warden") sheets & metadata load ONLY when Stage 2 starts
+      preloadStage2BossAssets(this);
+    }
+
     if (this.load.list.size === 0) {
       this.load.off(Phaser.Loader.Events.PROGRESS, handleProgress);
       gameManager.emitLoadProgress({
@@ -1312,20 +1394,47 @@ export class MainScene extends Phaser.Scene {
     );
 
     // 1. Infinite scrolling ground TileSprite aligned to zoomed camera center (non-interactive)
+    const isStage2 = this.currentStage.id === 'stage_2';
+    const isHighQuality = gameManager.getQualityTier() === 'high';
+    const floorTextureKey = this.resolveStageFloorTextureKey();
+    const floorResolutionScale = isStage2
+      ? resolveStageAssetVariant(STAGE_2_ASSETS.floor, isHighQuality).resolutionScale
+      : 1.0;
+    const floorTileScale = (this.currentStage.background.tileScale ?? 1) * floorResolutionScale;
+
     this.floor = this.add.tileSprite(
       this.cameras.main.width * 0.5,
       this.cameras.main.height * 0.5,
       width,
       height,
-      'floor'
+      floorTextureKey
     )
       .setOrigin(0.5, 0.5)
       .setScrollFactor(0)
+      .setTileScale(floorTileScale, floorTileScale)
       .setDepth(0);
     this.floor.disableInteractive();
 
     // 1b. Dynamic World Torches, Ruined Pillars & Real-Time Shadow-Casting System
-    this.shadowSystem = new ShadowCasterSystem(this, width / 2, height / 2);
+    this.shadowSystem = new ShadowCasterSystem(this, width / 2, height / 2, isStage2);
+    if (isStage2) {
+      ensureBurningTreeTextures(this);
+      ensureCinderWardenTextures(this);
+      registerCinderWardenAnimations(this);
+      const decalResolutionScale = resolveStageAssetVariant(
+        STAGE_2_ASSETS.scorchDecals[0],
+        isHighQuality
+      ).resolutionScale;
+      this.burningTrees = new BurningTreeSystem(this, width / 2, height / 2, decalResolutionScale);
+      this.burningTrees.update(0, 0, width, height, width / 2, height / 2, 0, resolveStage2VfxQuality());
+      this.cinderWarden = new CinderWardenController(this);
+      this.cinderWardenCallbacks = this.createCinderWardenCallbacks();
+    } else {
+      this.burningTrees = null;
+      this.cinderWarden = null;
+      this.cinderWardenCallbacks = null;
+      soundManager.stopFireLoop();
+    }
 
     // 2. Groups
     this.enemiesGroup = this.physics.add.group();
@@ -1865,11 +1974,24 @@ export class MainScene extends Phaser.Scene {
       this
     );
 
+    if (this.burningTrees) {
+      this.physics.add.collider(
+        this.player,
+        this.burningTrees.getStaticBodyGroup(),
+        () => {
+          if (this.time.now - this.lastTreePhysicsCollisionMs >= 120) {
+            this.lastTreePhysicsCollisionMs = this.time.now;
+            this.burningTrees?.recordCollision();
+          }
+        }
+      );
+    }
+
     // Initial stats push to UI
     this.emitStatsUpdate();
 
-    // Start gameplay background music
-    soundManager.playGameplay();
+    // Ensure Exploration music is active via DynamicMusicManager
+    dynamicMusicManager.startRunExploration(false);
 
     // Ensure persistent AudioScene is running, then launch DarknessScene above world and UIScene always on top
     if (!this.scene.isActive('AudioScene')) {
@@ -2032,6 +2154,22 @@ export class MainScene extends Phaser.Scene {
       this.atmosphereOverlay = null;
       this.shadowSystem?.destroy();
       this.shadowSystem = null;
+      this.burningTrees?.destroy();
+      this.burningTrees = null;
+      this.cinderWarden?.destroy();
+      this.cinderWarden = null;
+      this.cinderWardenCallbacks = null;
+      if (this.currentStage.id === 'stage_2') {
+        unloadStage2BossAssets(this);
+      }
+      if (this.time) {
+        this.time.timeScale = 1.0;
+      }
+      if (this.anims) {
+        this.anims.globalTimeScale = 1.0;
+      }
+      this.lastBoss2SlowMoScale = 1.0;
+      soundManager.stopFireLoop();
       if (gameManager.activeScene === this) {
         gameManager.activeScene = null;
       }
@@ -4678,20 +4816,22 @@ export class MainScene extends Phaser.Scene {
     let target: Phaser.Physics.Arcade.Sprite | null = null;
     let closestDistSq = maxChainDist * maxChainDist;
 
+    const sourceY = this.getEnemyTargetY(source);
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (!e || !e.active || !e.scene || e === source) continue;
       const edata = ((e as unknown as { __enemyData?: EnemyData }).__enemyData ||
         e.getData('data')) as EnemyData | undefined;
-      if (!edata || edata.hp <= 0) continue;
+      if (!edata || edata.hp <= 0 || edata.isDying) continue;
 
+      const ey = this.getEnemyTargetY(e);
       // Chain lightning cannot strike enemies outside the lantern's light radius
       const pdx = e.x - this.player.x;
-      const pdy = e.y - this.player.y;
+      const pdy = ey - this.player.y;
       if (pdx * pdx + pdy * pdy > lanternRadiusSq) continue;
 
       const dx = e.x - source.x;
-      const dy = e.y - source.y;
+      const dy = ey - sourceY;
       const dSq = dx * dx + dy * dy;
       if (dSq < closestDistSq) {
         closestDistSq = dSq;
@@ -4700,7 +4840,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     if (target && target.active && target.scene) {
-      this.spawnChainLightningEffect(source.x, source.y, target.x, target.y);
+      this.spawnChainLightningEffect(source.x, sourceY, target.x, this.getEnemyTargetY(target));
       soundManager.playLightning();
       this.damageEnemy(target, chainDamage, false, 0, 0, false, 'lightning');
     }
@@ -4911,7 +5051,18 @@ export class MainScene extends Phaser.Scene {
       }
 
       // Exact real-time delta in ms (clamped at 50ms) so 60/90/120 FPS run identically
-      const delta = performanceRuntime.smoothFrameDelta(rawDelta);
+      const realDelta = performanceRuntime.smoothFrameDelta(rawDelta);
+      const slowScale = this.cinderWarden ? this.cinderWarden.getSlowMoScale() : 1.0;
+      if (slowScale !== this.lastBoss2SlowMoScale) {
+        this.lastBoss2SlowMoScale = slowScale;
+        if (this.time) {
+          this.time.timeScale = slowScale;
+        }
+        if (this.anims) {
+          this.anims.globalTimeScale = slowScale;
+        }
+      }
+      const delta = realDelta * slowScale;
 
     // Delta-time camera follow lerp (equivalent to 0.15 per 60Hz frame, sub-pixel)
     this.cameraController.updateFollowLerp(delta, 0.15);
@@ -5078,21 +5229,41 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
-    // Crossfade to intense music at 5:00 if boss is not active
-    if (this.runTime >= SPAWN_TIMELINE.feel.intenseMusicTimeSec && !this.hasCrossfadedToIntense && !this.activeBoss) {
+    // Escalate Exploration track to intense at 5:00 (deferred automatically if Boss Combat is active)
+    if (this.runTime >= SPAWN_TIMELINE.feel.intenseMusicTimeSec && !this.hasCrossfadedToIntense) {
       this.hasCrossfadedToIntense = true;
-      soundManager.playIntense();
+      dynamicMusicManager.setExplorationIntense(true);
     }
 
-    // 1. Update Floor TileSprite to follow logical camera scroll
+    // 1. Update Floor TileSprite to follow logical camera scroll (exact 1:1 world speed at any tileScale)
     const cam = this.cameras.main;
     const lScrollX = getLogicalScrollX(cam);
     const lScrollY = getLogicalScrollY(cam);
-    this.floor.tilePositionX = lScrollX;
-    this.floor.tilePositionY = lScrollY;
+    this.floor.tilePositionX = lScrollX / this.floor.tileScaleX;
+    this.floor.tilePositionY = lScrollY / this.floor.tileScaleY;
+
+    // 1b. Stage 2 Burning Trees: chunk streaming, culling, Y-sorting, flames & active physics bodies
+    if (this.burningTrees) {
+      this.burningTrees.update(
+        lScrollX,
+        lScrollY,
+        LOGICAL_WIDTH,
+        LOGICAL_HEIGHT,
+        this.player.x,
+        this.player.y,
+        time * 0.001,
+        resolveStage2VfxQuality()
+      );
+      soundManager.setFireLoopProximity(this.burningTrees.getNearestTreeDistance());
+    }
 
     // 2. Handle Player Movement (WASD + Arrows + Virtual Joystick)
     this.updatePlayerMovement(delta);
+
+    if (this.burningTrees) {
+      this.player.setDepth(this.burningTrees.computeYSortDepth(this.player.y));
+      this.updatePlayerTreeHeat(delta);
+    }
 
     // 3. Update Lantern Light Overlay (includes pressure, low-HP heartbeat, and event edge flash)
     this.updateLanternOverlay(delta, lScrollX, lScrollY);
@@ -5111,6 +5282,25 @@ export class MainScene extends Phaser.Scene {
 
     // 8. Update Enemies & AI
     this.updateEnemies(time, delta);
+
+    // 8a. Stage 2 Boss (Cinder Warden) state machine, attacks, hazards & death sequence
+    if (this.cinderWarden && this.cinderWardenCallbacks && this.activeBoss && this.activeBoss.active) {
+      const bossData = ((this.activeBoss as unknown as { __enemyData?: EnemyData }).__enemyData ||
+        this.activeBoss.getData('data')) as EnemyData | undefined;
+      if (bossData?.isStage2Boss) {
+        this.cinderWarden.update(
+          realDelta,
+          delta,
+          time * 0.001,
+          this.player.x,
+          this.player.y,
+          bossData.hp,
+          bossData.maxHp,
+          this.burningTrees,
+          this.cinderWardenCallbacks
+        );
+      }
+    }
 
     // 8b. Update World Torches/Pillars & Cast Real-Time Dynamic Shadows on Terrain & Enemies
     if (this.shadowSystem) {
@@ -5279,6 +5469,7 @@ export class MainScene extends Phaser.Scene {
         this.stanceRing.setAlpha(0.16);
       }
       this.shadowSystem?.resolvePillarPushout(this.player, 18);
+      this.burningTrees?.resolveCirclePushout(this.player, TREES.collision.playerRadius);
       return;
     }
 
@@ -5307,6 +5498,16 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.player.setVelocity(vx, vy);
+
+    if (this.playerKnockbackTimerMs > 0) {
+      const stepMs = Math.min(delta, this.playerKnockbackTimerMs);
+      const stepSec = stepMs * 0.001;
+      this.player.x += this.playerKnockbackVx * stepSec;
+      this.player.y += this.playerKnockbackVy * stepSec;
+      this.playerKnockbackTimerMs = Math.max(0, this.playerKnockbackTimerMs - delta);
+      this.shadowSystem?.resolvePillarPushout(this.player, 18);
+      this.burningTrees?.resolveCirclePushout(this.player, TREES.collision.playerRadius);
+    }
 
     const movingNow = len > 0.05;
     if (movingNow) {
@@ -5528,7 +5729,12 @@ export class MainScene extends Phaser.Scene {
     const count =
       BALANCE.primaryWeapon.startingProjectiles +
       this.multishotLevel * BALANCE.multishot.extraProjectilesPerLevel;
-    const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
+    const baseAngle = Phaser.Math.Angle.Between(
+      this.player.x,
+      this.player.y,
+      target.x,
+      this.getEnemyTargetY(target)
+    );
     const speed = BALANCE.primaryWeapon.projectileSpeed;
     const maxLife = Math.round((maxRange / speed) * 1000);
 
@@ -5602,7 +5808,12 @@ export class MainScene extends Phaser.Scene {
     this.triggerPlayerAttack();
     soundManager.playShoot();
 
-    const baseAngle = Phaser.Math.Angle.Between(this.player.x, this.player.y, target.x, target.y);
+    const baseAngle = Phaser.Math.Angle.Between(
+      this.player.x,
+      this.player.y,
+      target.x,
+      this.getEnemyTargetY(target)
+    );
     const speed = 480;
     const maxLife = Math.round((maxRange / speed) * 1000);
     const spreadOffsets = [-0.14, 0, 0.14];
@@ -5713,9 +5924,14 @@ export class MainScene extends Phaser.Scene {
       for (let j = 0; j < nearby.length; j++) {
         const enemy = nearby[j];
         if (!enemy || !enemy.active || !enemy.scene) continue;
+        const edata = (enemy as unknown as { __enemyData?: EnemyData }).__enemyData;
+        const ey = edata?.isStage2Boss ? getBoss2BodyCenterY(enemy.y) : enemy.y;
         const dx = enemy.x - bx;
-        const dy = enemy.y - by;
-        if (dx * dx + dy * dy < hitRadiusSq) {
+        const dy = ey - by;
+        const effHitSq = edata?.isStage2Boss
+          ? (45 + BOSS2.hitRadius * 0.55) * (45 + BOSS2.hitRadius * 0.55)
+          : hitRadiusSq;
+        if (dx * dx + dy * dy < effHitSq) {
           const enemyAny = enemy as unknown as { __lastBladeHit?: number };
           const lastHit = enemyAny.__lastBladeHit || 0;
           if (now - lastHit > 280) {
@@ -5750,7 +5966,7 @@ export class MainScene extends Phaser.Scene {
       const enemy = enemies[i];
       if (!enemy || !enemy.active || !enemy.scene) continue;
       const dx = enemy.x - this.player.x;
-      const dy = enemy.y - this.player.y;
+      const dy = this.getEnemyTargetY(enemy) - this.player.y;
       if (dx * dx + dy * dy <= maxRadiusSq) {
         const angle = Math.atan2(dy, dx);
         const kx = Math.cos(angle) * 220;
@@ -5975,6 +6191,36 @@ export class MainScene extends Phaser.Scene {
         continue;
       }
 
+      // Stage 2 Burning Trees: spatial-grid projectile collision (player bolts + enemy/boss orbs)
+      if (this.burningTrees) {
+        const projRadius = data.isEnemy
+          ? TREES.projectile.enemyOrbRadius
+          : TREES.projectile.playerBoltRadius;
+        if (this.burningTrees.checkCircleHit(proj.x, proj.y, projRadius)) {
+          this.burningTrees.recordCollision();
+          soundManager.playTreeHit();
+          this.spawnParticleBurst(
+            proj.x,
+            proj.y,
+            TREES.projectile.emberPuffCount,
+            'fx_spark',
+            35,
+            115,
+            0.14,
+            0.28,
+            TREES.projectile.emberPuffColor,
+            240,
+            0.88
+          );
+          if (data.isEnemy) {
+            this.releaseEnemyProjectile(proj);
+          } else {
+            this.releasePlayerProjectile(proj);
+          }
+          continue;
+        }
+      }
+
       if (!data.isEnemy) {
         if (data.rotSpeed) {
           proj.rotation += data.rotSpeed * dtSec;
@@ -6116,6 +6362,10 @@ export class MainScene extends Phaser.Scene {
     const kbDamp = Math.pow(0.88, delta / 16.6667);
     const dtSec = delta * 0.001;
     let usedEliteAuras = 0;
+    const burningTrees = this.burningTrees;
+    if (burningTrees) {
+      burningTrees.beginEnemyBurnGlowFrame();
+    }
 
     for (let i = 0; i < enemies.length; i++) {
       const enemy = enemies[i];
@@ -6128,10 +6378,16 @@ export class MainScene extends Phaser.Scene {
       // Zero-allocation hit-flash tint restoration
       if (edata.tintResetAtMs && time >= edata.tintResetAtMs) {
         edata.tintResetAtMs = 0;
-        if (edata.enraged) {
+        if (edata.isStage2Boss) {
+          if (!edata.isDying) {
+            this.cinderWarden?.restoreVisualTint(enemy);
+          }
+        } else if (edata.enraged) {
           enemy.setTint(edata.type === 'boss' ? 0xff7e86 : 0xff7a7a);
         } else if (edata.isElite) {
           enemy.setTint((ELITE_AURA_STYLE[edata.type] ?? ELITE_AURA_STYLE.brute).spriteTint);
+        } else if (this.currentStage.enemyTint !== null) {
+          enemy.setTint(this.currentStage.enemyTint);
         } else {
           enemy.clearTint();
         }
@@ -6153,7 +6409,10 @@ export class MainScene extends Phaser.Scene {
       }
 
       // Handle knockback decay (frame-rate-independent across 60/90/120fps)
-      if (Math.abs(edata.knockbackX) > 2 || Math.abs(edata.knockbackY) > 2) {
+      if (edata.isStage2Boss && this.cinderWarden?.isMovementLocked()) {
+        edata.knockbackX = 0;
+        edata.knockbackY = 0;
+      } else if (Math.abs(edata.knockbackX) > 2 || Math.abs(edata.knockbackY) > 2) {
         enemy.x += edata.knockbackX * dtSec;
         enemy.y += edata.knockbackY * dtSec;
         edata.knockbackX *= kbDamp;
@@ -6171,18 +6430,29 @@ export class MainScene extends Phaser.Scene {
         edata.chargeTimerMs -= delta;
         const cvx = (edata.chargeVx ?? Math.cos(angle) * effectiveSpeed) * globalEnemySpeedFactor;
         const cvy = (edata.chargeVy ?? Math.sin(angle) * effectiveSpeed) * globalEnemySpeedFactor;
-        enemy.setVelocity(cvx, cvy);
+        if (burningTrees && (edata.type === 'imp' || edata.type === 'brute' || edata.type === 'spitter')) {
+          const eRadius = TREES.collision.enemyRadii[edata.type];
+          burningTrees.steerGroundEnemy(enemy, eRadius, cvx, cvy, edata.phase ?? 0);
+          enemy.setVelocity(burningTrees.steerOut.vx, burningTrees.steerOut.vy);
+        } else {
+          enemy.setVelocity(cvx, cvy);
+        }
         const shouldFlipCharge = cvx < 0;
         if (enemy.flipX !== shouldFlipCharge) enemy.setFlipX(shouldFlipCharge);
         if (edata.type === 'imp' && (!enemy.anims.isPlaying || enemy.anims.currentAnim?.key !== 'imp_run')) {
           enemy.play('imp_run', true);
         }
+        if (burningTrees) {
+          this.updateEnemyTreeHeat(enemy, edata, time, delta);
+        }
         continue;
       }
 
-      // All standard enemies flip toward the player
-      const shouldFlip = dxToPlayer < 0;
-      if (enemy.flipX !== shouldFlip) enemy.setFlipX(shouldFlip);
+      // All standard enemies flip toward the player (Stage 2 Cinder Warden owns its own locked attack facing)
+      if (!edata.isStage2Boss) {
+        const shouldFlip = dxToPlayer < 0;
+        if (enemy.flipX !== shouldFlip) enemy.setFlipX(shouldFlip);
+      }
 
       // Enemy specific behaviors
       switch (edata.type) {
@@ -6277,6 +6547,24 @@ export class MainScene extends Phaser.Scene {
         }
 
         case 'boss': {
+          if (edata.isStage2Boss) {
+            // Stage 2 Cinder Warden AI & attacks are driven by CinderWardenController;
+            // only emit throttled boss HP bar updates here.
+            if (time - this.lastBossEmitMs >= 100) {
+              this.lastBossEmitMs = time;
+              const bossTier = edata.bossTier || 1;
+              gameManager.emitBossUpdate({
+                name: bossTier > 1 ? `${BOSS2.name} Tier ${bossTier}` : BOSS2.name,
+                currentHp: Math.max(0, Math.round(edata.hp)),
+                maxHp: edata.maxHp,
+                active: true,
+                recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 10,
+                enraged: Boolean(edata.enraged),
+              });
+            }
+            break;
+          }
+
           const bossTier = edata.bossTier || 1;
           const hpRatio = edata.hp / Math.max(1, edata.maxHp);
           const isEnraged = hpRatio <= 0.5;
@@ -6381,6 +6669,26 @@ export class MainScene extends Phaser.Scene {
         }
       }
 
+      if (burningTrees) {
+        if (edata.type === 'imp' || edata.type === 'brute' || edata.type === 'spitter') {
+          const eBody = enemy.body as Phaser.Physics.Arcade.Body | null;
+          if (eBody) {
+            const eRadius = TREES.collision.enemyRadii[edata.type];
+            burningTrees.steerGroundEnemy(
+              enemy,
+              eRadius,
+              eBody.velocity.x,
+              eBody.velocity.y,
+              edata.phase ?? 0
+            );
+            enemy.setVelocity(burningTrees.steerOut.vx, burningTrees.steerOut.vy);
+          }
+        }
+        if (!edata.isStage2Boss) {
+          this.updateEnemyTreeHeat(enemy, edata, time, delta);
+        }
+      }
+
       if (
         this.shadowSystem &&
         edata.type !== 'wisp' &&
@@ -6393,12 +6701,161 @@ export class MainScene extends Phaser.Scene {
       }
     }
 
+    if (burningTrees) {
+      burningTrees.endEnemyBurnGlowFrame();
+    }
+
     for (let i = usedEliteAuras; i < this.eliteAuraPool.length; i++) {
       const aura = this.eliteAuraPool[i];
       if (aura && aura.visible) {
         aura.setVisible(false);
       }
     }
+  }
+
+  private updatePlayerTreeHeat(delta: number) {
+    if (!this.burningTrees || this.isDead || this.isVictoryEnded || this.isGamePaused) return;
+    const inHeat = this.burningTrees.isPointInHeatZone(this.player.x, this.player.y);
+    const stateChanged = inHeat !== this.isPlayerBurning;
+    this.isPlayerBurning = inHeat;
+    this.burningTrees.setPlayerBurning(inHeat);
+
+    if (!inHeat) {
+      this.playerBurnTimerMs = 0;
+      if (stateChanged) {
+        this.emitStatsUpdate();
+      }
+      return;
+    }
+
+    if (stateChanged) {
+      this.emitStatsUpdate();
+    }
+
+    this.playerBurnTimerMs += delta;
+    while (this.playerBurnTimerMs >= TREES.heat.tickMs) {
+      this.playerBurnTimerMs -= TREES.heat.tickMs;
+      this.applyHeatBurnToPlayer(TREES.heat.damage);
+      if (this.isDead) break;
+    }
+  }
+
+  private applyHeatBurnToPlayer(amount: number) {
+    if (
+      this.isDead ||
+      this.isVictoryEnded ||
+      this.isGamePaused ||
+      this.dashActiveTimerMs > 0 ||
+      !this.sys?.isActive()
+    ) {
+      return;
+    }
+
+    this.playerStats.currentHp -= amount;
+
+    if (this.activeChallenge?.status === 'active' && this.activeChallenge.id === 'untouchable') {
+      this.failDynamicChallenge('Took burn damage');
+    }
+
+    this.showBurnDamageNumber(this.player.x, this.player.y - 34, amount, true);
+    this.spawnParticleBurst(
+      this.player.x,
+      this.player.y - 4,
+      3,
+      'fx_spark',
+      24,
+      75,
+      0.12,
+      0.24,
+      TREES.projectile.emberPuffColor,
+      240,
+      0.85
+    );
+
+    if (this.playerStats.currentHp <= 0) {
+      this.playerStats.currentHp = 0;
+      this.handlePlayerDeath();
+    }
+
+    this.emitStatsUpdate();
+  }
+
+  private updateEnemyTreeHeat(
+    enemy: Phaser.Physics.Arcade.Sprite,
+    edata: EnemyData,
+    time: number,
+    delta: number
+  ) {
+    if (!this.burningTrees || !enemy.active || edata.hp <= 0) return;
+    if (this.burningTrees.isPointInHeatZone(enemy.x, enemy.y)) {
+      this.burningTrees.markEnemyBurnGlow(enemy.x, enemy.y, time * 0.001, edata.phase ?? 0);
+      edata.burnTimerMs = (edata.burnTimerMs ?? 0) + delta;
+      if (edata.burnTimerMs >= TREES.heat.tickMs) {
+        edata.burnTimerMs -= TREES.heat.tickMs;
+        this.applyHeatBurnToEnemy(enemy, edata, TREES.heat.damage);
+      }
+    } else if (edata.burnTimerMs) {
+      edata.burnTimerMs = 0;
+    }
+  }
+
+  private applyHeatBurnToEnemy(
+    enemy: Phaser.Physics.Arcade.Sprite,
+    edata: EnemyData,
+    amount: number
+  ) {
+    if (!enemy.active || !enemy.scene || edata.hp <= 0 || this.isDead || this.isVictoryEnded) {
+      return;
+    }
+    edata.hp -= amount;
+    this.damageDealt += amount;
+    this.recentDamageLog.push({ timeMs: this.time.now, amount });
+
+    if (edata.hp <= 0) {
+      this.killEnemy(enemy, edata, 0, 0, false);
+      return;
+    }
+
+    this.showBurnDamageNumber(enemy.x, enemy.y - 18, amount, false);
+  }
+
+  private showBurnDamageNumber(x: number, y: number, damage: number, isPlayer: boolean) {
+    const slot = this.acquireDamageBitmap();
+    if (!slot) return;
+
+    const rounded = Math.max(1, Math.round(damage));
+    slot.inUse = true;
+    slot.spawnTime = this.time.now;
+    slot.life = 0;
+    slot.maxLife = 460;
+    slot.vx = Phaser.Math.FloatBetween(-16, 16);
+    slot.vy = -58;
+    slot.gravity = 70;
+    slot.baseScale = isPlayer ? 0.88 : 0.72;
+    slot.popScale = isPlayer ? 1.08 : 0.9;
+
+    slot.text.setPosition(x + Phaser.Math.FloatBetween(-6, 6), y);
+    slot.text.setText(isPlayer ? `-${rounded}` : `${rounded}`);
+    slot.text.setTint(0xff842c);
+    slot.text.setDepth(30);
+    slot.text.setScale(slot.popScale);
+    slot.text.setAlpha(1);
+    slot.text.setActive(true);
+    slot.text.setVisible(true);
+  }
+
+  public toggleTreeDebug(): boolean {
+    if (!this.burningTrees) return false;
+    const next = !this.burningTrees.isDebugEnabled();
+    this.burningTrees.setDebugEnabled(next);
+    this.emitStatsUpdate();
+    return next;
+  }
+
+  public setTreeDebugEnabled(enabled: boolean): void {
+    if (!this.burningTrees) return;
+    this.burningTrees.setDebugEnabled(enabled);
+    this.emitStatsUpdate();
   }
 
   // Enemy Projectile & Ghost Trail Object Pools
@@ -6878,6 +7335,7 @@ export class MainScene extends Phaser.Scene {
     const hpMult =
       (1 + minutes * SPAWN_TIMELINE.enemyScaling.hpGrowthPerMinute + levelHpBonus) *
       this.difficultyPreset.enemyHpMult *
+      this.currentStage.enemyHpMultiplier *
       (fogMods ? fogMods.hpMult : 1);
 
     const speedMult =
@@ -7342,6 +7800,8 @@ export class MainScene extends Phaser.Scene {
     enemy.setScale(scale);
     if (options?.isElite) {
       enemy.setTint((ELITE_AURA_STYLE[type] ?? ELITE_AURA_STYLE.brute).spriteTint);
+    } else if (this.currentStage.enemyTint !== null) {
+      enemy.setTint(this.currentStage.enemyTint);
     } else {
       enemy.clearTint();
     }
@@ -7419,7 +7879,7 @@ export class MainScene extends Phaser.Scene {
     this.bloodFogBannerTimerMs = 0;
     this.nextSpawnTime = this.simTimeMs + 1500;
 
-    soundManager.playBoss();
+    dynamicMusicManager.setBossEncounterActive(true);
     soundManager.playBossSiren();
     this.cameraController.triggerShake(800, 0.025, true);
 
@@ -7427,19 +7887,47 @@ export class MainScene extends Phaser.Scene {
     const x = this.player.x + Math.cos(angle) * 460;
     const y = this.player.y + Math.sin(angle) * 460;
 
-    const boss = this.enemiesGroup.create(x, y, 'boss_idle_sheet') as Phaser.Physics.Arcade.Sprite;
-    boss.setDepth(24);
-    boss.setScale(0.95 + Math.min(0.2, (tier - 1) * 0.08));
+    const isStage2Boss = this.currentStage.id === 'stage_2' && this.cinderWarden !== null;
+    const hasRealBoss2Idle = isStage2Boss && hasBoss2Sheet(this, 'boss2_idle');
+    const initialBossTex = isStage2Boss
+      ? hasRealBoss2Idle
+        ? 'boss2_idle'
+        : 'boss_idle_sheet'
+      : 'boss_idle_sheet';
 
-    const bossBody = boss.body as Phaser.Physics.Arcade.Body;
-    if (bossBody) {
-      bossBody.setSize(160, 200);
-      bossBody.setOffset(125, 26);
+    const boss = this.enemiesGroup.create(x, y, initialBossTex) as Phaser.Physics.Arcade.Sprite;
+    if (isStage2Boss) {
+      boss.setDepth(
+        this.burningTrees ? this.burningTrees.computeYSortDepth(y) : BOSS2.visuals.depth
+      );
+      applyBoss2SpriteLayout(boss, hasRealBoss2Idle ? 'boss2_idle' : null, hasRealBoss2Idle);
+      if (hasRealBoss2Idle) {
+        boss.clearTint();
+      } else {
+        boss.setTint(BOSS2.visuals.placeholderTint);
+      }
+    } else {
+      boss.setDepth(24);
+      boss.setScale(0.95 + Math.min(0.2, (tier - 1) * 0.08));
+      if (this.currentStage.enemyTint !== null) {
+        boss.setTint(this.currentStage.enemyTint);
+      }
+      const bossBody = boss.body as Phaser.Physics.Arcade.Body;
+      if (bossBody) {
+        bossBody.setSize(160, 200);
+        bossBody.setOffset(125, 26);
+      }
     }
 
     const { hpMult, speedMult } = this.getTimelineScaling();
-    // Focused duel Boss HP calibrated for ~30-55s fights across Baby/Pro/Hacker difficulties
-    const bossHp = Math.round(7200 * hpMult * Math.pow(1.6, tier - 1));
+    // Stage 1 boss HP formula; Stage 2 Cinder Warden HP = exact 1.4x Stage 1 boss HP
+    const stage1HpMult = isStage2Boss
+      ? hpMult / Math.max(0.01, this.currentStage.enemyHpMultiplier)
+      : hpMult;
+    const stage1BossHp = Math.round(7200 * stage1HpMult * Math.pow(1.6, tier - 1));
+    const bossHp = isStage2Boss
+      ? Math.round(stage1BossHp * BOSS2.stats.hpMultiplier)
+      : stage1BossHp;
     const bossDmg = Math.round(
       48 * (1 + (tier - 1) * 0.35) * this.difficultyPreset.enemyDmgMult
     );
@@ -7449,7 +7937,7 @@ export class MainScene extends Phaser.Scene {
       type: 'boss',
       hp: bossHp,
       maxHp: bossHp,
-      speed: Math.round(105 * speedMult),
+      speed: isStage2Boss ? BOSS2.stats.walkSpeed : Math.round(105 * speedMult),
       damage: bossDmg,
       scoreValue: 1500 * tier,
       gemValue: 45,
@@ -7463,6 +7951,8 @@ export class MainScene extends Phaser.Scene {
       isBossAttacking: false,
       attackShockwaveDone: false,
       lastBossVolley: 0,
+      isStage2Boss,
+      isDying: false,
     };
     const bossAny = boss as unknown as { __enemyData?: EnemyData; __lastBladeHit?: number };
     bossAny.__enemyData = edata;
@@ -7470,41 +7960,50 @@ export class MainScene extends Phaser.Scene {
     boss.setData('data', edata);
     this.activeBoss = boss;
 
-    // Start with boss_idle and randomize start frame
-    boss.play('boss_idle');
-    boss.anims.setProgress(Math.random());
-
-    // On boss_attack frame index 10: deal area damage, add camera shake, spawn fx_ring shockwave
-    boss.on(
-      Phaser.Animations.Events.ANIMATION_UPDATE,
-      (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
-        if (!boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
-        if (_anim.key === 'boss_attack') {
-          const fIndex =
-            typeof frame.textureFrame === 'number'
-              ? frame.textureFrame
-              : parseInt(String(frame.textureFrame), 10);
-          if (fIndex === 10 || frame.index === 11) {
-            if (!edata.attackShockwaveDone) {
-              edata.attackShockwaveDone = true;
-              this.triggerBossAreaAttack(boss);
+    if (isStage2Boss && this.cinderWarden) {
+      this.cinderWarden.attachBoss(boss);
+    } else {
+      // Start Stage 1 boss with boss_idle and randomize start frame
+      boss.play('boss_idle');
+      boss.anims.setProgress(Math.random());
+      // Stage 1 Void Titan: on boss_attack frame index 10 deal area damage, shake, fx_ring shockwave
+      boss.on(
+        Phaser.Animations.Events.ANIMATION_UPDATE,
+        (_anim: Phaser.Animations.Animation, frame: Phaser.Animations.AnimationFrame) => {
+          if (!boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
+          if (_anim.key === 'boss_attack') {
+            const fIndex =
+              typeof frame.textureFrame === 'number'
+                ? frame.textureFrame
+                : parseInt(String(frame.textureFrame), 10);
+            if (fIndex === 10 || frame.index === 11) {
+              if (!edata.attackShockwaveDone) {
+                edata.attackShockwaveDone = true;
+                this.triggerBossAreaAttack(boss);
+              }
             }
           }
         }
-      }
-    );
+      );
 
-    // Return to boss_idle when boss_attack completes
-    boss.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
-      if (!boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
-      if (anim.key === 'boss_attack') {
-        edata.isBossAttacking = false;
-        edata.attackShockwaveDone = false;
-        boss.play('boss_idle', true);
-      }
-    });
+      // Return to boss_idle when boss_attack completes
+      boss.on(Phaser.Animations.Events.ANIMATION_COMPLETE, (anim: Phaser.Animations.Animation) => {
+        if (!boss.active || !boss.scene || this.isDead || !this.sys?.isActive()) return;
+        if (anim.key === 'boss_attack') {
+          edata.isBossAttacking = false;
+          edata.attackShockwaveDone = false;
+          boss.play('boss_idle', true);
+        }
+      });
+    }
 
-    const bossDisplayName = tier > 1 ? `The Void Titan Tier ${tier}` : 'The Void Titan';
+    const bossDisplayName = isStage2Boss
+      ? tier > 1
+        ? `${BOSS2.name} Tier ${tier}`
+        : BOSS2.name
+      : tier > 1
+        ? `The Void Titan Tier ${tier}`
+        : 'The Void Titan';
 
     gameManager.emitBossUpdate({
       name: bossDisplayName,
@@ -7583,7 +8082,7 @@ export class MainScene extends Phaser.Scene {
     const kx = Math.cos(angle) * 140;
     const ky = Math.sin(angle) * 140;
     const hitX = (proj.x + enemy.x) * 0.5;
-    const hitY = (proj.y + enemy.y) * 0.5;
+    const hitY = (proj.y + this.getEnemyTargetY(enemy)) * 0.5;
 
     this.damageEnemy(
       enemy,
@@ -7617,7 +8116,7 @@ export class MainScene extends Phaser.Scene {
     if (!enemy || !enemy.active || !enemy.scene || this.isDead || this.isVictoryEnded || !this.sys?.isActive()) return;
     const edata = ((enemy as unknown as { __enemyData?: EnemyData }).__enemyData ||
       enemy.getData('data')) as EnemyData;
-    if (!edata || edata.hp <= 0) return;
+    if (!edata || edata.hp <= 0 || edata.isDying) return;
 
     edata.hp -= damage;
     this.damageDealt += damage;
@@ -7639,10 +8138,12 @@ export class MainScene extends Phaser.Scene {
       return;
     }
 
+    const enemyTargetY = this.getEnemyTargetY(enemy);
+
     // Surviving enemy hit: magic attack splash effect instead of blood splash
     this.spawnMagicHitSplash(
       hitX ?? enemy.x,
-      hitY ?? enemy.y,
+      hitY ?? enemyTargetY,
       attackStyle,
       knockbackX,
       knockbackY,
@@ -7655,27 +8156,46 @@ export class MainScene extends Phaser.Scene {
     edata.knockbackX += knockbackX * resist;
     edata.knockbackY += knockbackY * resist;
 
-    // Color-flash on hit (golden/crimson burst for critical hits, crisp white flash otherwise)
+    // Color-flash on hit (Stage 2 boss uses crisp white tint for 80ms; Stage 1 unchanged)
     const isHeavyEnemy = Boolean(edata.isElite || edata.type === 'boss');
-    if (isCrit) {
-      enemy.setTint(isHeavyEnemy ? 0xff4d5a : 0xf2a93b);
-      gameManager.emitCritImpact({
-        damage,
-        x: hitX ?? enemy.x,
-        y: hitY ?? enemy.y,
-        isEliteOrBoss: isHeavyEnemy,
-        enemyType: edata.type,
-        enemyDisplaySize,
-        attackStyle,
-      });
+    if (edata.isStage2Boss) {
+      if (this.cinderWarden) {
+        this.cinderWarden.triggerHitFlash(enemy);
+      } else {
+        enemy.setTint(BOSS2.visuals.hitFlashTint);
+      }
+      if (isCrit) {
+        gameManager.emitCritImpact({
+          damage,
+          x: hitX ?? enemy.x,
+          y: hitY ?? enemyTargetY,
+          isEliteOrBoss: true,
+          enemyType: edata.type,
+          enemyDisplaySize,
+          attackStyle,
+        });
+      }
+      edata.tintResetAtMs = this.time.now + BOSS2.visuals.hitFlashMs;
     } else {
-      enemy.setTint(0xffffff);
+      if (isCrit) {
+        enemy.setTint(isHeavyEnemy ? 0xff4d5a : 0xf2a93b);
+        gameManager.emitCritImpact({
+          damage,
+          x: hitX ?? enemy.x,
+          y: hitY ?? enemy.y,
+          isEliteOrBoss: isHeavyEnemy,
+          enemyType: edata.type,
+          enemyDisplaySize,
+          attackStyle,
+        });
+      } else {
+        enemy.setTint(0xffffff);
+      }
+      edata.tintResetAtMs = this.time.now + (isCrit ? 95 : 70);
     }
 
-    edata.tintResetAtMs = this.time.now + (isCrit ? 95 : 70);
-
     // Spawn floating damage text
-    this.showDamageNumber(enemy.x, enemy.y - 20, damage, isCrit);
+    this.showDamageNumber(enemy.x, enemyTargetY - 20, damage, isCrit);
   }
 
   private killEnemy(
@@ -7685,6 +8205,25 @@ export class MainScene extends Phaser.Scene {
     knockbackY: number = 0,
     isCrit: boolean = false
   ) {
+    // Stage 2 Cinder Warden plays its 0.3s slow-mo + ash fade death sequence before dropping loot & clearing Stage 2
+    if (edata.isStage2Boss && this.cinderWarden && this.cinderWardenCallbacks) {
+      if (edata.isDying) return;
+      edata.isDying = true;
+      edata.hp = 0;
+      edata.tintResetAtMs = 0;
+      const bossTier = edata.bossTier || 1;
+      gameManager.emitBossUpdate({
+        name: bossTier > 1 ? `${BOSS2.name} Tier ${bossTier}` : BOSS2.name,
+        currentHp: 0,
+        maxHp: edata.maxHp,
+        active: true,
+        recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 10,
+        enraged: Boolean(edata.enraged),
+      });
+      this.cinderWarden.startDeathSequence(enemy, this.cinderWardenCallbacks);
+      return;
+    }
+
     this.enemiesKilled++;
     bestiary.recordKill(edata.type);
     dailyMissions.recordIncrement('kill_enemies', 1);
@@ -7770,6 +8309,9 @@ export class MainScene extends Phaser.Scene {
         const oy = enemy.y + Phaser.Math.Between(-25, 25);
         this.spawnPickup(ox, oy, 'coin', 1);
       }
+      if (coinCount >= 2) {
+        soundManager.playCoinDropScatter(coinCount);
+      }
     }
 
     // Elite & Boss chest drop (guaranteed upgrade on pickup)
@@ -7813,6 +8355,7 @@ export class MainScene extends Phaser.Scene {
     if (edata.type === 'boss') {
       this.activeBoss = null;
       gameManager.emitBossUpdate(null);
+      dynamicMusicManager.setBossEncounterActive(false);
       this.tweens.killTweensOf(enemy);
       enemy.off(Phaser.Animations.Events.ANIMATION_UPDATE);
       enemy.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
@@ -7822,6 +8365,216 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.releaseEnemy(enemy);
+  }
+
+  private createCinderWardenCallbacks(): CinderWardenCallbacks {
+    return {
+      damagePlayer: (amount: number) =>
+        this.damagePlayer(Math.max(1, Math.round(amount * this.difficultyPreset.enemyDmgMult))),
+      isPlayerInvulnerable: () => this.isInvulnerable || this.dashActiveTimerMs > 0,
+      applyPlayerKnockback: (dirX: number, dirY: number, distancePx: number, durationMs: number) => {
+        if (this.isDead || this.isVictoryEnded || durationMs <= 0) return;
+        const speed = distancePx / (durationMs * 0.001);
+        this.playerKnockbackVx = dirX * speed;
+        this.playerKnockbackVy = dirY * speed;
+        this.playerKnockbackTimerMs = durationMs;
+      },
+      triggerCameraShake: (durationMs: number, intensity: number) => {
+        this.cameraController.triggerShake(durationMs, intensity, false);
+      },
+      spawnEmberPuff: (x: number, y: number, count: number) => {
+        this.spawnParticleBurst(
+          x,
+          y,
+          count,
+          'fx_spark',
+          50,
+          165,
+          0.14,
+          0.3,
+          TREES.projectile.emberPuffColor,
+          260,
+          0.9
+        );
+      },
+      spawnSpawnBursts: (x: number, y: number) => {
+        soundManager.playBossSlam();
+        this.spawnParticleBurst(
+          x,
+          y,
+          BOSS2.spawn.dustBurstCount,
+          'void_wisp_particle',
+          40,
+          165,
+          0.32,
+          0.74,
+          0x7c7268,
+          620,
+          0.78,
+          Phaser.BlendModes.NORMAL
+        );
+        this.spawnParticleBurst(
+          x,
+          y - 20,
+          BOSS2.spawn.emberBurstCount,
+          'fx_spark',
+          75,
+          230,
+          0.16,
+          0.36,
+          BOSS2.visuals.placeholderTint,
+          520,
+          0.9,
+          Phaser.BlendModes.ADD
+        );
+      },
+      spawnDeathBursts: (x: number, y: number) => {
+        soundManager.playEnemyDeath();
+        this.spawnParticleBurst(
+          x,
+          y,
+          BOSS2.death.emberBurstCount,
+          'fx_spark',
+          90,
+          270,
+          0.18,
+          0.42,
+          BOSS2.visuals.placeholderTint,
+          620,
+          0.92,
+          Phaser.BlendModes.ADD
+        );
+        this.spawnParticleBurst(
+          x,
+          y,
+          BOSS2.death.ashBurstCount,
+          'void_wisp_particle',
+          40,
+          170,
+          0.35,
+          0.8,
+          0x928a82,
+          760,
+          0.84,
+          Phaser.BlendModes.NORMAL
+        );
+        this.spawnExpandingRing(
+          x,
+          y,
+          0.2,
+          2.2,
+          0.85,
+          520,
+          24,
+          BOSS2.visuals.placeholderTint,
+          Phaser.BlendModes.ADD
+        );
+      },
+      showCallout: (x: number, y: number, text: string, color: string) => {
+        this.showFloatingCallout(x, y, text, color);
+      },
+      onPhase2Enter: (boss: Phaser.Physics.Arcade.Sprite) => {
+        const edata = ((boss as unknown as { __enemyData?: EnemyData }).__enemyData ||
+          boss.getData('data')) as EnemyData | undefined;
+        if (!edata) return;
+        edata.enraged = true;
+        const bossTier = edata.bossTier || 1;
+        this.lastBossEmitMs = this.time.now;
+        gameManager.emitBossUpdate({
+          name: bossTier > 1 ? `${BOSS2.name} Tier ${bossTier}` : BOSS2.name,
+          currentHp: Math.max(0, Math.round(edata.hp)),
+          maxHp: edata.maxHp,
+          active: true,
+          recommendedLevel: BOSS_RECOMMENDED_LEVEL + (bossTier - 1) * 10,
+          enraged: true,
+        });
+      },
+      onDeathComplete: (boss: Phaser.Physics.Arcade.Sprite) => {
+        this.finalizeCinderWardenDeath(boss);
+      },
+    };
+  }
+
+  private finalizeCinderWardenDeath(boss: Phaser.Physics.Arcade.Sprite) {
+    if (!this.sys?.isActive() || this.isDead || this.isVictoryEnded) return;
+    const edata = ((boss as unknown as { __enemyData?: EnemyData }).__enemyData ||
+      boss.getData('data')) as EnemyData | undefined;
+    const bx = boss.x;
+    const by = boss.y;
+
+    this.enemiesKilled++;
+    bestiary.recordKill('boss');
+    dailyMissions.recordIncrement('kill_enemies', 1);
+    achievements.recordIncrement('totalKills', 1);
+    dailyMissions.recordIncrement('kill_bosses', 1);
+    achievements.recordIncrement('bossesDefeated', 1);
+
+    if (this.playerStats.eliteKillHeal > 0) {
+      const prevHp = this.playerStats.currentHp;
+      this.playerStats.currentHp = Math.min(
+        this.playerStats.maxHp,
+        this.playerStats.currentHp + this.playerStats.eliteKillHeal
+      );
+      const healed = Math.round(this.playerStats.currentHp - prevHp);
+      if (healed > 0) {
+        this.showFloatingCallout(this.player.x, this.player.y - 36, `+${healed} HP`, '#6ee7b7');
+      }
+    }
+
+    // Drop guaranteed chest + XP gems + Soul Coins
+    const xpMult =
+      this.darknessFallsTimerMs > 0 ? 1 + LIGHT.progression.darknessFalls.xpDropBonus : 1;
+    const primaryGemXp = Math.max(1, Math.round((edata?.gemValue ?? 45) * xpMult));
+    this.spawnPickup(bx, by, 'gem', primaryGemXp);
+
+    const bonusGemXp = Math.max(6, Math.round(primaryGemXp * 0.4));
+    for (let i = 0; i < BOSS2.death.bonusGemCount; i++) {
+      const a = (i * Math.PI * 2) / BOSS2.death.bonusGemCount;
+      this.spawnPickup(
+        bx + Math.cos(a) * BOSS2.death.bonusGemSpreadPx,
+        by + Math.sin(a) * BOSS2.death.bonusGemSpreadPx,
+        'gem',
+        bonusGemXp
+      );
+    }
+
+    const coinCount = edata?.coinDrops ?? 30;
+    for (let i = 0; i < coinCount; i++) {
+      const ox = bx + Phaser.Math.Between(-30, 30);
+      const oy = by + Phaser.Math.Between(-30, 30);
+      this.spawnPickup(ox, oy, 'coin', 1);
+    }
+    soundManager.playCoinDropScatter(coinCount);
+    this.spawnPickup(bx + 14, by - 10, 'chest', 1);
+
+    if (
+      this.activeChallenge &&
+      this.activeChallenge.status === 'active' &&
+      this.activeChallenge.id === 'no_red_shards'
+    ) {
+      this.activeChallenge.progress = 1;
+      this.completeDynamicChallenge();
+    }
+
+    // Restore normal timescale, clear boss state & trigger Stage 2 victory/clear save
+    if (this.time) {
+      this.time.timeScale = 1.0;
+    }
+    if (this.anims) {
+      this.anims.globalTimeScale = 1.0;
+    }
+    this.lastBoss2SlowMoScale = 1.0;
+
+    this.activeBoss = null;
+    gameManager.emitBossUpdate(null);
+    dynamicMusicManager.setBossEncounterActive(false);
+    this.tweens.killTweensOf(boss);
+    boss.off(Phaser.Animations.Events.ANIMATION_UPDATE);
+    boss.off(Phaser.Animations.Events.ANIMATION_COMPLETE);
+    if (boss.scene) {
+      boss.destroy();
+    }
+    this.triggerStageVictory();
   }
 
   private triggerBloodFogWave(tier: number): void {
@@ -8070,7 +8823,7 @@ export class MainScene extends Phaser.Scene {
       }
       this.emitStatsUpdate();
     } else if (type === 'chest') {
-      soundManager.playCoinCollect();
+      soundManager.playCoinGain('medium');
       this.spawnParticleBurst(pickup.x, pickup.y, 24, 'fx_ring', 90, 220, 0.25, 0.45, 0xf2a93b);
       this.releasePickup(pickup);
       this.triggerLevelUp();
@@ -8422,7 +9175,7 @@ export class MainScene extends Phaser.Scene {
         break;
     }
 
-    soundManager.playCoinCollect();
+    soundManager.playCoinGain('medium');
     haptics.onMissionComplete();
     this.showFloatingCallout(
       this.player.x,
@@ -8451,13 +9204,15 @@ export class MainScene extends Phaser.Scene {
     if (!enemy || !enemy.active || !enemy.scene) return;
     const edata = ((enemy as unknown as { __enemyData?: EnemyData }).__enemyData ||
       enemy.getData('data')) as EnemyData;
-    if (!edata) return;
+    if (!edata || edata.isDying) return;
 
     this.damagePlayer(edata.damage);
   }
 
-  private damagePlayer(amount: number) {
-    if (this.isInvulnerable || this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) return;
+  private damagePlayer(amount: number): boolean {
+    if (this.isInvulnerable || this.isDead || this.isVictoryEnded || this.isGamePaused || !this.sys?.isActive()) {
+      return false;
+    }
 
     // Blend by playing attack only while the player is not hit, then return to walk
     if (this.isAttacking) {
@@ -8508,6 +9263,7 @@ export class MainScene extends Phaser.Scene {
     }
 
     this.emitStatsUpdate();
+    return true;
   }
 
   private handlePlayerDeath() {
@@ -8562,7 +9318,7 @@ export class MainScene extends Phaser.Scene {
     this.physics.pause();
 
     soundManager.unduckMusic(100);
-    soundManager.playGameOverStinger();
+    dynamicMusicManager.enterDefeat();
 
     // Bank earned coins & flush Daily Missions + Bestiary on run completion
     saveCoins(getSavedCoins() + this.coinsEarned);
@@ -8581,8 +9337,10 @@ export class MainScene extends Phaser.Scene {
       ease: 'Power2',
       onComplete: () => {
         if (!this.sys?.isActive()) return;
+        const timeSurvived = Math.floor(this.runTime);
+        const bestResult = gameManager.recordStageBestTime(this.currentStage.id, timeSurvived);
         const stats: RunStats = {
-          timeSurvived: Math.floor(this.runTime),
+          timeSurvived,
           enemiesKilled: this.enemiesKilled,
           coinsEarned: this.coinsEarned,
           levelReached: this.playerLevel,
@@ -8590,6 +9348,10 @@ export class MainScene extends Phaser.Scene {
           victory: false,
           challengesCompleted: this.challengesCompletedCount,
           difficulty: this.difficultyPreset.id,
+          stageId: this.currentStage.id,
+          stageName: this.currentStage.name,
+          stageBestTime: bestResult.bestTime,
+          isNewStageBestTime: bestResult.isNewBest,
         };
         gameManager.emitGameOver(stats);
       },
@@ -8612,6 +9374,10 @@ export class MainScene extends Phaser.Scene {
     if (this.time) {
       this.time.timeScale = 1.0;
     }
+    if (this.anims) {
+      this.anims.globalTimeScale = 1.0;
+    }
+    this.lastBoss2SlowMoScale = 1.0;
 
     if (this.player?.anims) {
       this.player.anims.stop();
@@ -8619,6 +9385,7 @@ export class MainScene extends Phaser.Scene {
     }
     this.physics.pause();
 
+    soundManager.stopFireLoop();
     soundManager.unduckMusic(100);
     soundManager.playLevelUp();
     haptics.onLevelUp();
@@ -8638,29 +9405,50 @@ export class MainScene extends Phaser.Scene {
     bestiary.flush();
     this.emitStatsUpdate();
 
-    // Celebratory golden pulse & immediate Stage 1 Complete notification
+    // Persist Stage 1 / Stage 2 boss defeat & record stage best time
+    if (this.currentStage.id === 'stage_1') {
+      gameManager.markStage1BossDefeated();
+    } else if (this.currentStage.id === 'stage_2') {
+      gameManager.markStage2BossDefeated();
+    }
+    const timeSurvived = Math.floor(this.runTime);
+    const bestResult = gameManager.recordStageBestTime(this.currentStage.id, timeSurvived);
+    const diffClearResult = gameManager.recordDifficultyClear(
+      this.currentStage.id,
+      this.difficultyPreset.id,
+      timeSurvived
+    );
+
+    // Celebratory golden pulse & immediate Stage Complete notification
+    const stageClearTitle = `STAGE ${this.currentStage.stageNumber} COMPLETE!`;
     if (this.player && this.player.active) {
       this.spawnLevelUpRingEffect(this.player.x, this.player.y);
       this.spawnParticleBurst(this.player.x, this.player.y, 14, 'fx_ring', 130, 290, 0.18, 0.36, 0xf2c464, 420, 0.68);
       this.spawnParticleBurst(this.player.x, this.player.y, 16, 'fx_spark', 110, 260, 0.16, 0.32, 0xffd700, 440, 0.72);
-      this.showFloatingCallout(this.player.x, this.player.y - 54, 'STAGE 1 COMPLETE!', '#f2c464');
+      this.showFloatingCallout(this.player.x, this.player.y - 54, stageClearTitle, '#f2c464');
     }
 
     gameManager.emitEventWarning({
-      title: 'STAGE 1 COMPLETE!',
-      subtitle: `${this.difficultyPreset.name} Mode · +${stageRewardGold.toLocaleString()} Gold Reward`,
+      title: stageClearTitle,
+      subtitle: `${this.currentStage.name} · ${this.difficultyPreset.name} Mode · +${stageRewardGold.toLocaleString()} Gold Reward`,
     });
 
     this.time.delayedCall(1250, () => {
       if (!this.sys?.isActive()) return;
       gameManager.emitEventWarning(null);
       const stats: RunStats = {
-        timeSurvived: Math.floor(this.runTime),
+        timeSurvived,
         enemiesKilled: this.enemiesKilled,
         coinsEarned: this.coinsEarned,
         runCoinsCollected,
         stageRewardGold,
-        stageCleared: 1,
+        stageCleared: this.currentStage.stageNumber,
+        stageId: this.currentStage.id,
+        stageName: this.currentStage.name,
+        stageBestTime: bestResult.bestTime,
+        isNewStageBestTime: bestResult.isNewBest,
+        difficultyBestClearTime: diffClearResult.record.bestClearTimeSec ?? Math.max(1, timeSurvived),
+        isNewDifficultyBestClearTime: diffClearResult.isNewBest,
         levelReached: this.playerLevel,
         damageDealt: this.damageDealt,
         victory: true,
@@ -8671,9 +9459,64 @@ export class MainScene extends Phaser.Scene {
     });
   }
 
+  private resolveStageFloorTextureKey(): string {
+    const bg = this.currentStage.background;
+    if (bg.baseColor) {
+      this.cameras.main.setBackgroundColor(bg.baseColor);
+    }
+
+    const texKey = bg.textureKey;
+    if (this.textures.exists(texKey)) {
+      const tex = this.textures.get(texKey);
+      if (tex && tex.setFilter) {
+        tex.setFilter(Phaser.Textures.FilterMode.LINEAR);
+      }
+      return texKey;
+    }
+
+    if (!bg.baseColor) {
+      return 'floor';
+    }
+
+    const baseFloorTex = this.textures.get('floor');
+    const sourceImg = baseFloorTex?.getSourceImage() as
+      | HTMLImageElement
+      | HTMLCanvasElement
+      | undefined;
+    const texW =
+      sourceImg && 'width' in sourceImg && sourceImg.width > 0 ? sourceImg.width : 512;
+    const texH =
+      sourceImg && 'height' in sourceImg && sourceImg.height > 0 ? sourceImg.height : 512;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = texW;
+    canvas.height = texH;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.fillStyle = bg.baseColor;
+      ctx.fillRect(0, 0, texW, texH);
+      if (sourceImg) {
+        ctx.save();
+        ctx.globalAlpha = bg.tileOverlayAlpha;
+        ctx.drawImage(sourceImg, 0, 0, texW, texH);
+        ctx.restore();
+      }
+      ctx.fillStyle = 'rgba(20, 16, 14, 0.34)';
+      ctx.fillRect(0, 0, texW, texH);
+    }
+
+    this.textures.addCanvas(texKey, canvas);
+    return texKey;
+  }
+
   // -------------------------------------------------------------
   // Helpers & UI Bridge
   // -------------------------------------------------------------
+  private getEnemyTargetY(enemy: Phaser.Physics.Arcade.Sprite): number {
+    const edata = (enemy as unknown as { __enemyData?: EnemyData }).__enemyData;
+    return edata?.isStage2Boss ? getBoss2BodyCenterY(enemy.y) : enemy.y;
+  }
+
   private getNearestEnemy(range: number): Phaser.Physics.Arcade.Sprite | null {
     const enemies = this.enemiesGroup.getChildren() as Phaser.Physics.Arcade.Sprite[];
     let nearest: Phaser.Physics.Arcade.Sprite | null = null;
@@ -8682,8 +9525,10 @@ export class MainScene extends Phaser.Scene {
     for (let i = 0; i < enemies.length; i++) {
       const e = enemies[i];
       if (!e.active) continue;
+      const edata = (e as unknown as { __enemyData?: EnemyData }).__enemyData;
+      if (edata?.isDying) continue;
       const dx = e.x - this.player.x;
-      const dy = e.y - this.player.y;
+      const dy = (edata?.isStage2Boss ? getBoss2BodyCenterY(e.y) : e.y) - this.player.y;
       const dSq = dx * dx + dy * dy;
       if (dSq < minDistSq) {
         minDistSq = dSq;
@@ -9013,6 +9858,13 @@ export class MainScene extends Phaser.Scene {
       coins: this.coinsEarned,
       weapons: this.weaponsSnapshot,
       combo: this.comboMultiplier,
+      comboKills: this.comboKills,
+      comboTimeRemainingMs: Math.max(0, this.comboTimerMs),
+      comboDecayMs: SPAWN_TIMELINE.combo.decayMs,
+      comboNextThreshold:
+        this.comboMultiplier < SPAWN_TIMELINE.combo.killThresholds.length
+          ? SPAWN_TIMELINE.combo.killThresholds[this.comboMultiplier]
+          : null,
       isUnderPressure: this.isUnderPressure,
       lightShardRemainingSec:
         this.lightShardTimerMs > 0 ? Math.ceil(this.lightShardTimerMs / 1000) : 0,
@@ -9030,6 +9882,10 @@ export class MainScene extends Phaser.Scene {
       dashCooldownProgress,
       equippedRelicIds: this.playerStats.equippedRelicIds,
       activeRelicSynergies: this.playerStats.activeRelicSynergies,
+      isBurning: this.isPlayerBurning,
+      stageId: this.currentStage.id,
+      treeDebug: this.burningTrees ? this.burningTrees.getDebugSnapshot() : null,
+      bossDebug: this.cinderWarden ? this.cinderWarden.getDebugSnapshot() : null,
       debug: {
         fps,
         enemyCount,
@@ -9065,6 +9921,9 @@ export class MainScene extends Phaser.Scene {
     } else if (!this.isGamePaused && !this.isDead) {
       if (this.physics?.world) this.physics.resume();
       if (this.time) this.time.paused = false;
+      if (this.burningTrees && !this.isVictoryEnded) {
+        soundManager.startFireLoop(this.burningTrees.getNearestTreeDistance());
+      }
     }
   }
 
@@ -9156,6 +10015,9 @@ export class MainScene extends Phaser.Scene {
       currentHp: this.playerStats ? this.playerStats.currentHp : BALANCE.player.startingHp,
       maxHp: this.playerStats ? this.playerStats.maxHp : BALANCE.player.startingHp,
       activeBoss: this.activeBoss,
+      isStage2Boss: Boolean(this.cinderWarden && this.activeBoss && this.activeBoss.active),
+      isStage2BossPhase2: Boolean(this.cinderWarden && this.cinderWarden.isPhase2Active()),
+      cinderWardenTelegraph: this.cinderWarden ? this.cinderWarden.getTelegraphSnapshot() : null,
       enemiesGroup: this.enemiesGroup,
       pickupsGroup: this.pickupsGroup,
       projectilesGroup: this.projectilesGroup,
@@ -9163,6 +10025,8 @@ export class MainScene extends Phaser.Scene {
       orbitingBlades: this.orbitingBlades,
       torches: this.shadowSystem ? this.shadowSystem.getTorchesSnapshot() : null,
       pillars: this.shadowSystem ? this.shadowSystem.getPillarsSnapshot() : null,
+      burningTreeLights: this.burningTrees ? this.burningTrees.getNearestLightsSnapshot() : null,
+      burningTreeFarGlows: this.burningTrees ? this.burningTrees.getFarGlowsSnapshot() : null,
       levelUpPulseSeq: this.levelUpPulseSeq,
       lightRadiusMultiplier: this.getLightRadiusMultiplier(),
       hasNightEyes: this.hasNightEyes,

@@ -92,9 +92,14 @@ export const ShopPage: React.FC<ShopPageProps> = ({ initialSubTab = 'market' }) 
   };
 
   const handleBuyDeal = (dealId: string) => {
+    const deal = deals.find((d) => d.id === dealId);
     const res = purchaseDailyShopDeal(dealId);
     if (res.success) {
-      soundManager.playCoinCollect();
+      if (deal?.currency === 'coins') {
+        soundManager.playCoinSpend(deal.cost);
+      } else {
+        soundManager.playCoinGain(deal?.id.endsWith('_warden_tribute') ? 'jackpot' : 'large');
+      }
       haptics.tap('heavy');
       setCoins(res.newCoins);
       setGems(res.newGems);
@@ -105,7 +110,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({ initialSubTab = 'market' }) 
   const handleBuyUpgrade = (upgradeId: string) => {
     const res = purchaseUpgrade(upgradeId);
     if (res.success) {
-      soundManager.playCoinCollect();
+      const spent = Math.max(50, coins - res.newCoins);
+      soundManager.playCoinSpend(spent);
       haptics.tap('medium');
       setCoins(res.newCoins);
       setUpgrades(res.upgrades);
@@ -115,7 +121,8 @@ export const ShopPage: React.FC<ShopPageProps> = ({ initialSubTab = 'market' }) 
   const handleUnlockRelic = (relicId: RelicId) => {
     const res = unlockRelic(relicId);
     if (res.success) {
-      soundManager.playCoinCollect();
+      const spent = Math.max(100, coins - res.newCoins);
+      soundManager.playCoinSpend(spent);
       haptics.tap('heavy');
       setCoins(res.newCoins);
       setUnlockedRelics(res.unlockedRelics);
@@ -145,7 +152,7 @@ export const ShopPage: React.FC<ShopPageProps> = ({ initialSubTab = 'market' }) 
   const handleUnlockRelicSlot = () => {
     const res = unlockNextRelicSlot();
     if (res.success) {
-      soundManager.playCoinCollect();
+      soundManager.playCoinSpend(500);
       haptics.tap('heavy');
       setGems(res.newSeals);
       setMaxRelicSlots(res.maxRelicSlots);

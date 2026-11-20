@@ -5,13 +5,21 @@ import { UI_SPRITES } from './uiConfig';
 export interface UiBarProps {
   percent: number;
   trailPercent?: number;
-  fill?: 'crimson' | 'cyan' | 'gold';
+  fill?: 'crimson' | 'cyan' | 'gold' | 'green' | 'darkPurple';
   heightClassName?: string;
   ariaLabel?: string;
   className?: string;
   frameBorderWidth?: string;
   children?: React.ReactNode;
 }
+
+const TRAIL_GRADIENTS: Record<NonNullable<UiBarProps['fill']>, string> = {
+  crimson: 'linear-gradient(180deg, #ff9b9f 0%, #e5303a 60%, #99131a 100%)',
+  cyan: 'linear-gradient(180deg, #c2f6ff 0%, #5de4ff 60%, #1c7c96 100%)',
+  gold: 'linear-gradient(180deg, #fff0c2 0%, #f2a93b 60%, #9a6016 100%)',
+  green: 'linear-gradient(180deg, #d7ffe0 0%, #74eb95 55%, #2b944c 100%)',
+  darkPurple: 'linear-gradient(180deg, #d8b4fe 0%, #9333ea 58%, #4c1d95 100%)',
+};
 
 /**
  * Framed progress/HP/XP bar:
@@ -62,7 +70,7 @@ export const UiBar: React.FC<UiBarProps> = ({
           className="pointer-events-none absolute inset-[2px] z-[5] transition-[clip-path] duration-500 ease-out"
           style={{
             clipPath: `inset(0 ${trailClipRightPct}% 0 0)`,
-            background: 'linear-gradient(180deg, #ff9b9f 0%, #e5303a 60%, #99131a 100%)',
+            background: TRAIL_GRADIENTS[fill],
           }}
         />
       )}
@@ -80,6 +88,26 @@ export const UiBar: React.FC<UiBarProps> = ({
             className="w-full h-full"
             style={{
               background: 'linear-gradient(180deg, #ffe294 0%, #f2a93b 52%, #9a6016 100%)',
+            }}
+          />
+        ) : fill === 'green' ? (
+          <div
+            className="w-full h-full"
+            style={{
+              background:
+                'linear-gradient(180deg, #7ef29a 0%, #2fd162 28%, #169c42 70%, #0b5a26 100%)',
+              boxShadow:
+                'inset 0 1px 0 rgba(215, 255, 224, 0.5), inset 0 -1px 2px rgba(4, 34, 15, 0.78)',
+            }}
+          />
+        ) : fill === 'darkPurple' ? (
+          <div
+            className="w-full h-full"
+            style={{
+              background:
+                'linear-gradient(180deg, #9d5cff 0%, #5b21b6 30%, #3b0d78 72%, #1d053d 100%)',
+              boxShadow:
+                'inset 0 1px 0 rgba(216, 180, 254, 0.4), inset 0 -1px 2px rgba(15, 3, 30, 0.85)',
             }}
           />
         ) : (

@@ -1,5 +1,17 @@
 export type GameDifficultyId = 'baby' | 'pro' | 'hacker';
 export type GoreLevel = 'off' | 'low' | 'normal';
+export type StageId = 'stage_1' | 'stage_2';
+
+export interface DifficultyClearRecord {
+  cleared: boolean;
+  bestClearTimeSec: number | null;
+  clearCount: number;
+}
+
+export type StageDifficultyClearsMap = Record<
+  StageId,
+  Record<GameDifficultyId, DifficultyClearRecord>
+>;
 
 export type RelicId =
   | 'lodestone_heart'
@@ -103,6 +115,12 @@ export interface RunStats {
   stageCleared?: number;
   stageRewardGold?: number;
   runCoinsCollected?: number;
+  stageId?: StageId;
+  stageName?: string;
+  stageBestTime?: number;
+  isNewStageBestTime?: boolean;
+  difficultyBestClearTime?: number;
+  isNewDifficultyBestClearTime?: boolean;
 }
 
 export type DynamicChallengeId =
@@ -162,6 +180,29 @@ export interface DebugStats {
   killsPerMin: number;
   playerDps: number;
   currentMinute: number;
+}
+
+export interface TreeDebugStats {
+  enabled: boolean;
+  activeTrees: number;
+  visibleTrees: number;
+  physicsBodies: number;
+  realTreeLights: number;
+  collisions: number;
+  hitboxRadius: number;
+  heatRadius: number;
+  playerBurning: boolean;
+}
+
+export interface Boss2DebugStats {
+  active: boolean;
+  state: string;
+  attackKind: string | null;
+  animKey: string;
+  frameIndex: number;
+  maxFrame: number;
+  telegraphRemainingSec: number;
+  flipX: boolean;
 }
 
 export interface DpsSample {
@@ -241,6 +282,7 @@ export interface AchievementDefinition {
   statKey: AchievementStatKey;
   target: number;
   rewardCoins: number;
+  rewardSeals: number;
   icon: 'skull' | 'clock' | 'crown' | 'swords' | 'coins' | 'flame' | 'sparkles';
 }
 

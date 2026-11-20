@@ -1,7 +1,11 @@
-import React, { useEffect, useRef } from 'react';
-import { Activity, Smartphone } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Activity, Smartphone, Terminal } from 'lucide-react';
 import { soundManager } from '../game/audio';
+import { BOSS2 } from '../game/CinderWardenBoss';
+import { isDeveloperMode, subscribeDeveloperMode } from '../game/developerMode';
 import { GoreLevel } from '../game/types';
+import { BossAnimPreviewModal } from './BossAnimPreviewModal';
+import { DeveloperModeModal } from './DeveloperModeModal';
 import {
   GothicPanel9Slice,
   GothicRow9Slice,
@@ -59,9 +63,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onToggleScreenShake,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const versionTapCountRef = useRef<number>(0);
+  const lastVersionTapMsRef = useRef<number>(0);
+  const [bossPreviewOpen, setBossPreviewOpen] = useState<boolean>(false);
+  const [devModalOpen, setDevModalOpen] = useState<boolean>(false);
+  const [devModeActive, setDevModeActive] = useState<boolean>(() => isDeveloperMode());
 
   useEffect(() => {
-    if (!isOpen) return;
+    return subscribeDeveloperMode(setDevModeActive);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) {
+      versionTapCountRef.current = 0;
+      setBossPreviewOpen(false);
+      setDevModalOpen(false);
+    }
+  }, [isOpen]);
+
+  const handleVersionTap = () => {
+    const now = Date.now();
+    if (now - lastVersionTapMsRef.current > 2500) {
+      versionTapCountRef.current = 0;
+    }
+    lastVersionTapMsRef.current = now;
+    versionTapCountRef.current += 1;
+    if (versionTapCountRef.current >= 5) {
+      versionTapCountRef.current = 0;
+      soundManager.playUiClick();
+      setBossPreviewOpen(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen || bossPreviewOpen || devModalOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         soundManager.playUiClick();
@@ -70,7 +105,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, onClose]);
+  }, [isOpen, bossPreviewOpen, devModalOpen, onClose]);
 
   if (!isOpen) return null;
 
@@ -390,6 +425,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 }}
               />
             </GothicRow9Slice>
+
+            {/* Developer Mode Menu */}
+            <GothicRow9Slice contentClassName="px-3 py-2 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-6 h-6 aspect-square shrink-0 flex items-center justify-center rounded bg-[#141519] border border-[#3a3f47] text-[#f2a93b]">
+                  <Terminal className="w-3.5 h-3.5" aria-hidden="true" />
+                </div>
+                <div className="flex flex-col min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-body text-[14px] font-bold text-[#e8dcc2] leading-tight">
+                      Developer
+                    </span>
+                    {devModeActive && (
+                      <span className="px-1.5 py-[1px] rounded bg-[#0e2a1e] border border-[#6ee7b7]/55 font-mono text-[9px] font-bold tracking-wider text-[#6ee7b7] uppercase">
+                        ACTIVE
+                      </span>
+                    )}
+                  </div>
+                  <span className="font-body text-[11px] text-[#9c8e72] leading-tight mt-0.5 truncate">
+                    {devModeActive
+                      ? 'All stages unlocked · Unlimited Coins & Gems'
+                      : 'Enter access code for Developer Mode'}
+                  </span>
+                </div>
+              </div>
+
+              <Sprite3SliceButton
+                variant="iron"
+                active={devModeActive}
+                onClick={() => {
+                  soundManager.playUiClick();
+                  setDevModalOpen(true);
+                }}
+                className="min-w-[96px] shrink-0"
+              >
+                DEVELOPER
+              </Sprite3SliceButton>
+            </GothicRow9Slice>
           </div>
 
           {/* Custom Interactive Sprite Scrollbar */}
@@ -397,7 +470,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         </div>
 
         {/* FOOTER */}
-        <footer className="relative z-20 shrink-0 flex flex-col items-center pt-2.5">
+        <footer className="relative z-20 shrink-0 flex flex-col items-center pt-2.5 gap-1.5">
           <Sprite3SliceButton
             variant="done"
             onClick={handleClose}
@@ -405,8 +478,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           >
             DONE
           </Sprite3SliceButton>
+          <button
+            type="button"
+            onClick={handleVersionTap}
+            className="text-[10px] font-mono tracking-widest text-[#8f7f6c]/75 hover:text-[#c7b396] transition-colors px-2 py-0.5 cursor-pointer select-none"
+          >
+            {BOSS2.debugVersionLabel}
+          </button>
         </footer>
       </GothicPanel9Slice>
+
+      <BossAnimPreviewModal
+        isOpen={bossPreviewOpen}
+        onClose={() => setBossPreviewOpen(false)}
+      />
+
+      <DeveloperModeModal
+        isOpen={devModalOpen}
+        onClose={() => setDevModalOpen(false)}
+      />
     </div>
   );
 };

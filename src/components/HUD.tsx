@@ -1,11 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActiveDynamicChallenge,
+  Boss2DebugStats,
   BossInfo,
   EventWarningInfo,
   RelicDefinition,
   RelicId,
   RelicSetId,
+  StageId,
+  TreeDebugStats,
   WeaponState,
 } from '../game/types';
 import { IconRarity } from '../game/iconRegistry';
@@ -15,6 +18,8 @@ import { Icon } from './Icon';
 import { BloodHpBar } from './BloodHpBar';
 import { BloodSplatterHit, BloodSplatterOverlay } from './BloodSplatterOverlay';
 import { BossHealthOverlay } from './BossHealthOverlay';
+import { CoinCounter } from './CoinCounter';
+import { ComboMultiplierHud } from './ComboMultiplierHud';
 import { EliteSlayerCounter } from './EliteSlayerCounter';
 import { CritImpactPayload, gameManager } from '../game/GameManager';
 import { haptics } from '../mobile/haptics';
@@ -35,6 +40,10 @@ interface HUDProps {
   weapons: WeaponState[];
   boss: BossInfo | null;
   combo: number;
+  comboKills?: number;
+  comboTimeRemainingMs?: number;
+  comboDecayMs?: number;
+  comboNextThreshold?: number | null;
   isUnderPressure: boolean;
   lightShardRemainingSec?: number;
   redShardRemainingSec?: number;
@@ -47,6 +56,10 @@ interface HUDProps {
   dashCooldownProgress?: number;
   equippedRelicIds?: RelicId[];
   activeRelicSynergies?: RelicSetId[];
+  isBurning?: boolean;
+  stageId?: StageId;
+  treeDebug?: TreeDebugStats | null;
+  bossDebug?: Boss2DebugStats | null;
   eventWarning: EventWarningInfo | null;
   isMuted: boolean;
   isPaused: boolean;
@@ -55,6 +68,7 @@ interface HUDProps {
   onTogglePause: () => void;
   onSpawnBossNow: () => void;
   onTriggerDash: () => void;
+  onToggleTreeDebug?: () => void;
 }
 
 export function getWeaponFrameRarity(weapon: WeaponState): IconRarity {
@@ -79,6 +93,10 @@ const HUDComponent: React.FC<HUDProps> = ({
   weapons,
   boss,
   combo,
+  comboKills = 0,
+  comboTimeRemainingMs = 0,
+  comboDecayMs: _comboDecayMs = 3000,
+  comboNextThreshold: _comboNextThreshold = 5,
   isUnderPressure,
   lightShardRemainingSec = 0,
   redShardRemainingSec = 0,
@@ -91,32 +109,28 @@ const HUDComponent: React.FC<HUDProps> = ({
   dashCooldownProgress = 1,
   equippedRelicIds = [],
   activeRelicSynergies = [],
+  isBurning = false,
+  stageId = 'stage_1',
+  treeDebug = null,
+  bossDebug = null,
   eventWarning,
   isMuted: _isMuted,
-  isPaused: _isPaused,
+  isPaused,
   onToggleMute: _onToggleMute,
   onOpenSettings: _onOpenSettings,
   onTogglePause,
   onSpawnBossNow,
   onTriggerDash,
+  onToggleTreeDebug,
 }) => {
-  const prevCoinsRef = useRef<number>(coins);
   const prevLevelRef = useRef<number>(level);
   const prevHpRef = useRef<number>(hp);
   const splatterSeqRef = useRef<number>(0);
   const splatterTimerRef = useRef<number | null>(null);
   const critFlashTimerRef = useRef<number | null>(null);
-  const [coinPopSeq, setCoinPopSeq] = useState<number>(0);
   const [levelPopSeq, setLevelPopSeq] = useState<number>(0);
   const [splatterHit, setSplatterHit] = useState<BloodSplatterHit | null>(null);
   const [critFlash, setCritFlash] = useState<CritImpactPayload | null>(null);
-
-  useEffect(() => {
-    if (coins > prevCoinsRef.current) {
-      setCoinPopSeq((seq) => seq + 1);
-    }
-    prevCoinsRef.current = coins;
-  }, [coins]);
 
   useEffect(() => {
     if (level > prevLevelRef.current) {
@@ -202,7 +216,6 @@ const HUDComponent: React.FC<HUDProps> = ({
   const ringDashOffset = DASH_RING_CIRCUMFERENCE * (1 - ringProgress);
 
   const hasSubLeftBadges =
-    combo > 1 ||
     isUnderPressure ||
     lightShardRemainingSec > 0 ||
     redShardRemainingSec > 0 ||
@@ -304,6 +317,7 @@ const HUDComponent: React.FC<HUDProps> = ({
             <NineSlice
               variant="plateWideIron"
               tileTexture="row"
+              highlight={isBurning ? 'ember' : 'none'}
               borderWidth="clamp(5px, 0.9vw, 8px) clamp(8px, 1.4vw, 12px)"
               padding="0px"
               className="w-[clamp(108px,26vw,148px)] shrink-0 shadow-[0_6px_14px_rgba(0,0,0,0.85)]"
@@ -317,12 +331,30 @@ const HUDComponent: React.FC<HUDProps> = ({
                     <span className="text-[#9c8e72] font-semibold">/{maxHp}</span>
                   </span>
                 </div>
-                <span className="font-display font-bold text-[9px] text-[#f2c464] whitespace-nowrap">
-                  LV.{level}
-                </span>
+                {isBurning ? (
+                  <span
+                    className="inline-flex items-center gap-[2px] px-1 py-[1px] rounded-[3px] bg-[#ff6a1a]/25 border border-[#ff8c38]/75 font-display font-black text-[8px] tracking-wider text-[#ffae52] animate-pulse whitespace-nowrap"
+                    title="Taking heat burn damage near burning trees"
+                  >
+                    <Icon id="ui_flame" size={9} />
+                    BURN
+                  </span>
+                ) : (
+                  <span className="font-display font-bold text-[9px] text-[#f2c464] whitespace-nowrap">
+                    LV.{level}
+                  </span>
+                )}
               </div>
 
-              <BloodHpBar hp={hp} maxHp={maxHp} compact />
+              <div className="relative">
+                <BloodHpBar hp={hp} maxHp={maxHp} compact />
+                {isBurning && (
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-0 rounded-[2px] ring-1 ring-[#ff8c38]/85 shadow-[0_0_8px_rgba(255,118,32,0.75)] animate-pulse"
+                  />
+                )}
+              </div>
 
               <UiBar
                 percent={xpPercent}
@@ -359,25 +391,15 @@ const HUDComponent: React.FC<HUDProps> = ({
 
               <span className="w-px h-3 bg-[#4a505c]/75 shrink-0" aria-hidden="true" />
 
-              <div
-                key={`hud-coin-${coinPopSeq}`}
-                className={`flex items-center gap-1 whitespace-nowrap ${
-                  coinPopSeq > 0 ? 'hud-coin-pop' : ''
-                }`}
-                title="Coins"
-              >
-                <Icon id="soul_coin" size={13} />
-                <span className="font-display text-[clamp(10px,2vw,12px)] font-bold text-[#f2c464] tabular-nums">
-                  {coins}
-                </span>
-              </div>
+              <CoinCounter coins={coins} iconSize={13} />
             </NineSlice>
           </div>
 
-          {/* Top-Right: Fixed-Aspect 44x44 Pause Button (behavior preserved 100%) */}
+          {/* Top-Right: Fixed-Aspect 44x44 Pause Button + Stage 2 Tree Debug Toggle */}
           <div
             className="justify-self-end pointer-events-auto relative z-30"
             onTouchStart={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
           >
             <UiRoundButton
               variant="steel"
@@ -391,29 +413,115 @@ const HUDComponent: React.FC<HUDProps> = ({
                 <span className="w-[4px] h-[14px] rounded-[1.5px] bg-gradient-to-b from-[#fff1c7] via-[#e2d2b0] to-[#9c8459]" />
               </div>
             </UiRoundButton>
+
+            {stageId === 'stage_2' && onToggleTreeDebug && (
+              <button
+                type="button"
+                aria-label="Toggle Burning Trees Debug Overlay"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleTreeDebug();
+                }}
+                className={`absolute right-0 top-[48px] whitespace-nowrap px-2 py-0.5 rounded-[4px] border font-display text-[9px] font-black tracking-[0.08em] uppercase transition-colors ${
+                  treeDebug?.enabled
+                    ? 'bg-[#ff6a1a]/30 border-[#ff9442] text-[#ffd49e]'
+                    : 'bg-[#12141a]/85 border-[#4b515d] text-[#a79c86] hover:text-[#ede0c4]'
+                }`}
+              >
+                {treeDebug?.enabled ? 'DBG ON' : 'DBG'}
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Sub-Header Row: Active Buffs & Pact + Boss Countdown Strip */}
-        {(hasSubLeftBadges || !boss) && (
-          <div className="w-full grid grid-cols-[155px_minmax(0,1fr)] sm:grid-cols-[1fr_auto_1fr] items-start gap-1.5 mt-1 pointer-events-none">
-            <div className="justify-self-start flex flex-col items-start gap-1 pointer-events-none min-w-0">
-              {combo > 1 && (
-                <NineSlice
-                  variant="miniPlate"
-                  tileTexture="row"
-                  highlight="cyan"
-                  borderWidth="4px 8px"
-                  padding="0px"
-                  contentClassName="px-1.5 py-[2px] flex items-center gap-1 text-[10px] leading-tight whitespace-nowrap"
-                >
-                  <span className="font-display font-bold text-[#9c8e72] uppercase">XP</span>
-                  <span className="font-display font-extrabold text-[#5de4ff] tabular-nums">
-                    x{combo}
-                  </span>
-                </NineSlice>
-              )}
+        {/* Stage 2 Burning Trees Debug Overlay Readout */}
+        {stageId === 'stage_2' && treeDebug?.enabled && (
+          <div className="fixed right-2.5 top-[92px] z-30 pointer-events-none">
+            <div className="w-[178px] rounded-[6px] border border-[#ff8c38]/65 bg-[#0b0d12]/90 px-2.5 py-2 text-[10px] leading-snug text-[#e6dac3] shadow-[0_6px_18px_rgba(0,0,0,0.85)]">
+              <div className="flex items-center justify-between border-b border-[#3a3f4a] pb-1 mb-1">
+                <span className="font-display font-black tracking-wider uppercase text-[#ff9f4d]">
+                  TREES DEBUG
+                </span>
+                <span className="font-mono text-[9px] text-[#9c8e72]">F3</span>
+              </div>
+              <div className="flex justify-between font-mono tabular-nums">
+                <span className="text-[#9c8e72]">Trees</span>
+                <span>
+                  {treeDebug.visibleTrees} vis / {treeDebug.activeTrees} act
+                </span>
+              </div>
+              <div className="flex justify-between font-mono tabular-nums">
+                <span className="text-[#9c8e72]">Bodies</span>
+                <span>{treeDebug.physicsBodies}</span>
+              </div>
+              <div className="flex justify-between font-mono tabular-nums">
+                <span className="text-[#9c8e72]">Collisions</span>
+                <span className="text-[#ffd49e]">{treeDebug.collisions}</span>
+              </div>
+              <div className="flex justify-between font-mono tabular-nums">
+                <span className="text-[#9c8e72]">Real Lights</span>
+                <span>{treeDebug.realTreeLights}/4 (&lt;8)</span>
+              </div>
+              <div className="mt-1 pt-1 border-t border-[#2d323b] flex items-center justify-between text-[9px] font-mono">
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full border border-[#ff4d57] bg-[#ff4d57]/35 inline-block" />
+                  Hit {treeDebug.hitboxRadius}px
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-2 h-2 rounded-full border border-dashed border-[#ff9836] bg-[#ff9836]/20 inline-block" />
+                  Heat {treeDebug.heatRadius}px
+                </span>
+              </div>
 
+              <div className="mt-1.5 pt-1.5 border-t border-[#3a3f4a]">
+                <div className="flex items-center justify-between mb-0.5">
+                  <span className="font-display font-black tracking-wider uppercase text-[#ff7354]">
+                    BOSS DEBUG
+                  </span>
+                  <span className="font-mono text-[9px] text-[#9c8e72]">
+                    {bossDebug?.active ? (bossDebug.flipX ? 'L' : 'R') : 'WAIT'}
+                  </span>
+                </div>
+                {bossDebug?.active ? (
+                  <>
+                    <div className="flex justify-between font-mono tabular-nums">
+                      <span className="text-[#9c8e72]">State</span>
+                      <span className="text-[#ffd49e]">
+                        {bossDebug.attackKind
+                          ? `${bossDebug.state} (${bossDebug.attackKind.toUpperCase()})`
+                          : bossDebug.state}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-mono tabular-nums gap-1">
+                      <span className="text-[#9c8e72] shrink-0">Anim</span>
+                      <span className="truncate text-right">{bossDebug.animKey}</span>
+                    </div>
+                    <div className="flex justify-between font-mono tabular-nums">
+                      <span className="text-[#9c8e72]">Frame</span>
+                      <span>
+                        {bossDebug.frameIndex} / {bossDebug.maxFrame}
+                      </span>
+                    </div>
+                    <div className="flex justify-between font-mono tabular-nums">
+                      <span className="text-[#9c8e72]">Telegraph</span>
+                      <span className={bossDebug.telegraphRemainingSec > 0 ? 'text-[#ff6b5c]' : 'text-[#9c8e72]'}>
+                        {bossDebug.telegraphRemainingSec > 0
+                          ? `${bossDebug.telegraphRemainingSec.toFixed(2)}s`
+                          : '--'}
+                      </span>
+                    </div>
+                  </>
+                ) : (
+                  <div className="font-mono text-[9px] text-[#9c8e72]">Not spawned yet</div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Sub-Header Row: Active Buffs & Pact + Top-Left Combo Text + Boss Countdown Strip */}
+        <div className="w-full grid grid-cols-[155px_minmax(0,1fr)] sm:grid-cols-[1fr_auto_1fr] items-start gap-1.5 mt-1 pointer-events-none">
+          <div className="justify-self-start flex flex-col items-start gap-1 pointer-events-none min-w-0">
               {lightShardRemainingSec > 0 && (
                 <NineSlice
                   variant="miniPlate"
@@ -526,6 +634,13 @@ const HUDComponent: React.FC<HUDProps> = ({
                   </span>
                 </NineSlice>
               )}
+
+              {/* Top-Left Frameless Dynamic Animated Kill Combo Text (stacked cleanly in flow) */}
+              <ComboMultiplierHud
+                combo={combo}
+                comboKills={comboKills}
+                comboTimeRemainingMs={comboTimeRemainingMs}
+              />
             </div>
 
             {/* Boss Countdown Strip + Clickable SUMMON Button */}
@@ -563,8 +678,7 @@ const HUDComponent: React.FC<HUDProps> = ({
                 </NineSlice>
               </div>
             )}
-          </div>
-        )}
+        </div>
       </div>
 
       {/* Event Warning / Stage Clear Banner */}
@@ -573,15 +687,15 @@ const HUDComponent: React.FC<HUDProps> = ({
           <NineSlice
             variant="bannerCrimson"
             tileTexture="row"
-            highlight={eventWarning.title.includes('STAGE 1') ? 'gold' : 'blood'}
+            highlight={eventWarning.title.includes('COMPLETE') ? 'gold' : 'blood'}
             padding="0px"
             contentClassName="px-3.5 py-2 flex items-center gap-2.5 justify-center text-center"
           >
-            <Icon id={eventWarning.title.includes('STAGE 1') ? 'ui_crown' : 'ui_warning'} size={18} />
+            <Icon id={eventWarning.title.includes('COMPLETE') ? 'ui_crown' : 'ui_warning'} size={18} />
             <div className="flex flex-col">
               <span
                 className={`font-display text-xs font-bold tracking-wider ${
-                  eventWarning.title.includes('STAGE 1') ? 'text-[#f2c464]' : 'text-[#e5303a]'
+                  eventWarning.title.includes('COMPLETE') ? 'text-[#f2c464]' : 'text-[#e5303a]'
                 }`}
               >
                 {eventWarning.title}

@@ -1,4 +1,5 @@
 import { addCoins, getSavedCoins } from './metaProgression';
+import { addRelicSeals, getRelicSeals } from './relics';
 import { saveDataStore } from './saveData';
 import {
   AchievementDefinition,
@@ -18,7 +19,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'combat',
     statKey: 'totalKills',
     target: 50,
-    rewardCoins: 25,
+    rewardCoins: 300,
+    rewardSeals: 1,
     icon: 'skull',
   },
   {
@@ -28,7 +30,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'combat',
     statKey: 'totalKills',
     target: 500,
-    rewardCoins: 60,
+    rewardCoins: 1000,
+    rewardSeals: 2,
     icon: 'swords',
   },
   {
@@ -38,7 +41,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'combat',
     statKey: 'totalKills',
     target: 2500,
-    rewardCoins: 150,
+    rewardCoins: 3000,
+    rewardSeals: 5,
     icon: 'swords',
   },
 
@@ -50,7 +54,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'survival',
     statKey: 'longestRunSec',
     target: 180,
-    rewardCoins: 40,
+    rewardCoins: 450,
+    rewardSeals: 1,
     icon: 'clock',
   },
   {
@@ -60,7 +65,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'survival',
     statKey: 'longestRunSec',
     target: 300,
-    rewardCoins: 80,
+    rewardCoins: 1200,
+    rewardSeals: 2,
     icon: 'clock',
   },
   {
@@ -70,7 +76,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'survival',
     statKey: 'longestRunSec',
     target: 480,
-    rewardCoins: 160,
+    rewardCoins: 2800,
+    rewardSeals: 4,
     icon: 'flame',
   },
 
@@ -82,7 +89,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'bosses',
     statKey: 'bossesDefeated',
     target: 1,
-    rewardCoins: 90,
+    rewardCoins: 1500,
+    rewardSeals: 3,
     icon: 'crown',
   },
   {
@@ -92,7 +100,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'bosses',
     statKey: 'bossesDefeated',
     target: 5,
-    rewardCoins: 180,
+    rewardCoins: 4500,
+    rewardSeals: 6,
     icon: 'crown',
   },
 
@@ -104,7 +113,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'mastery',
     statKey: 'elitesSlain',
     target: 10,
-    rewardCoins: 75,
+    rewardCoins: 900,
+    rewardSeals: 2,
     icon: 'skull',
   },
   {
@@ -114,7 +124,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'mastery',
     statKey: 'highestLevel',
     target: 15,
-    rewardCoins: 85,
+    rewardCoins: 1400,
+    rewardSeals: 2,
     icon: 'sparkles',
   },
   {
@@ -124,7 +135,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'mastery',
     statKey: 'totalCoinsEarned',
     target: 500,
-    rewardCoins: 70,
+    rewardCoins: 800,
+    rewardSeals: 1,
     icon: 'coins',
   },
   {
@@ -134,7 +146,8 @@ export const ACHIEVEMENTS: AchievementDefinition[] = [
     category: 'mastery',
     statKey: 'runsCompleted',
     target: 5,
-    rewardCoins: 65,
+    rewardCoins: 750,
+    rewardSeals: 2,
     icon: 'flame',
   },
 ];
@@ -174,6 +187,16 @@ class AchievementsManager {
     const claimedSet = new Set(state.claimedIds);
     return ACHIEVEMENTS.filter((a) => unlockedSet.has(a.id) && !claimedSet.has(a.id)).reduce(
       (sum, a) => sum + a.rewardCoins,
+      0
+    );
+  }
+
+  public getUnclaimedSealTotal(): number {
+    const state = saveDataStore.readFastRef().achievements;
+    const unlockedSet = new Set(state.unlockedIds);
+    const claimedSet = new Set(state.claimedIds);
+    return ACHIEVEMENTS.filter((a) => unlockedSet.has(a.id) && !claimedSet.has(a.id)).reduce(
+      (sum, a) => sum + a.rewardSeals,
       0
     );
   }
@@ -369,7 +392,9 @@ class AchievementsManager {
 
   public claimAchievement(achievementId: string): {
     claimedCoins: number;
+    claimedSeals: number;
     newCoins: number;
+    newSeals: number;
     state: AchievementsProgressState;
   } {
     const target = ACHIEVEMENTS.find((a) => a.id === achievementId);
@@ -381,12 +406,15 @@ class AchievementsManager {
     ) {
       return {
         claimedCoins: 0,
+        claimedSeals: 0,
         newCoins: getSavedCoins(),
+        newSeals: getRelicSeals(),
         state: current,
       };
     }
 
     const newCoins = addCoins(target.rewardCoins);
+    const newSeals = target.rewardSeals > 0 ? addRelicSeals(target.rewardSeals) : getRelicSeals();
     const updated = saveDataStore.update((draft) => {
       const set = new Set(draft.achievements.claimedIds);
       set.add(achievementId);
@@ -396,14 +424,18 @@ class AchievementsManager {
     this.notifySubscribers(updated.achievements);
     return {
       claimedCoins: target.rewardCoins,
+      claimedSeals: target.rewardSeals,
       newCoins,
+      newSeals,
       state: updated.achievements,
     };
   }
 
   public claimAllAchievements(): {
     claimedCoins: number;
+    claimedSeals: number;
     newCoins: number;
+    newSeals: number;
     state: AchievementsProgressState;
   } {
     const current = this.getState();
@@ -416,13 +448,17 @@ class AchievementsManager {
     if (claimable.length === 0) {
       return {
         claimedCoins: 0,
+        claimedSeals: 0,
         newCoins: getSavedCoins(),
+        newSeals: getRelicSeals(),
         state: current,
       };
     }
 
     const totalCoins = claimable.reduce((sum, a) => sum + a.rewardCoins, 0);
-    const newCoins = addCoins(totalCoins);
+    const totalSeals = claimable.reduce((sum, a) => sum + a.rewardSeals, 0);
+    const newCoins = totalCoins > 0 ? addCoins(totalCoins) : getSavedCoins();
+    const newSeals = totalSeals > 0 ? addRelicSeals(totalSeals) : getRelicSeals();
 
     const updated = saveDataStore.update((draft) => {
       const set = new Set(draft.achievements.claimedIds);
@@ -433,7 +469,9 @@ class AchievementsManager {
     this.notifySubscribers(updated.achievements);
     return {
       claimedCoins: totalCoins,
+      claimedSeals: totalSeals,
       newCoins,
+      newSeals,
       state: updated.achievements,
     };
   }
